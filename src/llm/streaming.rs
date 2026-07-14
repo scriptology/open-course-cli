@@ -163,6 +163,7 @@ pub async fn stream_openai_compatible(
         "model": model,
         "messages": messages,
         "stream": true,
+        "max_tokens": 8192,
     });
     if let Some(effort) = reasoning_effort {
         body["reasoning_effort"] = json!(effort);

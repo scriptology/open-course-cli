@@ -160,6 +160,7 @@ impl RigClient {
                     let extractor = ExtractorBuilder::<T, _>::new(
                         openai::completion::CompletionModel::new(client.clone(), &self.model),
                     )
+                    .max_tokens(8192)
                     .build();
                     extractor.extract(prompt).await
                 }
@@ -208,6 +209,7 @@ impl RigClient {
     ) -> Agent<openai::completion::CompletionModel> {
         let builder =
             openai::completion::CompletionModel::new(client.clone(), model).into_agent_builder();
+        let builder = builder.max_tokens(8192);
         let builder = if let Some(system) = system {
             builder.preamble(system)
         } else {

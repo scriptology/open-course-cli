@@ -23,6 +23,7 @@ pub struct ReportLabels {
     pub feedback: &'static str,
     pub score: &'static str,
     pub weak_topics: &'static str,
+    pub task: &'static str,
     pub weak_topics_empty: &'static str,
     pub next_exercise: &'static str,
     pub finish: &'static str,
@@ -32,6 +33,7 @@ pub struct ReportLabels {
     pub curriculum: &'static str,
     pub settings: &'static str,
     pub quit: &'static str,
+    pub pairs: &'static str,
     pub loading: &'static str,
     pub analyzing: &'static str,
     pub error: &'static str,
@@ -91,6 +93,7 @@ const EN_REPORT: ReportLabels = ReportLabels {
     feedback: "Feedback",
     score: "Score",
     weak_topics: "Weak topics",
+    task: "Task",
     weak_topics_empty: "Start a session to see weak topics.",
     next_exercise: "Next exercise",
     finish: "Finish",
@@ -100,6 +103,7 @@ const EN_REPORT: ReportLabels = ReportLabels {
     curriculum: "Curriculum",
     settings: "Settings",
     quit: "Quit",
+    pairs: "Pairs",
     loading: "Loading...",
     analyzing: "Analyzing...",
     error: "Error",
@@ -140,6 +144,7 @@ const RU_REPORT: ReportLabels = ReportLabels {
     feedback: "Обратная связь",
     score: "Результат",
     weak_topics: "Слабые темы",
+    task: "Задание",
     weak_topics_empty: "Начните сессию, чтобы увидеть слабые темы.",
     next_exercise: "Следующее упражнение",
     finish: "Завершить",
@@ -149,6 +154,7 @@ const RU_REPORT: ReportLabels = ReportLabels {
     curriculum: "Программа",
     settings: "Настройки",
     quit: "Выйти",
+    pairs: "Пары",
     loading: "Загрузка...",
     analyzing: "Анализ...",
     error: "Ошибка",
@@ -276,7 +282,7 @@ fn lookup<T: Copy>(table: &[(&str, T)], lang: &str) -> T {
 
 pub fn native_language_code(config: Option<&crate::config::OpenCourseConfig>) -> &str {
     config
-        .map(|c| c.profile.native_language.as_str())
+        .map(|c| c.active_profile().native_language.as_str())
         .unwrap_or("en")
 }
 

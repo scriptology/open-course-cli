@@ -9,7 +9,6 @@ use crate::config::OpenCourseConfig;
 use crate::config::profile::HintMode;
 use crate::config::provider::{ProviderConfig, ProviderId};
 use crate::config::write_config;
-use crate::core::language::{is_valid_language_code, normalize_language_code};
 use crate::error::{AppError, Result};
 use crate::llm::model_listing::{ModelInfo, list_models};
 use crate::llm::provider::ProviderMeta;
@@ -142,7 +141,7 @@ impl SettingsState {
     fn field_count(&self) -> usize {
         match self.section {
             Section::Provider => 4,
-            Section::Profile => 4,
+            Section::Profile => 2,
             Section::Session => 2,
             Section::Data => 5,
         }
@@ -222,15 +221,13 @@ impl SettingsState {
     fn load_input(&mut self, config: &OpenCourseConfig) {
         self.input = match self.section {
             Section::Profile => match self.active_field {
-                0 => config.profile.native_language.clone(),
-                1 => config.profile.target_language.clone(),
-                2 => config
-                    .profile
+                0 => config
+                    .active_profile()
                     .age
                     .map(|a| a.to_string())
                     .unwrap_or_default(),
-                3 => config
-                    .profile
+                1 => config
+                    .active_profile()
                     .self_assessed_cefr
                     .clone()
                     .unwrap_or_default(),
@@ -255,26 +252,7 @@ impl SettingsState {
             Section::Provider => {}
             Section::Profile => match self.active_field {
                 0 => {
-                    let norm = normalize_language_code(&value);
-                    if !is_valid_language_code(&norm) {
-                        return Err(AppError::Config(format!("Invalid language code: {value}")));
-                    }
-                    config.profile.native_language = norm;
-                }
-                1 => {
-                    let norm = normalize_language_code(&value);
-                    if !is_valid_language_code(&norm) {
-                        return Err(AppError::Config(format!("Invalid language code: {value}")));
-                    }
-                    if norm == config.profile.native_language {
-                        return Err(AppError::Config(
-                            "Target language must differ from native language".to_string(),
-                        ));
-                    }
-                    config.profile.target_language = norm;
-                }
-                2 => {
-                    config.profile.age = if value.is_empty() {
+                    config.active_profile_mut().age = if value.is_empty() {
                         None
                     } else {
                         match value.parse::<u32>() {
@@ -287,11 +265,11 @@ impl SettingsState {
                         }
                     };
                 }
-                3 => {
+                1 => {
                     if !value.is_empty() && !CEFR_LEVELS.contains(&value.to_uppercase().as_str()) {
                         return Err(AppError::Config(format!("Invalid CEFR level: {value}")));
                     }
-                    config.profile.self_assessed_cefr = if value.is_empty() {
+                    config.active_profile_mut().self_assessed_cefr = if value.is_empty() {
                         None
                     } else {
                         Some(value.to_uppercase())
@@ -333,10 +311,8 @@ fn field_label(section: Section, field: usize) -> &'static str {
     match section {
         Section::Provider => "",
         Section::Profile => match field {
-            0 => "Native language",
-            1 => "Target language",
-            2 => "Age",
-            3 => "CEFR",
+            0 => "Age",
+            1 => "CEFR",
             _ => unreachable!(),
         },
         Section::Session => match field {
@@ -359,15 +335,13 @@ fn field_value(config: &OpenCourseConfig, section: Section, field: usize) -> Str
     match section {
         Section::Provider => String::new(),
         Section::Profile => match field {
-            0 => config.profile.native_language.clone(),
-            1 => config.profile.target_language.clone(),
-            2 => config
-                .profile
+            0 => config
+                .active_profile()
                 .age
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "(none)".to_string()),
-            3 => config
-                .profile
+            1 => config
+                .active_profile()
                 .self_assessed_cefr
                 .clone()
                 .unwrap_or_else(|| "(none)".to_string()),

@@ -10,7 +10,7 @@ use crate::core::session::{AnalysisResult, MentorSession};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
-use crate::ui::views::{docs, session};
+use crate::ui::views::{docs, review, session};
 
 #[derive(Debug, Clone)]
 pub struct ReportState {
@@ -74,7 +74,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     frame.render_widget(paragraph.scroll((state.report.scroll_offset, 0)), chunks[0]);
 
     frame.render_widget(
-        Paragraph::new("↑/↓: scroll | n: new topic | r: repeat | d: docs | Esc: dashboard")
+        Paragraph::new("↑/↓: scroll | n: new topic | r: repeat | w: review topics | d: docs | Esc: dashboard")
             .style(Style::default().fg(Color::DarkGray)),
         chunks[1],
     );
@@ -94,6 +94,11 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                 state.view = View::Session;
                 session::start_review_topic_session(state, topic_id).await?;
             }
+        }
+        KeyCode::Char('w') => {
+            state.review.return_to = View::Report;
+            review::load(state).await?;
+            state.view = View::Review;
         }
         KeyCode::Char('d') => {
             if let Some(topic_id) = state.report.target_topic_id.clone() {
@@ -132,8 +137,24 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
     for (i, sentence) in report.analysis.sentences.iter().enumerate() {
         let has_errors = !sentence.errors.is_empty();
 
+        let exercise = report
+            .session
+            .exercises
+            .get(sentence.sentence_number.saturating_sub(1) as usize)
+            .or_else(|| report.session.exercises.get(i));
+        if let Some(exercise) = exercise {
+            lines.push(Line::from(vec![
+                Span::raw(format!("{}. ", i + 1)),
+                Span::styled(
+                    format!("{}: ", labels.task),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(exercise.target_sentence.clone()),
+            ]));
+        }
+
         let mut student_line = vec![
-            Span::raw(format!("{}. ", i + 1)),
+            Span::raw("   "),
             Span::styled(
                 format!("{}: ", labels.your_translation),
                 Style::default().add_modifier(Modifier::BOLD),

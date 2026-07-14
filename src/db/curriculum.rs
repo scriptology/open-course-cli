@@ -102,6 +102,30 @@ pub fn topic_domain(topic: &Topic) -> Option<&'static str> {
     None
 }
 
+/// Topic names that are too broad or abstract to be useful for repeated practice.
+/// These are often invented by the analysis model as catch-all categories.
+const ABSTRACT_TOPIC_PATTERNS: &[&str] = &[
+    "common spelling errors",
+    "common grammar mistakes",
+    "common errors",
+    "common mistakes",
+    "grammar basics",
+    "basic grammar",
+    "basic vocabulary",
+    "advanced vocabulary",
+    "advanced grammar",
+    "spelling errors",
+    "grammar mistakes",
+    "vocabulary",
+    "fundamentals",
+    "advanced topics",
+];
+
+pub fn is_abstract_topic_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    ABSTRACT_TOPIC_PATTERNS.iter().any(|p| lower.contains(p))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Topic {
@@ -263,6 +287,11 @@ impl CurriculumTable {
         self.table.delete(&eq_predicate("id", &topic.id)).await?;
         let batch = topic_to_record_batch(topic)?;
         self.table.add(vec![batch]).execute().await?;
+        Ok(())
+    }
+
+    pub async fn delete_by_topic_id(&self, topic_id: &str) -> Result<()> {
+        self.table.delete(&eq_predicate("id", topic_id)).await?;
         Ok(())
     }
 

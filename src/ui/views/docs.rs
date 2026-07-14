@@ -391,7 +391,7 @@ async fn generate_inner(
     }
 
     let model = create_llm_model(&config)?;
-    let prompt = build_topic_review_prompt(&config.profile, &topic);
+    let prompt = build_topic_review_prompt(config.active_profile(), &topic);
     let text =
         generate_topic_review(model.as_ref(), &prompt, Some(&tx), Some(data_dir.as_path())).await?;
 

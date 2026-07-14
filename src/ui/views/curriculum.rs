@@ -6,7 +6,7 @@ use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use serde::{Deserialize, Serialize};
 
 use crate::app::{AppState, LlmResult, View};
-use crate::db::curriculum::{CEFR_LEVELS, Curriculum, Topic, difficulty_to_cefr};
+use crate::db::curriculum::{CEFR_LEVELS, Curriculum, Topic, difficulty_to_cefr, is_abstract_topic_name};
 use crate::error::{AppError, Result};
 use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_curriculum as generate_curriculum_llm;
@@ -47,6 +47,7 @@ pub struct CurriculumState {
     pub list_state: ListState,
     pub loading: bool,
     pub pending_reset: bool,
+    pub pending_delete: Option<Topic>,
     pub sort_by: CurriculumSortBy,
 }
 
@@ -56,9 +57,6 @@ impl CurriculumState {
     }
 
     pub async fn load(&mut self, db: &crate::db::Database) -> Result<()> {
-        if !self.topics.is_empty() {
-            return Ok(());
-        }
         let curriculum = db.curriculum().read_all().await?;
         let progress = db.progress().read_all().await?;
         let progress_map: std::collections::HashMap<String, f64> = progress
@@ -66,7 +64,10 @@ impl CurriculumState {
             .iter()
             .map(|t| (t.topic_id.clone(), t.score))
             .collect();
-        self.topics = curriculum.topics;
+
+        let topics = cleanup_abstract_topics(db, curriculum.topics).await?;
+
+        self.topics = topics;
         self.progress = progress_map;
         if self.topics.is_empty() {
             self.list_state.select(None);
@@ -176,7 +177,21 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         return;
     }
 
-    let header_height = if state.curriculum.topics.is_empty() { 2 } else { 2 };
+    if let Some(topic) = &state.curriculum.pending_delete {
+        draw_confirmation(
+            frame,
+            area,
+            "Delete Topic",
+            &format!(
+                "Delete \"{}\" and its progress/review?\nThis cannot be undone.",
+                topic.name
+            ),
+            "y: confirm | n/Esc: cancel",
+        );
+        return;
+    }
+
+    let header_height = 2;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -247,7 +262,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         format!("g: generate | m: change model {model_hint} | Esc: back")
     } else {
         format!(
-            "↑↓: navigate | Enter: review | s: sort ({}) | a: add 5 | r: reset | m: model | Esc: back",
+            "↑↓: navigate | Enter: review | s: sort ({}) | a: add 5 | x: delete | r: reset | m: model | Esc: back",
             state.curriculum.sort_by.label()
         )
     };
@@ -266,6 +281,19 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             }
             KeyCode::Char('n') | KeyCode::Esc => {
                 state.curriculum.pending_reset = false;
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    if state.curriculum.pending_delete.is_some() {
+        match code {
+            KeyCode::Char('y') => {
+                delete_selected_topic(state).await?;
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                state.curriculum.pending_delete = None;
             }
             _ => {}
         }
@@ -300,6 +328,12 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         }
         KeyCode::Char('r') if !state.curriculum.topics.is_empty() => {
             state.curriculum.pending_reset = true;
+        }
+        KeyCode::Char('x') if !state.curriculum.topics.is_empty() => {
+            let selected = state.curriculum.list_state.selected().unwrap_or(0);
+            if let Some(topic) = state.curriculum.topics.get(selected).cloned() {
+                state.curriculum.pending_delete = Some(topic);
+            }
         }
         KeyCode::Char('a') if !state.curriculum.topics.is_empty() => {
             extend_curriculum(state, 5).await?;
@@ -338,7 +372,7 @@ fn generation_levels(state: &AppState) -> Vec<String> {
     let start = state
         .config
         .as_ref()
-        .and_then(|c| c.profile.self_assessed_cefr.as_deref())
+        .and_then(|c| c.active_profile().self_assessed_cefr.as_deref())
         .and_then(|c| CEFR_LEVELS.iter().position(|l| *l == c.to_uppercase()))
         .unwrap_or(0);
     CEFR_LEVELS
@@ -373,14 +407,14 @@ pub async fn generate_curriculum(state: &mut AppState) -> Result<()> {
     state.curriculum_progress.clear();
 
     let tx = state.llm_tx.clone();
-    let target_language = config.profile.target_language.clone();
-    let native_language = config.profile.native_language.clone();
+    let target_language = config.active_profile().target_language.clone();
+    let native_language = config.active_profile().native_language.clone();
     tokio::spawn(async move {
         let result: Result<Curriculum> = async {
             let model = create_llm_model(&config)?;
             let mut curriculum = generate_curriculum_llm(
                 model.as_ref(),
-                &config.profile,
+                config.active_profile(),
                 Some(&tx),
                 Some(&data_dir),
             )
@@ -423,6 +457,43 @@ pub async fn reset_and_generate_curriculum(state: &mut AppState) -> Result<()> {
     Ok(())
 }
 
+async fn cleanup_abstract_topics(
+    db: &crate::db::Database,
+    topics: Vec<Topic>,
+) -> Result<Vec<Topic>> {
+    let mut kept = Vec::with_capacity(topics.len());
+    for topic in topics {
+        if is_abstract_topic_name(&topic.name) {
+            let _ = db.curriculum().delete_by_topic_id(&topic.id).await;
+            let _ = db.progress().delete_by_topic_id(&topic.id).await;
+            let _ = db.reviews().remove_by_topic_id(&topic.id).await;
+        } else {
+            kept.push(topic);
+        }
+    }
+    Ok(kept)
+}
+
+async fn delete_selected_topic(state: &mut AppState) -> Result<()> {
+    if let Some(topic) = state.curriculum.pending_delete.take() {
+        state.db.curriculum().delete_by_topic_id(&topic.id).await?;
+        state.db.progress().delete_by_topic_id(&topic.id).await?;
+        state.db.reviews().remove_by_topic_id(&topic.id).await?;
+
+        state.curriculum.topics.retain(|t| t.id != topic.id);
+        state.curriculum.progress.remove(&topic.id);
+
+        let len = state.curriculum.topics.len();
+        let current = state.curriculum.list_state.selected().unwrap_or(0);
+        if len == 0 {
+            state.curriculum.list_state.select(None);
+        } else if current >= len {
+            state.curriculum.list_state.select(Some(len - 1));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct CurriculumExtension {
@@ -439,7 +510,7 @@ pub async fn extend_curriculum(state: &mut AppState, count: usize) -> Result<()>
     let progress = state.db.progress().read_all().await?;
 
     let prompt = build_curriculum_extension_prompt(
-        &config.profile,
+        config.active_profile(),
         &curriculum.topics,
         &progress.topics,
         count,
@@ -451,8 +522,8 @@ pub async fn extend_curriculum(state: &mut AppState, count: usize) -> Result<()>
     let base_order = existing_orders.iter().copied().max().unwrap_or(0);
 
     let tx = state.llm_tx.clone();
-    let target_language = config.profile.target_language.clone();
-    let native_language = config.profile.native_language.clone();
+    let target_language = config.active_profile().target_language.clone();
+    let native_language = config.active_profile().native_language.clone();
     tokio::spawn(async move {
         let result: Result<Vec<Topic>> = async {
             let model = create_llm_model(&config)?;

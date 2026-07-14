@@ -3,6 +3,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use std::sync::Arc;
 
 use crate::app::{AppState, LlmResult, View};
 use crate::config::profile::UserProfile;
@@ -13,7 +14,7 @@ use crate::error::{AppError, Result};
 use crate::llm::model_listing::{ModelInfo, list_models};
 use crate::llm::provider::ProviderMeta;
 use crate::ui::views::model_check;
-use crate::ui::widgets::logo;
+use crate::ui::widgets::Logo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -73,8 +74,16 @@ fn shows_base_url_step(provider: ProviderId) -> bool {
     matches!(provider, ProviderId::Custom | ProviderId::Ollama)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OnboardingMode {
+    #[default]
+    Initial,
+    AddPair,
+}
+
 #[derive(Debug, Clone)]
 pub struct OnboardingState {
+    pub mode: OnboardingMode,
     pub steps: Vec<Step>,
     pub active: usize,
     pub input: String,
@@ -104,8 +113,26 @@ impl Default for OnboardingState {
 
 impl OnboardingState {
     pub fn new() -> Self {
+        Self::for_mode(OnboardingMode::Initial)
+    }
+
+    pub fn for_add_pair() -> Self {
+        Self::for_mode(OnboardingMode::AddPair)
+    }
+
+    fn for_mode(mode: OnboardingMode) -> Self {
+        let steps = match mode {
+            OnboardingMode::Initial => Step::all().to_vec(),
+            OnboardingMode::AddPair => vec![
+                Step::NativeLanguage,
+                Step::TargetLanguage,
+                Step::Age,
+                Step::Cefr,
+            ],
+        };
         Self {
-            steps: Step::all().to_vec(),
+            mode,
+            steps,
             active: 0,
             input: String::new(),
             provider: ProviderId::Custom,
@@ -297,7 +324,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .constraints([Constraint::Length(4), Constraint::Length(2)])
         .split(chunks[0]);
 
-    frame.render_widget(logo(), header_chunks[0]);
+    frame.render_widget(Logo, header_chunks[0]);
 
     let subtitle = Text::from(vec![
         Line::from(Span::styled(
@@ -584,10 +611,17 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     }
 }
 
+fn handle_esc(state: &mut AppState) {
+    match state.onboarding.mode {
+        OnboardingMode::Initial => state.view = View::Quitting,
+        OnboardingMode::AddPair => state.view = View::Pairs,
+    }
+}
+
 async fn handle_provider_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     let all = ProviderId::all();
     match code {
-        KeyCode::Esc => state.view = View::Quitting,
+        KeyCode::Esc => handle_esc(state),
         KeyCode::Enter | KeyCode::Char('\t') | KeyCode::Tab => {
             advance_onboarding(state).await?;
         }
@@ -646,7 +680,7 @@ async fn handle_provider_key(state: &mut AppState, code: KeyCode) -> Result<()> 
 
 async fn handle_base_url_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     match code {
-        KeyCode::Esc => state.view = View::Quitting,
+        KeyCode::Esc => handle_esc(state),
         KeyCode::Char('\t') | KeyCode::Tab | KeyCode::Enter => {
             advance_onboarding(state).await?;
         }
@@ -690,7 +724,7 @@ async fn handle_model_key(state: &mut AppState, code: KeyCode) -> Result<()> {
 
     if state.onboarding.model_picker_error.is_some() {
         match code {
-            KeyCode::Esc => state.view = View::Quitting,
+            KeyCode::Esc => handle_esc(state),
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 spawn_model_fetch(state);
             }
@@ -705,7 +739,7 @@ async fn handle_model_key(state: &mut AppState, code: KeyCode) -> Result<()> {
 
     let len = state.onboarding.model_picker_models.len();
     match code {
-        KeyCode::Esc => state.view = View::Quitting,
+        KeyCode::Esc => handle_esc(state),
         KeyCode::Enter => {
             let selected = state.onboarding.model_picker_selected;
             if let Some(model) = state.onboarding.model_picker_models.get(selected) {
@@ -737,7 +771,7 @@ async fn handle_model_key(state: &mut AppState, code: KeyCode) -> Result<()> {
 
 async fn handle_cefr_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     match code {
-        KeyCode::Esc => state.view = View::Quitting,
+        KeyCode::Esc => handle_esc(state),
         KeyCode::Enter | KeyCode::Char('\t') | KeyCode::Tab => {
             advance_onboarding(state).await?;
         }
@@ -790,7 +824,7 @@ async fn handle_cefr_key(state: &mut AppState, code: KeyCode) -> Result<()> {
 
 async fn handle_batch_size_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     match code {
-        KeyCode::Esc => state.view = View::Quitting,
+        KeyCode::Esc => handle_esc(state),
         KeyCode::Enter | KeyCode::Char('\t') | KeyCode::Tab => {
             advance_onboarding(state).await?;
         }
@@ -848,7 +882,7 @@ async fn handle_batch_size_key(state: &mut AppState, code: KeyCode) -> Result<()
 
 async fn handle_text_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     match code {
-        KeyCode::Esc => state.view = View::Quitting,
+        KeyCode::Esc => handle_esc(state),
         KeyCode::Char('\t') | KeyCode::Tab | KeyCode::Enter | KeyCode::Down => {
             advance_onboarding(state).await?;
         }
@@ -891,16 +925,34 @@ async fn advance_onboarding(state: &mut AppState) -> Result<()> {
 }
 
 pub(crate) async fn finish_onboarding(state: &mut AppState) -> Result<()> {
-    let config = build_config_from_onboarding(&state.onboarding);
+    match state.onboarding.mode {
+        OnboardingMode::Initial => {
+            let config = build_config_from_onboarding(&state.onboarding);
+            let pair_id = config.active_pair.clone();
+            write_config(&config, &state.data_dir)?;
+            state.config = Some(config);
 
-    write_config(&config, &state.data_dir)?;
-    state.config = Some(config);
-    state.view = View::Curriculum;
+            let db_path = crate::config::pair_db_path(&state.data_dir, &pair_id);
+            let db = crate::db::Database::connect(&db_path).await?;
+            state.db = Arc::new(db);
+
+            state.view = View::Curriculum;
+        }
+        OnboardingMode::AddPair => {
+            let profile = build_profile_from_onboarding(&state.onboarding);
+            let config = state.config.as_mut().ok_or_else(|| {
+                AppError::Config("No config available".to_string())
+            })?;
+            let new_id = config.add_pair(profile)?.to_string();
+            write_config(config, &state.data_dir)?;
+            crate::app::switch_pair(state, &new_id).await?;
+        }
+    }
     Ok(())
 }
 
-fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfig {
-    let profile = UserProfile {
+fn build_profile_from_onboarding(onboarding: &OnboardingState) -> UserProfile {
+    UserProfile {
         native_language: onboarding.native_language.clone(),
         target_language: onboarding.target_language.clone(),
         age: if onboarding.age.is_empty() {
@@ -909,7 +961,11 @@ fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfi
             onboarding.age.parse().ok()
         },
         self_assessed_cefr: Some(onboarding.cefr.clone()),
-    };
+    }
+}
+
+fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfig {
+    let profile = build_profile_from_onboarding(onboarding);
 
     let provider_config = ProviderConfig::ApiKey {
         api_key: if onboarding.api_key.is_empty() {

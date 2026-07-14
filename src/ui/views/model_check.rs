@@ -93,7 +93,7 @@ pub fn start(state: &mut AppState, config: OpenCourseConfig, return_to: View) {
                 return;
             }
         };
-        let profile = config.profile.clone();
+        let profile = config.active_profile().clone();
         let _ = run_model_diagnostics(client, &profile, |check| {
             let _ = tx.try_send(LlmResult::DiagnosticUpdate(check));
         })

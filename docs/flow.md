@@ -32,10 +32,32 @@ Main hub after onboarding. Available keys:
 | `r` | **Review** — open a list of all touched topics (topics with progress). |
 | `d` | **Docs** — browse touched topics and view their theory docs. |
 | `c` | **Curriculum** — view the full curriculum. |
+| `p` | **Pairs** — switch between language pairs or add a new one. |
 | `s` | **Settings** — edit profile, provider, batch size, hint mode. |
 | `q` | Quit. |
 
 If the app starts and there is no curriculum, it redirects to the Curriculum view automatically.
+
+---
+
+## Language pairs (`p`)
+
+Switch between language pairs or add a new one.
+
+- Each pair has its own isolated database folder: `.open-course-cli/pairs/{native-target}/db`.
+- Progress, session history, curriculum, and reviews are stored per pair.
+- Provider settings and preferences are shared across all pairs.
+
+Available keys:
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` or `j`/`k` | Select pair |
+| `Enter` | Switch to the selected pair |
+| `a` | Add a new pair (asks for native/target language, age, CEFR) |
+| `Esc` | Back to Dashboard |
+
+After switching, the dashboard and all sections reflect the active pair's data. If the newly selected pair has no curriculum, the app redirects to the Curriculum view so you can generate it.
 
 ---
 
@@ -134,7 +156,7 @@ Available keys:
 Sections:
 
 - **Provider**: provider, API key, base URL, endpoint, model.
-- **Profile**: native/target language, age, CEFR.
+- **Profile**: age and CEFR for the active pair. To change languages, add a new pair from the Pairs screen.
 - **Session**: batch size (2–5), hint mode (auto/on-demand).
 - **Data**: reset progress, history, curriculum, reviews, or all data.
 

@@ -134,6 +134,13 @@ Evaluation rules:
 - Each error type must be exactly one of: "critical" | "major" | "minor".
 - For each error, include `topicIds` from the list above that the error relates to. If the error involves a concept not covered by the list, also include `newTopics` with `name`, `description`, and `level` (CEFR, e.g. "A1").
 
+New topic rules (CRITICAL):
+- Each newTopic must be a SPECIFIC, narrow grammar or vocabulary point that can be practiced through translation exercises.
+- AVOID broad, abstract categories such as "Common Spelling Errors", "Grammar Basics", "Vocabulary", "Advanced Topics", "Common Mistakes", or "Fundamentals".
+- Good examples: "Relative pronouns: who vs which", "Spelling: experience vs expertise", "Word order in subordinate clauses", "Preterite of irregular verbs: venir".
+- Bad examples: "Common Spelling Errors", "Grammar mistakes", "Basic vocabulary".
+- The name should be 2-6 words and describe a concrete rule, pattern, or contrast.
+
 Return a JSON object exactly in this shape:
 {{
   "sentences": [

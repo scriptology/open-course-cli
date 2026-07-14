@@ -16,7 +16,7 @@ pub use cards::Card;
 pub use confirmation::draw_confirmation;
 pub use error_box::ErrorBox;
 pub use hint_bar::HintBar;
-pub use logo::logo;
+pub use logo::Logo;
 pub use markdown_style::OpenCourseStyleSheet;
 pub use progress_bar::ProgressBar;
 pub use sparkline::SparklineChart;

@@ -30,7 +30,31 @@ async fn main() -> anyhow::Result<()> {
     let data_dir = cli.data_dir.unwrap_or_else(|| cwd.clone());
 
     let config = config::read_config(&data_dir)?;
-    let db_path = config::open_course_dir(&data_dir).join("db");
+
+    let db = if let Some(ref cfg) = config {
+        let db_path = config::pair_db_path(&data_dir, &cfg.active_pair);
+        if config::migration::should_recreate_curriculum_table(&data_dir) {
+            Database::recreate_curriculum_table(&db_path).await?;
+            config::migration::mark_curriculum_table_recreated(&data_dir)?;
+        }
+        let db = Database::connect(&db_path).await?;
+        if let Some(curriculum) = config::migration::try_migrate_from_curriculum_md(
+            &data_dir,
+        )? {
+            let table = db.curriculum();
+            for topic in &curriculum.topics {
+                table.upsert(topic).await?;
+            }
+        }
+        if config::migration::should_clear_reviews_cache(&data_dir) {
+            db.reviews().reset().await?;
+            config::migration::mark_reviews_cache_cleared(&data_dir)?;
+        }
+        Arc::new(db)
+    } else {
+        let fallback_db = config::open_course_dir(&data_dir).join("db");
+        Arc::new(Database::connect(&fallback_db).await?)
+    };
 
     if std::env::var_os("OPEN_COURSE_CLI_DEBUG").is_some() {
         log_debug_event(
@@ -40,26 +64,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    if config::migration::should_recreate_curriculum_table(&data_dir) {
-        Database::recreate_curriculum_table(&db_path).await?;
-        config::migration::mark_curriculum_table_recreated(&data_dir)?;
-    }
-
-    let db = Database::connect(&db_path).await?;
-    let db = Arc::new(db);
     config::ensure_open_course_gitignore(&data_dir)?;
-
-    if let Some(curriculum) = config::migration::try_migrate_from_curriculum_md(&data_dir)? {
-        let table = db.curriculum();
-        for topic in &curriculum.topics {
-            table.upsert(topic).await?;
-        }
-    }
-
-    if config::migration::should_clear_reviews_cache(&data_dir) {
-        db.reviews().reset().await?;
-        config::migration::mark_reviews_cache_cleared(&data_dir)?;
-    }
 
     setup_panic_hook();
 

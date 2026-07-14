@@ -9,21 +9,21 @@ use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyMo
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
-use crate::config::OpenCourseConfig;
+use crate::config::{OpenCourseConfig, pair_db_path, write_config};
 use crate::core::session::{
     AnalysisResult, EvaluatedTopic, Exercise, MentorSession, apply_analysis_to_db, create_session,
 };
 use crate::db::Database;
 use crate::db::curriculum::{Curriculum, Topic, cefr_to_numeric};
 use crate::db::progress::ProgressTopic;
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::llm::diagnostics::CheckResult;
 use crate::llm::model_listing::ModelInfo;
 use crate::llm::pipeline::{generate_topic_metadata, log_debug_event};
 use crate::ui::views::{
-    CurriculumState, DashboardState, DocsState, ModelCheckState, OnboardingState, ReportState,
-    ReviewState, SessionState, SettingsState, curriculum, dashboard, docs, model_check, onboarding,
-    report, review, session, settings,
+    CurriculumState, DashboardState, DocsState, ModelCheckState, OnboardingState, PairsState,
+    ReportState, ReviewState, SessionState, SettingsState, curriculum, dashboard, docs, model_check,
+    onboarding, pairs, report, review, session, settings,
 };
 use crate::ui::widgets::{ErrorBox, Spinner};
 
@@ -38,6 +38,7 @@ pub enum View {
     Curriculum,
     Settings,
     ModelCheck,
+    Pairs,
     Quitting,
 }
 
@@ -71,6 +72,7 @@ pub struct AppState {
     pub settings: SettingsState,
     pub report: ReportState,
     pub model_check: ModelCheckState,
+    pub pairs: PairsState,
     pub quit_requested: Arc<AtomicBool>,
     pub llm_tx: mpsc::Sender<LlmResult>,
     pub spinner: Spinner,
@@ -106,6 +108,7 @@ impl AppState {
             settings: SettingsState::new(),
             report: ReportState::new(),
             model_check: ModelCheckState::new(),
+            pairs: PairsState::new(),
             quit_requested,
             llm_tx,
             spinner: Spinner::new(),
@@ -191,40 +194,46 @@ pub async fn run_app(
 }
 
 async fn handle_event(state: &mut AppState, event: Event) -> Result<()> {
-    if let Event::Key(key) = event
-        && key.kind == KeyEventKind::Press
-    {
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            state.view = View::Quitting;
-            return Ok(());
-        }
-
-        if state.error.is_some() {
-            match key.code {
-                KeyCode::Char('q') => state.view = View::Quitting,
-                KeyCode::Char('m') | KeyCode::Char('M') => {
-                    state.error = None;
-                    settings::jump_to_model_selection(state);
-                }
-                KeyCode::Char('r') => {
-                    state.error = None;
-                }
-                _ => state.error = None,
+    match event {
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                state.view = View::Quitting;
+                return Ok(());
             }
-            return Ok(());
-        }
 
-        let previous_view = state.view;
-        if let Err(e) = handle_key(state, key.code).await {
-            state.error = Some(e.to_string());
-        }
+            if state.error.is_some() {
+                match key.code {
+                    KeyCode::Char('q') => state.view = View::Quitting,
+                    KeyCode::Char('m') | KeyCode::Char('M') => {
+                        state.error = None;
+                        settings::jump_to_model_selection(state);
+                    }
+                    KeyCode::Char('r') => {
+                        state.error = None;
+                    }
+                    _ => state.error = None,
+                }
+                return Ok(());
+            }
 
-        if state.view == View::Dashboard && previous_view != View::Dashboard {
-            let config = state.config.as_ref();
-            if let Err(e) = state.dashboard.refresh(&state.db, config).await {
+            let previous_view = state.view;
+            if let Err(e) = handle_key(state, key.code).await {
                 state.error = Some(e.to_string());
             }
+
+            if state.view == View::Dashboard && previous_view != View::Dashboard {
+                let config = state.config.as_ref();
+                if let Err(e) = state.dashboard.refresh(&state.db, config).await {
+                    state.error = Some(e.to_string());
+                }
+            }
         }
+        Event::Resize(_, _) => {
+            // The terminal will be redrawn on the next loop iteration.
+            // The logo widget checks the allocated area and hides itself
+            // automatically when it does not fit.
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -250,6 +259,7 @@ async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         }
         View::Settings => settings::handle_key(state, code).await,
         View::ModelCheck => model_check::handle_key(state, code).await,
+        View::Pairs => pairs::handle_key(state, code).await,
         View::Quitting => Ok(()),
     }
 }
@@ -645,7 +655,7 @@ async fn ensure_topics_exist(
     let mut progress = db.progress().read_all().await?;
     let user_cefr = cefr_to_numeric(
         config
-            .profile
+            .active_profile()
             .self_assessed_cefr
             .as_deref()
             .unwrap_or("beginner"),
@@ -688,7 +698,7 @@ async fn ensure_progress_for_curriculum(db: &Database, config: &OpenCourseConfig
 
     let user_cefr = cefr_to_numeric(
         config
-            .profile
+            .active_profile()
             .self_assessed_cefr
             .as_deref()
             .unwrap_or("beginner"),
@@ -741,6 +751,37 @@ fn clear_loading(state: &mut AppState) {
     state.curriculum_progress.clear();
 }
 
+pub async fn switch_pair(state: &mut AppState, pair_id: &str) -> Result<()> {
+    let config = state
+        .config
+        .as_mut()
+        .ok_or_else(|| AppError::Config("No config available".to_string()))?;
+    config.active_pair = pair_id.to_string();
+    write_config(config, &state.data_dir)?;
+
+    let db_path = pair_db_path(&state.data_dir, pair_id);
+    let db = Database::connect(&db_path).await?;
+    state.db = Arc::new(db);
+
+    clear_loading(state);
+    state.curriculum.topics.clear();
+    state.curriculum.progress.clear();
+    state.curriculum.list_state.select(Some(0));
+
+    state
+        .dashboard
+        .refresh(&state.db, state.config.as_ref())
+        .await?;
+    state.curriculum.load(&state.db).await?;
+
+    if state.curriculum.topics.is_empty() {
+        state.view = View::Curriculum;
+    } else {
+        state.view = View::Dashboard;
+    }
+    Ok(())
+}
+
 fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let area = frame.area();
 
@@ -759,6 +800,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         View::Curriculum => curriculum::draw(frame, area, state),
         View::Settings => settings::draw(frame, area, state),
         View::ModelCheck => model_check::draw(frame, area, state),
+        View::Pairs => pairs::draw(frame, area, state),
         View::Quitting => {}
     }
 }

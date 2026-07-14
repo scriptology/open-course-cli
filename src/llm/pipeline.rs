@@ -18,7 +18,7 @@ use crate::core::session::{
 };
 use crate::db::curriculum::{
     CEFR_LEVELS, CURRICULUM_DOMAIN_DESCRIPTIONS, Curriculum, Topic, cefr_to_difficulty,
-    target_level_topic_count,
+    is_abstract_topic_name, target_level_topic_count,
 };
 use crate::error::{AppError, Result};
 use crate::llm::client::LlmClient;
@@ -363,6 +363,17 @@ pub async fn finalize_analysis_with_new_topics(
     for sentence in &analysis.sentences {
         for error in &sentence.errors {
             for new_topic in &error.new_topics {
+                if is_abstract_topic_name(&new_topic.name) {
+                    log_debug_event(
+                        "analysis",
+                        &format!(
+                            "Skipping abstract new topic from analysis: {}",
+                            new_topic.name
+                        ),
+                        data_dir,
+                    );
+                    continue;
+                }
                 seen.entry(new_topic.name.clone())
                     .or_insert(new_topic.clone());
             }
@@ -753,7 +764,7 @@ pub async fn generate_topic_metadata(
     stream_tx: Option<&mpsc::Sender<LlmResult>>,
     data_dir: Option<&Path>,
 ) -> Result<Topic> {
-    let prompt = build_topic_metadata_prompt(topic_id, &config.profile);
+    let prompt = build_topic_metadata_prompt(topic_id, config.active_profile());
     let client = create_llm_model(config)?;
     let raw = with_timeout_secs(
         stream_or_prompt(
@@ -784,10 +795,10 @@ pub async fn generate_topic_metadata(
         topic.id = topic_id.to_string();
     }
     if topic.target_lang.is_empty() {
-        topic.target_lang = config.profile.target_language.clone();
+        topic.target_lang = config.active_profile().target_language.clone();
     }
     if topic.native_lang.is_empty() {
-        topic.native_lang = config.profile.native_language.clone();
+        topic.native_lang = config.active_profile().native_language.clone();
     }
     if topic.version == 0 {
         topic.version = 1;

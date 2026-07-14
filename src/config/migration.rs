@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::config::open_course_dir;
-use crate::config::profile::UserProfile;
+use crate::config::pair_db_path;
+use crate::config::profile::{LanguagePair, UserProfile};
 use crate::config::{OpenCourseConfig, ProviderConfig, ProviderId};
 use crate::db::curriculum::Curriculum;
 use crate::error::Result;
@@ -60,8 +61,31 @@ fn parse_legacy_profile(content: &str) -> UserProfile {
     }
 }
 
-pub fn migrate_legacy_config(config: &mut OpenCourseConfig) {
+pub fn migrate_legacy_config(cwd: &std::path::Path, config: &mut OpenCourseConfig) -> Result<bool> {
     strip_opencode_model_prefixes(config);
+    if config.version >= 2 {
+        return Ok(false);
+    }
+    if let Some(profile) = config.profile.take() {
+        let id = OpenCourseConfig::pair_id(&profile.native_language, &profile.target_language);
+        config.pairs.push(LanguagePair {
+            id: id.clone(),
+            profile,
+        });
+        config.active_pair = id.clone();
+
+        let old_db = open_course_dir(cwd).join("db");
+        let new_db = pair_db_path(cwd, &id);
+        if old_db.exists() && !new_db.exists() {
+            std::fs::create_dir_all(new_db.parent().unwrap())?;
+            std::fs::rename(&old_db, &new_db)?;
+        }
+    }
+    if config.active_pair.is_empty() && !config.pairs.is_empty() {
+        config.active_pair = config.pairs[0].id.clone();
+    }
+    config.version = 2;
+    Ok(true)
 }
 
 fn strip_opencode_model_prefixes(config: &mut OpenCourseConfig) {

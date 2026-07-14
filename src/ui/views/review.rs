@@ -6,7 +6,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 
 use crate::app::{AppState, View};
-use crate::db::curriculum::Topic;
+use crate::db::curriculum::{Topic, difficulty_to_cefr};
 use crate::db::progress::ProgressTopic;
 use crate::error::{AppError, Result};
 use crate::ui::labels::{get_review_labels, native_language_code};
@@ -128,25 +128,34 @@ fn sort_topics(state: &mut AppState) {
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let labels = get_review_labels(native_language_code(state.config.as_ref()));
+    let accent = Color::Rgb(0, 122, 255);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(area);
 
-    frame.render_widget(
-        Paragraph::new(format!(
-            "Review\n{}\n{}",
-            labels.select_topic,
+    let header_lines = vec![
+        ratatui::text::Line::from(ratatui::text::Span::styled(
+            "Review",
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        )),
+        ratatui::text::Line::from(labels.select_topic),
+        ratatui::text::Line::from(ratatui::text::Span::styled(
             match state.review.sort_by {
                 SortBy::Score => labels.sort_by_score,
                 SortBy::LastPracticed => labels.sort_by_last_practiced,
-            }
+            },
+            Style::default().fg(Color::DarkGray),
         )),
+        ratatui::text::Line::from(""),
+    ];
+    frame.render_widget(
+        Paragraph::new(ratatui::text::Text::from(header_lines)),
         chunks[0],
     );
 
@@ -170,17 +179,34 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 let score = progress.map(|p| p.score).unwrap_or(0.0);
                 let last = progress
                     .and_then(|p| p.last_practiced.as_ref())
-                    .map(|d| format!(" | {}", d.split('T').next().unwrap_or(d)))
-                    .unwrap_or_default();
-                ListItem::new(format!(
-                    "{} [{}] {score:.0}{last}",
-                    topic.name, topic.difficulty
-                ))
+                    .map(|d| d.split('T').next().unwrap_or(d))
+                    .unwrap_or("");
+                let level = topic
+                    .level
+                    .clone()
+                    .or_else(|| difficulty_to_cefr(&topic.difficulty))
+                    .unwrap_or_else(|| "?".to_string())
+                    .to_uppercase();
+                ListItem::new(ratatui::text::Line::from(vec![
+                    ratatui::text::Span::raw(format!("{} [{}] ", topic.name, level)),
+                    ratatui::text::Span::styled(
+                        format!("{:.0}", score),
+                        score_style(score),
+                    ),
+                    ratatui::text::Span::styled(
+                        if last.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" | {last}")
+                        },
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
             })
             .collect();
         let list = List::new(items).highlight_symbol("> ").highlight_style(
             Style::default()
-                .fg(Color::Rgb(0, 122, 255))
+                .fg(accent)
                 .add_modifier(Modifier::BOLD),
         );
         frame.render_stateful_widget(list, chunks[1], &mut state.review.list_state);
@@ -194,6 +220,16 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .style(Style::default().fg(Color::DarkGray)),
         chunks[2],
     );
+}
+
+fn score_style(score: f64) -> Style {
+    if score >= 80.0 {
+        Style::default().fg(Color::Green)
+    } else if score > 0.0 {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::White)
+    }
 }
 
 pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {

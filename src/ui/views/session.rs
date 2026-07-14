@@ -362,7 +362,7 @@ pub(crate) async fn start_exercises_for_topic(
         .config
         .clone()
         .ok_or_else(|| AppError::Config("No provider configured".to_string()))?;
-    let profile = config.profile.clone();
+    let profile = config.active_profile().clone();
 
     let target_topic = state
         .session
@@ -476,7 +476,7 @@ async fn finish_session(state: &mut AppState) -> Result<()> {
         .config
         .clone()
         .ok_or_else(|| AppError::Config("No provider configured".to_string()))?;
-    let profile = config.profile.clone();
+    let profile = config.active_profile().clone();
     let topics = state.session.topics.clone();
 
     let session = state

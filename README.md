@@ -86,6 +86,7 @@ The `--data-dir` directory gets a `.open-course-cli/` folder:
 | `r` | Topic review |
 | `d` | Topic documentation |
 | `c` | Curriculum list |
+| `p` | Language pairs |
 | `s` | Settings |
 | `q` | Quit |
 
@@ -147,6 +148,17 @@ After the last exercise the answers are sent to the LLM for analysis. While gene
 | `Enter` | Open the selected topic in Docs |
 | `Esc` | Back to Dashboard |
 
+### Language pairs
+
+| Key | Action |
+|-----|----------|
+| `↑`/`↓` or `j`/`k` | Select pair |
+| `Enter` | Switch to the selected pair |
+| `a` | Add a new language pair (mini-onboarding: native/target/age/CEFR) |
+| `Esc` | Back to Dashboard |
+
+Each pair has its own isolated database folder under `.open-course-cli/pairs/{native-target}/db`. Progress, history, curriculum, and reviews are not shared between pairs. Provider settings and preferences are global.
+
 ### Settings
 
 | Key | Action |
@@ -160,7 +172,7 @@ After the last exercise the answers are sent to the LLM for analysis. While gene
 Settings sections:
 
 - **Provider** — provider, base URL, endpoint, API key, model.
-- **Profile** — native language, target language, age, CEFR.
+- **Profile** — age and CEFR for the active language pair. To change the native/target languages, add a new pair from the dashboard (`p`).
 - **Session** — batch size (2–5), hint mode (`auto` / `on-demand`).
 - **Data** — reset progress, history, curriculum, reviews, or everything. Requires `y` confirmation.
 

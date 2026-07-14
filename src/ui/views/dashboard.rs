@@ -15,7 +15,7 @@ use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, review, session};
-use crate::ui::widgets::{ActivityChart, HintBar, StackedProgressBar, logo};
+use crate::ui::widgets::{ActivityChart, HintBar, Logo, StackedProgressBar};
 
 #[derive(Debug, Clone)]
 pub struct DashboardState {
@@ -74,13 +74,13 @@ impl DashboardState {
         self.session_count = progress.session_count;
         self.activity = get_daily_activity(&all_history, &progress, 14, chrono::Local::now().date_naive());
 
-        let cefr = config.and_then(|c| c.profile.self_assessed_cefr.as_deref());
+        let cefr = config.and_then(|c| c.active_profile().self_assessed_cefr.as_deref());
         self.due_count = get_due_review_topics(&curriculum.topics, &progress, cefr).len();
         self.weak_topics = get_weak_review_topics(&curriculum.topics, &progress);
 
         if let Some(config) = config {
-            self.profile_native = config.profile.native_language.clone();
-            self.profile_target = config.profile.target_language.clone();
+            self.profile_native = config.active_profile().native_language.clone();
+            self.profile_target = config.active_profile().target_language.clone();
             self.provider = config.active_provider.as_str().to_string();
             self.model = config
                 .providers
@@ -94,11 +94,18 @@ impl DashboardState {
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
+    let narrow = area.width < 100;
+    let middle_height = if narrow {
+        Constraint::Min(11)
+    } else {
+        Constraint::Length(11)
+    };
+
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(6),
-            Constraint::Length(11),
+            middle_height,
             Constraint::Min(4),
             Constraint::Length(1),
         ])
@@ -127,7 +134,7 @@ fn draw_top(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(inner);
 
-    frame.render_widget(logo(), chunks[0]);
+    frame.render_widget(Logo, chunks[0]);
     frame.render_widget(profile_info(state), chunks[1]);
 }
 
@@ -154,7 +161,7 @@ fn profile_info(state: &AppState) -> Paragraph<'static> {
         state.dashboard.model.clone()
     };
     let cefr = config
-        .and_then(|c| c.profile.self_assessed_cefr.as_ref())
+        .and_then(|c| c.active_profile().self_assessed_cefr.as_ref())
         .map(|c| {
             Span::styled(
                 format!(" | Level: {}", c),
@@ -190,10 +197,18 @@ fn profile_info(state: &AppState) -> Paragraph<'static> {
 }
 
 fn draw_middle(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(area);
+    let narrow = area.width < 100;
+    let chunks = if narrow {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+            .split(area)
+    };
 
     draw_session_dynamics(frame, chunks[0], state, labels);
     draw_progress(frame, chunks[1], state, labels);
@@ -212,6 +227,94 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
     block.render(area, frame.buffer_mut());
 
     let course = &state.dashboard.course;
+    let compact = inner.height < 9;
+
+    if compact {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("Course: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{} ({})", course.completed, labels.completed_label),
+                    Style::default().fg(COLOR_COMPLETED),
+                ),
+                Span::raw(" / "),
+                Span::styled(
+                    format!("{} ({})", course.in_progress, labels.in_progress_label),
+                    Style::default().fg(COLOR_IN_PROGRESS),
+                ),
+                Span::raw(" / "),
+                Span::styled(
+                    format!("{} ({})", course.not_started, labels.new_label),
+                    Style::default().fg(COLOR_NEW),
+                ),
+            ])),
+            chunks[0],
+        );
+
+        let bar = StackedProgressBar::new(
+            course.not_started as f64,
+            course.in_progress as f64,
+            course.completed as f64,
+        );
+        frame.render_widget(bar, chunks[1]);
+
+        let difficulties = ["beginner", "intermediate", "advanced"];
+        for (i, difficulty) in difficulties.iter().enumerate() {
+            let progress = state
+                .dashboard
+                .difficulty
+                .iter()
+                .find(|d| d.difficulty == *difficulty)
+                .cloned()
+                .unwrap_or(DifficultyProgress {
+                    difficulty: difficulty.to_string(),
+                    total: 0,
+                    completed: 0,
+                    in_progress: 0,
+                    not_started: 0,
+                    percent: 0.0,
+                });
+
+            let row = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Length(20), Constraint::Min(0)])
+                .split(chunks[2 + i]);
+
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", capitalize(difficulty)),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(progress.completed.to_string(), Style::default().fg(COLOR_COMPLETED)),
+                    Span::raw("/"),
+                    Span::styled(progress.in_progress.to_string(), Style::default().fg(COLOR_IN_PROGRESS)),
+                    Span::raw("/"),
+                    Span::styled(progress.not_started.to_string(), Style::default().fg(COLOR_NEW)),
+                ])),
+                row[0],
+            );
+
+            let diff_bar = StackedProgressBar::new(
+                progress.not_started as f64,
+                progress.in_progress as f64,
+                progress.completed as f64,
+            );
+            frame.render_widget(diff_bar, row[1]);
+        }
+        return;
+    }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -378,6 +481,7 @@ fn draw_hint_bar(frame: &mut ratatui::Frame, area: Rect, labels: ReportLabels, m
             ("r", labels.review),
             ("d", labels.docs),
             ("c", labels.curriculum),
+            ("p", labels.pairs),
             ("s", labels.settings),
             ("q", labels.quit),
         ])
@@ -407,6 +511,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             state.view = View::Docs;
         }
         KeyCode::Char('c') => state.view = View::Curriculum,
+        KeyCode::Char('p') => state.view = View::Pairs,
         KeyCode::Char('s') => state.view = View::Settings,
         _ => {}
     }
