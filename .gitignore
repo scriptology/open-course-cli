@@ -1,2 +1,12 @@
 /target
 .open-course-cli/
+
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
