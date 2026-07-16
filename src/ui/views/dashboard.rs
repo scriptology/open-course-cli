@@ -163,27 +163,56 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
 
-    draw_top(frame, top_area, state, labels);
+    draw_top(frame, top_area, state, labels, narrow);
     draw_middle(frame, middle_area, state, labels);
     draw_weak_topics(frame, weak_area, state, labels);
     draw_hint_bar(frame, hint_area, state, labels);
 }
 
-fn draw_top(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
+fn draw_top(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    state: &AppState,
+    labels: ReportLabels,
+    narrow: bool,
+) {
     let block = Block::default().padding(Padding::new(1, 1, 1, 0));
     let inner = block.inner(area);
     block.render(area, frame.buffer_mut());
 
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(inner);
+    if narrow {
+        // On narrow screens put the logo on the left and the profile info in a
+        // compact two-column grid on the right.
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Min(0)])
+            .split(inner);
 
-    frame.render_widget(Logo, chunks[0]);
-    frame.render_widget(profile_info(state, labels), chunks[1]);
+        frame.render_widget(Logo, chunks[0]);
+
+        let info_lines = profile_info_lines(state, labels);
+        let info_area = chunks[1];
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(info_area);
+
+        let left = Text::from(vec![info_lines[0].clone(), info_lines[1].clone()]);
+        let right = Text::from(vec![info_lines[2].clone(), info_lines[3].clone()]);
+        frame.render_widget(Paragraph::new(left).alignment(Alignment::Left), cols[0]);
+        frame.render_widget(Paragraph::new(right).alignment(Alignment::Right), cols[1]);
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(inner);
+
+        frame.render_widget(Logo, chunks[0]);
+        frame.render_widget(profile_info(state, labels), chunks[1]);
+    }
 }
 
-fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
+fn profile_info_lines(state: &AppState, labels: ReportLabels) -> Vec<Line<'static>> {
     let config = state.config.as_ref();
     let native = if state.dashboard.profile_native.is_empty() {
         "-".to_string()
@@ -215,7 +244,7 @@ fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
         })
         .unwrap_or_else(|| Span::raw(""));
 
-    let text = Text::from(vec![
+    vec![
         Line::from(vec![
             Span::styled(format!("{}: ", labels.learning), Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(format!("{} → {}", native, target)),
@@ -236,9 +265,11 @@ fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
             Span::styled(format!("{}: ", labels.provider_label), Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(format!("{} / {}", provider, model)),
         ]),
-    ]);
+    ]
+}
 
-    Paragraph::new(text).alignment(Alignment::Right)
+fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
+    Paragraph::new(Text::from(profile_info_lines(state, labels))).alignment(Alignment::Right)
 }
 
 fn draw_middle(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
