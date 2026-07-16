@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use clap::Parser;
 use ratatui::crossterm::{
     cursor::MoveTo,
+    event::DisableMouseCapture,
     execute,
     terminal::{Clear, ClearType},
 };
@@ -12,6 +13,7 @@ use ratatui::crossterm::{
 use open_course_cli::app::run_app;
 use open_course_cli::config;
 use open_course_cli::db::Database;
+use open_course_cli::db::curriculum::cleanup_topics;
 use open_course_cli::llm::pipeline::log_debug_event;
 
 #[derive(Parser)]
@@ -50,10 +52,19 @@ async fn main() -> anyhow::Result<()> {
             db.reviews().reset().await?;
             config::migration::mark_reviews_cache_cleared(&data_dir)?;
         }
+        let (moved, removed) = cleanup_topics(&db).await?;
+        if moved > 0 || removed > 0 {
+            eprintln!("Cleaned up {moved} micro-topics and removed {removed} stale topics");
+        }
         Arc::new(db)
     } else {
         let fallback_db = config::open_course_dir(&data_dir).join("db");
-        Arc::new(Database::connect(&fallback_db).await?)
+        let db = Database::connect(&fallback_db).await?;
+        let (moved, removed) = cleanup_topics(&db).await?;
+        if moved > 0 || removed > 0 {
+            eprintln!("Cleaned up {moved} micro-topics and removed {removed} stale topics");
+        }
+        Arc::new(db)
     };
 
     if std::env::var_os("OPEN_COURSE_CLI_DEBUG").is_some() {
@@ -82,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
     let mut terminal = ratatui::init();
     terminal.clear()?;
     let result = run_app(&mut terminal, data_dir, db, config, quit).await;
+    let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
     let _ = terminal.clear();
     ratatui::restore();
     println!();

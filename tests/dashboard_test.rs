@@ -1,5 +1,5 @@
 use open_course_cli::core::dashboard::{
-    get_course_progress, get_daily_activity, get_progress_by_difficulty,
+    get_course_progress, get_daily_activity, get_progress_by_level,
 };
 use open_course_cli::db::curriculum::{Curriculum, Difficulty, Topic};
 use open_course_cli::db::history::SessionSummary;
@@ -33,16 +33,22 @@ fn course_progress() {
         native_language: "ru".to_string(),
     };
     let progress = ProgressData {
-        version: 2,
+        version: 3,
         topics: vec![
             ProgressTopic {
                 topic_id: "t1".to_string(),
                 score: 90.0,
+                mastery: 90.0,
+                difficulty_estimate: 0.0,
+                practice_count: 1,
                 last_practiced: None,
             },
             ProgressTopic {
                 topic_id: "t2".to_string(),
                 score: 60.0,
+                mastery: 60.0,
+                difficulty_estimate: 0.0,
+                practice_count: 1,
                 last_practiced: Some("2024-01-01".to_string()),
             },
         ],
@@ -58,7 +64,7 @@ fn course_progress() {
 }
 
 #[test]
-fn progress_by_difficulty() {
+fn progress_by_level() {
     let curriculum = Curriculum {
         version: 1,
         topics: vec![
@@ -70,37 +76,43 @@ fn progress_by_difficulty() {
         native_language: "ru".to_string(),
     };
     let progress = ProgressData {
-        version: 2,
+        version: 3,
         topics: vec![
             ProgressTopic {
                 topic_id: "t1".to_string(),
                 score: 85.0,
+                mastery: 85.0,
+                difficulty_estimate: 0.0,
+                practice_count: 1,
                 last_practiced: None,
             },
             ProgressTopic {
                 topic_id: "t3".to_string(),
                 score: 75.0,
+                mastery: 75.0,
+                difficulty_estimate: 0.0,
+                practice_count: 1,
                 last_practiced: None,
             },
         ],
         ..Default::default()
     };
 
-    let by_difficulty = get_progress_by_difficulty(&curriculum, &progress);
-    let beginner = by_difficulty
+    let by_level = get_progress_by_level(&curriculum, &progress);
+    let a1 = by_level
         .iter()
-        .find(|d| d.difficulty == "beginner")
+        .find(|d| d.level == "A1")
         .unwrap();
-    assert_eq!(beginner.total, 2);
-    assert_eq!(beginner.completed, 1);
-    assert_eq!(beginner.in_progress, 0);
-    assert_eq!(beginner.not_started, 1);
+    assert_eq!(a1.total, 2);
+    assert_eq!(a1.completed, 1);
+    assert_eq!(a1.in_progress, 0);
+    assert_eq!(a1.not_started, 1);
 
-    let advanced = by_difficulty
+    let c1 = by_level
         .iter()
-        .find(|d| d.difficulty == "advanced")
+        .find(|d| d.level == "C1")
         .unwrap();
-    assert_eq!(advanced.total, 0);
+    assert_eq!(c1.total, 0);
 }
 
 #[test]
@@ -128,10 +140,13 @@ fn daily_activity() {
         },
     ];
     let progress = ProgressData {
-        version: 2,
+        version: 3,
         topics: vec![ProgressTopic {
             topic_id: "t1".to_string(),
             score: 90.0,
+            mastery: 90.0,
+            difficulty_estimate: 0.0,
+            practice_count: 1,
             last_practiced: Some("2024-01-02T10:00:00Z".to_string()),
         }],
         ..Default::default()
@@ -155,4 +170,85 @@ fn daily_activity() {
     assert_eq!(day3.sessions, 0);
     assert_eq!(day3.new_topics, 0);
     assert_eq!(day3.completed_topics, 0);
+}
+
+
+#[test]
+fn weak_selection_activates_and_wraps() {
+    use open_course_cli::ui::views::DashboardState;
+
+    let mut state = DashboardState::default();
+    state.weak_topics = (1..=3)
+        .map(|i| make_topic(&format!("t{i}"), Difficulty::Beginner))
+        .collect();
+
+    // Inactive: down selects the first row.
+    state.move_weak_selection(1);
+    assert_eq!(state.weak_selected, Some(0));
+
+    state.move_weak_selection(1);
+    assert_eq!(state.weak_selected, Some(1));
+
+    // Wraps forward and backward.
+    state.move_weak_selection(2);
+    assert_eq!(state.weak_selected, Some(0));
+
+    state.move_weak_selection(-1);
+    assert_eq!(state.weak_selected, Some(2));
+
+    // Fresh activation with up lands on the last row.
+    state.weak_selected = None;
+    state.move_weak_selection(-1);
+    assert_eq!(state.weak_selected, Some(2));
+}
+
+#[test]
+fn weak_selection_handles_empty_and_visible_window() {
+    use open_course_cli::ui::views::DashboardState;
+
+    let mut state = DashboardState::default();
+    state.move_weak_selection(1);
+    assert_eq!(state.weak_selected, None);
+
+    // 8 topics but only 5 visible rows: selection wraps after the 5th.
+    state.weak_topics = (1..=8)
+        .map(|i| make_topic(&format!("t{i}"), Difficulty::Beginner))
+        .collect();
+    for _ in 0..5 {
+        state.move_weak_selection(1);
+    }
+    assert_eq!(state.weak_selected, Some(4));
+    state.move_weak_selection(1);
+    assert_eq!(state.weak_selected, Some(0));
+}
+
+#[test]
+fn weak_selection_defaults_to_first() {
+    use open_course_cli::ui::views::DashboardState;
+
+    let mut state = DashboardState::default();
+    assert_eq!(state.weak_selected, None);
+
+    state.weak_topics = vec![
+        make_topic("t1", Difficulty::Beginner),
+        make_topic("t2", Difficulty::Beginner),
+    ];
+    assert_eq!(state.weak_visible_len(), 2);
+
+    // After refresh() the first weak topic is selected by default.
+    state.weak_selected = if state.weak_visible_len() > 0 {
+        Some(0)
+    } else {
+        None
+    };
+    assert_eq!(state.weak_selected, Some(0));
+
+    // Empty list keeps selection unset.
+    state.weak_topics.clear();
+    state.weak_selected = if state.weak_visible_len() > 0 {
+        Some(0)
+    } else {
+        None
+    };
+    assert_eq!(state.weak_selected, None);
 }

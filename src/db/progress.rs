@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use arrow_array::{Array, Float64Array, RecordBatch, StringArray};
+use arrow_array::{Array, Float64Array, Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures_util::stream::TryStreamExt;
 use lancedb::Connection;
-use lancedb::database::CreateTableMode;
 use lancedb::query::{ExecutableQuery, QueryBase};
 
 use crate::db::metadata::MetadataTable;
@@ -17,6 +16,9 @@ pub const TABLE_NAME: &str = "progress";
 pub struct ProgressTopic {
     pub topic_id: String,
     pub score: f64,
+    pub mastery: f64,
+    pub difficulty_estimate: f64,
+    pub practice_count: i32,
     pub last_practiced: Option<String>,
 }
 
@@ -32,8 +34,72 @@ fn schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("topic_id", DataType::Utf8, false),
         Field::new("score", DataType::Float64, false),
+        Field::new("mastery", DataType::Float64, false),
+        Field::new("difficulty_estimate", DataType::Float64, false),
+        Field::new("practice_count", DataType::Int32, false),
         Field::new("last_practiced", DataType::Utf8, true),
     ]))
+}
+
+async fn open_or_migrate_progress_table(connection: &Connection) -> Result<lancedb::Table> {
+    let names = connection
+        .table_names()
+        .execute()
+        .await
+        .unwrap_or_default();
+    if !names.contains(&TABLE_NAME.to_string()) {
+        return connection
+            .create_empty_table(TABLE_NAME, schema())
+            .execute()
+            .await
+            .map_err(Into::into);
+    }
+
+    let existing = connection.open_table(TABLE_NAME).execute().await?;
+    let existing_schema = existing.schema().await?;
+    if schema_compatible(&existing_schema, &schema()) {
+        Ok(existing)
+    } else {
+        migrate_progress_table(connection, existing).await
+    }
+}
+
+fn schema_compatible(existing: &Arc<Schema>, target: &Arc<Schema>) -> bool {
+    if existing.fields().len() != target.fields().len() {
+        return false;
+    }
+    existing
+        .fields()
+        .iter()
+        .zip(target.fields().iter())
+        .all(|(a, b)| a.name() == b.name() && a.data_type() == b.data_type())
+}
+
+async fn migrate_progress_table(
+    connection: &Connection,
+    old_table: lancedb::Table,
+) -> Result<lancedb::Table> {
+    let records: Vec<RecordBatch> = old_table
+        .query()
+        .execute()
+        .await?
+        .try_collect()
+        .await?;
+    let mut topics = Vec::new();
+    for batch in &records {
+        topics.extend(progress_from_record_batch(batch)?.topics);
+    }
+
+    connection.drop_table(TABLE_NAME, &[]).await?;
+    let new_table = connection.create_empty_table(TABLE_NAME, schema()).execute().await?;
+    if !topics.is_empty() {
+        let batches = topics
+            .iter()
+            .map(progress_topic_to_record_batch)
+            .collect::<Result<Vec<_>>>()?;
+        new_table.add(batches).execute().await?;
+    }
+    Ok(new_table)
 }
 
 #[derive(Clone)]
@@ -44,11 +110,7 @@ pub struct ProgressTable {
 
 impl ProgressTable {
     pub async fn open(connection: &Connection) -> Result<Self> {
-        let table = connection
-            .create_empty_table(TABLE_NAME, schema())
-            .mode(CreateTableMode::exist_ok(|req| req))
-            .execute()
-            .await?;
+        let table = open_or_migrate_progress_table(connection).await?;
         let metadata = MetadataTable::open(connection).await?;
         Ok(Self { table, metadata })
     }
@@ -63,7 +125,7 @@ impl ProgressTable {
             .await?;
         let mut data = if records.is_empty() {
             ProgressData {
-                version: 2,
+                version: 3,
                 topics: Vec::new(),
                 ..Default::default()
             }
@@ -73,7 +135,7 @@ impl ProgressTable {
                 all_topics.extend(progress_from_record_batch(batch)?.topics);
             }
             ProgressData {
-                version: 2,
+                version: 3,
                 topics: all_topics,
                 ..Default::default()
             }
@@ -149,6 +211,9 @@ fn progress_topic_to_record_batch(topic: &ProgressTopic) -> Result<RecordBatch> 
         vec![
             Arc::new(StringArray::from(vec![topic.topic_id.as_str()])),
             Arc::new(Float64Array::from(vec![topic.score])),
+            Arc::new(Float64Array::from(vec![topic.mastery])),
+            Arc::new(Float64Array::from(vec![topic.difficulty_estimate])),
+            Arc::new(Int32Array::from(vec![topic.practice_count])),
             Arc::new(StringArray::from(vec![topic.last_practiced.as_deref()])),
         ],
     )?;
@@ -169,6 +234,15 @@ fn progress_from_record_batch(batch: &RecordBatch) -> Result<ProgressData> {
         .as_any()
         .downcast_ref::<Float64Array>()
         .unwrap();
+    let mastery_col = batch
+        .column_by_name("mastery")
+        .and_then(|c| c.as_any().downcast_ref::<Float64Array>());
+    let difficulty_col = batch
+        .column_by_name("difficulty_estimate")
+        .and_then(|c| c.as_any().downcast_ref::<Float64Array>());
+    let count_col = batch
+        .column_by_name("practice_count")
+        .and_then(|c| c.as_any().downcast_ref::<Int32Array>());
     let last_col = batch
         .column_by_name("last_practiced")
         .unwrap()
@@ -178,9 +252,14 @@ fn progress_from_record_batch(batch: &RecordBatch) -> Result<ProgressData> {
 
     let mut topics = Vec::with_capacity(n);
     for i in 0..n {
+        let score = score_col.value(i);
+        let mastery = mastery_col.map(|c| c.value(i)).unwrap_or(score);
         topics.push(ProgressTopic {
             topic_id: topic_id_col.value(i).to_string(),
-            score: score_col.value(i),
+            score,
+            mastery,
+            difficulty_estimate: difficulty_col.map(|c| c.value(i)).unwrap_or(0.0),
+            practice_count: count_col.map(|c| c.value(i)).unwrap_or(0),
             last_practiced: if last_col.is_null(i) {
                 None
             } else {
@@ -190,7 +269,7 @@ fn progress_from_record_batch(batch: &RecordBatch) -> Result<ProgressData> {
     }
 
     Ok(ProgressData {
-        version: 2,
+        version: 3,
         topics,
         ..Default::default()
     })

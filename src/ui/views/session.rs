@@ -2,14 +2,15 @@ use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Widget};
 
 use crate::app::{AppState, LlmResult, View};
 use crate::core::session::{
-    AnalysisResult, Exercise, MentorSession, advance_exercise, is_session_complete, record_answer,
-    select_side_topics,
+    AnalysisResult, Exercise, MentorSession, NextSessionTopic, advance_exercise,
+    is_session_complete, pick_next_session_topic, record_answer, select_side_topics,
 };
 use crate::db::curriculum::Topic;
+use crate::db::learning_items::{LearningItem, LearningItemsTable};
 use crate::error::{AppError, Result};
 use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::{
@@ -18,8 +19,11 @@ use crate::llm::pipeline::{
 use crate::llm::prompts::{build_batch_analysis_prompt, build_exercise_prompt};
 use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::curriculum;
-use crate::ui::views::utils::{screen_chunks, select_next_wrapping, select_previous_wrapping};
+use crate::ui::views::utils::{
+    screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
+};
 use crate::ui::widgets::Card;
+use crate::ui::colors;
 
 #[derive(Debug, Clone, Default)]
 pub enum Mode {
@@ -37,9 +41,10 @@ pub struct SessionState {
     pub list_state: ListState,
     pub mentor_session: Option<MentorSession>,
     pub loading: bool,
-    pub loading_title: Option<&'static str>,
+    pub loading_title: Option<String>,
     pub pending_new_topic: bool,
     pub target_topic_id: Option<String>,
+    pub learning_item_ids: Vec<String>,
 }
 
 impl SessionState {
@@ -71,9 +76,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         let loading_message = state
             .stream_status
             .as_deref()
-            .unwrap_or(state.session.loading_title.unwrap_or(labels.loading));
+            .unwrap_or(state.session.loading_title.as_deref().unwrap_or(labels.loading));
         let loading_text = Line::from(vec![
-            Span::styled(spinner_symbol, Style::default().fg(Color::Yellow)),
+            Span::styled(spinner_symbol, Style::default().fg(colors::YELLOW)),
             Span::raw(" "),
             Span::raw(loading_message),
         ]);
@@ -116,7 +121,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
             let list = List::new(items).highlight_symbol("> ").highlight_style(
                 Style::default()
-                    .fg(Color::Rgb(0, 122, 255))
+                    .fg(colors::BLUE)
                     .add_modifier(Modifier::BOLD),
             );
 
@@ -151,27 +156,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
             let input = &state.session.input;
             let cursor = state.session.cursor;
-            let mut spans = Vec::new();
-            let before: String = input.chars().take(cursor).collect();
-            spans.push(Span::raw(before));
-            let mut tail = input.chars().skip(cursor);
-            if let Some(c) = tail.next() {
-                spans.push(Span::styled(
-                    c.to_string(),
-                    Style::default().bg(Color::White).fg(Color::Black),
-                ));
-                let after: String = tail.collect();
-                spans.push(Span::raw(after));
-            } else {
-                spans.push(Span::styled(
-                    " ".to_string(),
-                    Style::default().bg(Color::White),
-                ));
-            }
-            frame.render_widget(
-                Card::new(labels.your_answer).line(Line::from(spans)),
-                chunks[1],
-            );
+            let input_block = Block::default()
+                .title(labels.your_answer)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray));
+            let input_inner = input_block.inner(chunks[1]);
+            input_block.render(chunks[1], frame.buffer_mut());
+            let input_text = wrapped_input_text(input, cursor, input_inner.width as usize);
+            frame.render_widget(Paragraph::new(input_text), input_inner);
 
             frame.render_widget(
                 Paragraph::new(format!("Enter: {} | Esc: {}", labels.submit, labels.back))
@@ -330,7 +322,7 @@ pub(crate) async fn start_exercises(state: &mut AppState) -> Result<()> {
         .get(selected)
         .cloned()
         .ok_or_else(|| AppError::NotFound("Selected topic not found".to_string()))?;
-    start_exercises_for_topic(state, &target_topic.id).await
+    start_exercises_for_topic(state, &target_topic.id, None).await
 }
 
 pub async fn start_new_topic_session(state: &mut AppState) -> Result<()> {
@@ -339,24 +331,50 @@ pub async fn start_new_topic_session(state: &mut AppState) -> Result<()> {
         state.view = View::Curriculum;
         return Ok(());
     }
-    if let Some(topic_id) = pick_untouched_topic(state).await? {
-        start_exercises_for_topic(state, &topic_id).await
-    } else {
-        curriculum::extend_curriculum(state, 5).await?;
-        state.session.loading = true;
-        state.session.pending_new_topic = true;
-        Ok(())
+    let progress = state.db.progress().read_all().await?;
+    match pick_next_session_topic(&state.session.topics, &progress, chrono::Utc::now()) {
+        NextSessionTopic::Review(topic) => {
+            let title = review_title(state, &topic.name);
+            start_exercises_for_topic(state, &topic.id, Some(title)).await
+        }
+        NextSessionTopic::New(topic) => {
+            let title = new_topic_title(state, &topic.name);
+            start_exercises_for_topic(state, &topic.id, Some(title)).await
+        }
+        NextSessionTopic::ExtendCurriculum => {
+            curriculum::extend_curriculum(state, 5).await?;
+            state.session.loading = true;
+            state.session.pending_new_topic = true;
+            Ok(())
+        }
     }
+}
+
+fn review_title(state: &AppState, topic_name: &str) -> String {
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    format!("{}: {}", labels.review_session_label, topic_name)
+}
+
+fn new_topic_title(state: &AppState, topic_name: &str) -> String {
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    format!("{}: {}", labels.new_topic_session_label, topic_name)
 }
 
 pub async fn start_review_topic_session(state: &mut AppState, topic_id: String) -> Result<()> {
     state.session.load(&state.db).await?;
-    start_exercises_for_topic(state, &topic_id).await
+    let title = state
+        .session
+        .topics
+        .iter()
+        .find(|t| t.id == topic_id)
+        .map(|t| review_title(state, &t.name));
+    start_exercises_for_topic(state, &topic_id, title).await
 }
 
 pub(crate) async fn start_exercises_for_topic(
     state: &mut AppState,
     target_topic_id: &str,
+    loading_title: Option<String>,
 ) -> Result<()> {
     let config = state
         .config
@@ -384,17 +402,42 @@ pub(crate) async fn start_exercises_for_topic(
         .cloned()
         .collect();
 
+    let learning_items: Vec<LearningItem> = state
+        .db
+        .learning_items()
+        .read_all()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|li| li.target_lang == profile.target_language)
+        .collect();
+    let forced_learning_items = LearningItemsTable::weakest(&learning_items,
+        3,
+    );
+    state.session.learning_item_ids = forced_learning_items
+        .iter()
+        .map(|li| li.id.clone())
+        .collect();
+
+    let history = state.db.history().read_all().await.unwrap_or_default();
+    let success_rate = crate::core::session::recent_success_rate(&history,
+        5,
+    );
+
     let prompt = build_exercise_prompt(
         &profile,
         &[target_topic],
         &side_topics,
         &candidate_topics,
+        &forced_learning_items,
         config.preferences.batch_size,
+        success_rate,
     );
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     state.session.loading = true;
-    state.session.loading_title = Some(labels.loading_exercises);
+    state.session.loading_title =
+        loading_title.or_else(|| Some(labels.loading_exercises.to_string()));
     state.session.pending_new_topic = false;
     state.session.target_topic_id = Some(target_topic_id.to_string());
 
@@ -441,7 +484,7 @@ pub async fn maybe_start_pending_new_topic(state: &mut AppState) -> Result<()> {
     }
     state.session.pending_new_topic = false;
     if let Some(topic_id) = pick_untouched_topic(state).await? {
-        start_exercises_for_topic(state, &topic_id).await?;
+        start_exercises_for_topic(state, &topic_id, None).await?;
     } else {
         state.error = Some("No new topic available after curriculum generation".to_string());
     }
@@ -514,7 +557,7 @@ async fn finish_session(state: &mut AppState) -> Result<()> {
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     state.session.loading = true;
-    state.session.loading_title = Some(labels.loading_analysis);
+    state.session.loading_title = Some(labels.loading_analysis.to_string());
 
     let data_dir = state.data_dir.clone();
     let tx = state.llm_tx.clone();
@@ -522,7 +565,7 @@ async fn finish_session(state: &mut AppState) -> Result<()> {
         let result: Result<AnalysisResult> = async {
             let model = create_llm_model(&config)?;
             let mut analysis =
-                generate_analysis(model.as_ref(), &prompt, Some(&tx), Some(data_dir.as_path()))
+                generate_analysis(model.as_ref(), &prompt, pairs.len(), Some(&tx), Some(data_dir.as_path()))
                     .await?;
             merge_analysis_with_pairs(&mut analysis, &pairs);
             analysis = finalize_analysis_with_new_topics(

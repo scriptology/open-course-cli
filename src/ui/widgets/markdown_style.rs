@@ -1,5 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 use tui_markdown::StyleSheet;
+use crate::ui::colors;
 
 #[derive(Debug, Clone, Copy)]
 pub struct OpenCourseStyleSheet;
@@ -8,16 +9,16 @@ impl StyleSheet for OpenCourseStyleSheet {
     fn heading(&self, level: u8) -> Style {
         match level {
             1 => Style::default()
-                .fg(Color::Rgb(0, 122, 255))
+                .fg(colors::BLUE)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             2 => Style::default()
-                .fg(Color::Rgb(0, 122, 255))
+                .fg(colors::BLUE)
                 .add_modifier(Modifier::BOLD),
             3 => Style::default()
-                .fg(Color::Rgb(0, 122, 255))
+                .fg(colors::BLUE)
                 .add_modifier(Modifier::BOLD | Modifier::ITALIC),
             _ => Style::default()
-                .fg(Color::Rgb(0, 122, 255))
+                .fg(colors::BLUE)
                 .add_modifier(Modifier::ITALIC),
         }
     }
@@ -28,12 +29,12 @@ impl StyleSheet for OpenCourseStyleSheet {
 
     fn link(&self) -> Style {
         Style::default()
-            .fg(Color::Rgb(0, 122, 255))
+            .fg(colors::BLUE)
             .add_modifier(Modifier::UNDERLINED)
     }
 
     fn blockquote(&self) -> Style {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(colors::YELLOW)
     }
 
     fn heading_meta(&self) -> Style {
@@ -41,6 +42,6 @@ impl StyleSheet for OpenCourseStyleSheet {
     }
 
     fn metadata_block(&self) -> Style {
-        Style::default().fg(Color::LightYellow)
+        Style::default().fg(colors::YELLOW)
     }
 }

@@ -11,6 +11,8 @@ use crate::llm::diagnostics::{
     CheckResult, CheckStatus, model_check_verdict, run_model_diagnostics,
 };
 use crate::llm::factory::create_llm_model;
+use crate::ui::colors;
+use crate::ui::labels::{get_report_labels, native_language_code};
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelCheckState {
@@ -115,27 +117,32 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             "Model is ready."
         };
         format!(
-            "{}\nEnter/c: continue | Esc/b: back to model list | r: retry | s: skip",
+            "{} | Enter/c: continue | Esc/b: back to model list | r: retry | s: skip",
             verdict
         )
     };
     let footer_height = footer.lines().count() as u16;
     let chunks = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(3),
         Constraint::Min(0),
         Constraint::Length(footer_height),
     ])
     .split(area);
 
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+
     frame.render_widget(
-        Paragraph::new("Model diagnostics")
-            .style(Style::default().add_modifier(Modifier::BOLD)),
+        Paragraph::new(Text::from(vec![
+            Line::from(labels.model_diagnostics)
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+            Line::from(""),
+        ])),
         chunks[0],
     );
 
     let mut lines: Vec<Line> = Vec::new();
     if state.model_check.checks.is_empty() {
-        lines.push(Line::from("Running diagnostics...").style(Style::default().fg(Color::Yellow)));
+        lines.push(Line::from("Running diagnostics...").style(Style::default().fg(colors::YELLOW)));
     } else {
         let spinner_symbol = state.spinner.symbol();
         for check in &state.model_check.checks {
@@ -176,10 +183,10 @@ fn render_check_line<'a>(check: &'a CheckResult, spinner_symbol: &'a str) -> Lin
 fn status_style(status: &CheckStatus) -> Style {
     match status {
         CheckStatus::Pending => Style::default().fg(Color::DarkGray),
-        CheckStatus::InProgress => Style::default().fg(Color::Yellow),
-        CheckStatus::Passed => Style::default().fg(Color::Green),
+        CheckStatus::InProgress => Style::default().fg(colors::YELLOW),
+        CheckStatus::Passed => Style::default().fg(colors::GREEN),
         CheckStatus::Failed(_) => Style::default().fg(Color::Red),
-        CheckStatus::Warning(_) => Style::default().fg(Color::Yellow),
+        CheckStatus::Warning(_) => Style::default().fg(colors::YELLOW),
     }
 }
 

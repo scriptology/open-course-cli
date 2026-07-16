@@ -6,16 +6,17 @@ use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use serde::{Deserialize, Serialize};
 
 use crate::app::{AppState, LlmResult, View};
-use crate::db::curriculum::{CEFR_LEVELS, Curriculum, Topic, difficulty_to_cefr, is_abstract_topic_name};
+use crate::db::curriculum::{CEFR_LEVELS, Curriculum, Topic, difficulty_to_cefr};
 use crate::error::{AppError, Result};
+use crate::llm::client::{DEFAULT_MAX_TOKENS, extract_typed};
 use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_curriculum as generate_curriculum_llm;
 use crate::llm::prompts::build_curriculum_extension_prompt;
 use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::docs;
-use crate::ui::views::settings::jump_to_model_selection;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::draw_confirmation;
+use crate::ui::colors;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CurriculumSortBy {
@@ -25,13 +26,6 @@ pub enum CurriculumSortBy {
 }
 
 impl CurriculumSortBy {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Progression => "progression",
-            Self::Score => "score",
-        }
-    }
-
     fn toggle(self) -> Self {
         match self {
             Self::Progression => Self::Score,
@@ -57,6 +51,7 @@ impl CurriculumState {
     }
 
     pub async fn load(&mut self, db: &crate::db::Database) -> Result<()> {
+        crate::db::curriculum::cleanup_topics(db).await?;
         let curriculum = db.curriculum().read_all().await?;
         let progress = db.progress().read_all().await?;
         let progress_map: std::collections::HashMap<String, f64> = progress
@@ -65,9 +60,7 @@ impl CurriculumState {
             .map(|t| (t.topic_id.clone(), t.score))
             .collect();
 
-        let topics = cleanup_abstract_topics(db, curriculum.topics).await?;
-
-        self.topics = topics;
+        self.topics = curriculum.topics;
         self.progress = progress_map;
         if self.topics.is_empty() {
             self.list_state.select(None);
@@ -106,28 +99,31 @@ impl CurriculumState {
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     if state.curriculum.loading {
         let labels = get_report_labels(native_language_code(state.config.as_ref()));
-        let accent = Color::Rgb(0, 122, 255);
+        let accent = colors::BLUE;
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),
+                Constraint::Length(3),
                 Constraint::Min(0),
                 Constraint::Length(1),
             ])
             .split(area);
 
         frame.render_widget(
-            Paragraph::new(Span::styled(
-                "Curriculum",
-                Style::default().fg(accent).add_modifier(Modifier::BOLD),
-            )),
+            Paragraph::new(Text::from(vec![
+                Line::from(Span::styled(
+                    labels.curriculum,
+                    Style::default().fg(accent).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ])),
             chunks[0],
         );
 
         let spinner_symbol = state.spinner.symbol();
         let mut lines: Vec<Line> = Vec::new();
         lines.push(Line::from(vec![
-            Span::styled(spinner_symbol, Style::default().fg(Color::Yellow)),
+            Span::styled(spinner_symbol, Style::default().fg(colors::YELLOW)),
             Span::raw(" "),
             Span::raw(
                 state
@@ -157,9 +153,8 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             chunks[1],
         );
 
-        let model_hint = current_model_hint(state);
         frame.render_widget(
-            Paragraph::new(format!("Esc: {} | m: change model {model_hint}", labels.cancel))
+            Paragraph::new(format!("Esc: {}", labels.cancel))
                 .style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
@@ -191,7 +186,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         return;
     }
 
-    let header_height = 2;
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let accent = colors::BLUE;
+    let header_height = 3;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -201,17 +198,22 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         ])
         .split(area);
 
-    let mut header_lines = vec![Line::from(Span::styled(
-        "Curriculum",
-        Style::default()
-            .fg(Color::Rgb(0, 122, 255))
-            .add_modifier(Modifier::BOLD),
-    ))];
-    if state.curriculum.topics.is_empty() {
-        header_lines.push(Line::from(""));
-    } else {
+    let mut header_lines = vec![
+        Line::from(Span::styled(
+            labels.curriculum,
+            Style::default()
+                .fg(accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+    if !state.curriculum.topics.is_empty() {
+        let sort_label = match state.curriculum.sort_by {
+            CurriculumSortBy::Progression => labels.sort_progression,
+            CurriculumSortBy::Score => labels.sort_score,
+        };
         header_lines.push(Line::from(Span::styled(
-            format!("Sort: {}", state.curriculum.sort_by.label()),
+            format!("{}: {}", labels.sort, sort_label),
             Style::default().fg(Color::DarkGray),
         )));
     }
@@ -220,8 +222,8 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     let items: Vec<ListItem> = if state.curriculum.topics.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
-            "No curriculum loaded. Press 'g' to generate.",
-            Style::default().fg(Color::Yellow),
+            labels.no_curriculum_loaded,
+            Style::default().fg(colors::YELLOW),
         )))]
     } else {
         state
@@ -251,19 +253,30 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     let list = List::new(items).highlight_symbol("> ").highlight_style(
         Style::default()
-            .fg(Color::Rgb(0, 122, 255))
+            .fg(colors::BLUE)
             .add_modifier(Modifier::BOLD),
     );
 
     frame.render_stateful_widget(list, chunks[1], &mut state.curriculum.list_state);
 
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let sort_label = match state.curriculum.sort_by {
+        CurriculumSortBy::Progression => labels.sort_progression,
+        CurriculumSortBy::Score => labels.sort_score,
+    };
     let help = if state.curriculum.topics.is_empty() {
-        let model_hint = current_model_hint(state);
-        format!("g: generate | m: change model {model_hint} | Esc: back")
+        format!("g: {} | Esc: {}", labels.generate_label, labels.back)
     } else {
         format!(
-            "↑↓: navigate | Enter: review | s: sort ({}) | a: add 5 | x: delete | r: reset | m: model | Esc: back",
-            state.curriculum.sort_by.label()
+            "↑↓/wheel: {} | Enter: {} | s: {} ({}) | a: {} | x: {} | r: {} | Esc: {}",
+            labels.navigate,
+            labels.docs,
+            labels.sort,
+            sort_label,
+            labels.add_topics_label,
+            labels.delete_label,
+            labels.reset_label,
+            labels.back,
         )
     };
     frame.render_widget(
@@ -323,9 +336,6 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Char('g') => {
             generate_curriculum(state).await?;
         }
-        KeyCode::Char('m') => {
-            jump_to_model_selection(state);
-        }
         KeyCode::Char('r') if !state.curriculum.topics.is_empty() => {
             state.curriculum.pending_reset = true;
         }
@@ -350,6 +360,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                     state.docs.list_state.select(Some(index));
                 }
                 docs::start_viewing(state, topic);
+                state.docs.return_to = Some(View::Curriculum);
                 state.view = View::Docs;
             }
         }
@@ -360,11 +371,11 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
 
 fn score_style(score: f64) -> Style {
     if score >= 80.0 {
-        Style::default().fg(Color::Green)
+        Style::default().fg(colors::GREEN)
     } else if score > 0.0 {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(colors::YELLOW)
     } else {
-        Style::default().fg(Color::Rgb(0, 122, 255))
+        Style::default().fg(colors::BLUE)
     }
 }
 
@@ -380,18 +391,6 @@ fn generation_levels(state: &AppState) -> Vec<String> {
         .skip(start)
         .map(|l| l.to_string())
         .collect()
-}
-
-fn current_model_hint(state: &AppState) -> String {
-    state
-        .config
-        .as_ref()
-        .and_then(|c| {
-            c.providers
-                .get(&c.active_provider)
-                .map(|p| format!("({} / {})", c.active_provider.as_str(), p.model()))
-        })
-        .unwrap_or_else(|| "(no model)".to_string())
 }
 
 pub async fn generate_curriculum(state: &mut AppState) -> Result<()> {
@@ -457,23 +456,6 @@ pub async fn reset_and_generate_curriculum(state: &mut AppState) -> Result<()> {
     Ok(())
 }
 
-async fn cleanup_abstract_topics(
-    db: &crate::db::Database,
-    topics: Vec<Topic>,
-) -> Result<Vec<Topic>> {
-    let mut kept = Vec::with_capacity(topics.len());
-    for topic in topics {
-        if is_abstract_topic_name(&topic.name) {
-            let _ = db.curriculum().delete_by_topic_id(&topic.id).await;
-            let _ = db.progress().delete_by_topic_id(&topic.id).await;
-            let _ = db.reviews().remove_by_topic_id(&topic.id).await;
-        } else {
-            kept.push(topic);
-        }
-    }
-    Ok(kept)
-}
-
 async fn delete_selected_topic(state: &mut AppState) -> Result<()> {
     if let Some(topic) = state.curriculum.pending_delete.take() {
         state.db.curriculum().delete_by_topic_id(&topic.id).await?;
@@ -527,7 +509,7 @@ pub async fn extend_curriculum(state: &mut AppState, count: usize) -> Result<()>
     tokio::spawn(async move {
         let result: Result<Vec<Topic>> = async {
             let model = create_llm_model(&config)?;
-            let mut extension = model.extract::<CurriculumExtension>(&prompt).await?;
+            let mut extension = extract_typed::<CurriculumExtension>(model.as_ref(), &prompt, DEFAULT_MAX_TOKENS).await?;
             for (index, topic) in extension.topics.iter_mut().enumerate() {
                 if topic.target_lang.is_empty() {
                     topic.target_lang = target_language.clone();

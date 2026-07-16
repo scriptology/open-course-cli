@@ -28,13 +28,15 @@ Main hub after onboarding. Available keys:
 
 | Key | Action |
 |-----|--------|
-| `n` | **New topic** — start a session with the next untouched curriculum topic. If the curriculum is empty, opens the Curriculum view. If every topic has already been practiced, the curriculum is extended by 3 new topics. |
-| `r` | **Review** — open a list of all touched topics (topics with progress). |
+| `n` | **New topic** — start the next balanced session: a due review (weakest decayed topic) or the next untouched curriculum topic; every 3rd session is a review when topics are due. If the curriculum is empty, opens the Curriculum view; if there is nothing to review or learn, the curriculum is extended by 5 new topics. |
 | `d` | **Docs** — browse touched topics and view their theory docs. |
 | `c` | **Curriculum** — view the full curriculum. |
 | `p` | **Pairs** — switch between language pairs or add a new one. |
 | `s` | **Settings** — edit profile, provider, batch size, hint mode. |
 | `q` | Quit. |
+| `↑`/`↓` | Show and move the selector in the **Weak topics** block (top 5 weakest topics). |
+| `Enter` | Start a review session for the selected weak topic. |
+| `Esc` | Hide the weak-topics selector. |
 
 If the app starts and there is no curriculum, it redirects to the Curriculum view automatically.
 
@@ -81,8 +83,7 @@ Available keys:
 | `r` | Reset curriculum, progress, and reviews, then regenerate (only when non-empty). |
 | `a` | Add 5 new topics extending the existing curriculum (only when non-empty). |
 | `s` | Toggle sort: progression vs score (only when non-empty). |
-| `m` | Change the current model (opens Settings > Provider > Model). |
-| `Enter` | Open the selected topic in Docs. |
+| `Enter` | Open the selected topic in Docs (`Esc` there returns to this list). |
 | `Esc` | Back to Dashboard. |
 
 Curriculum generation runs in parallel by CEFR level. The screen shows per-level progress: each level displays whether it is waiting, thinking/writing, or complete.
@@ -92,10 +93,14 @@ Curriculum generation runs in parallel by CEFR level. The screen shows per-level
 ## New Topic Session (`n`)
 
 1. App looks at the curriculum and progress.
-2. It picks the first topic that has no progress record (`last_practiced` is None).
-3. If all curriculum topics are already touched, the app asks the LLM to generate 3 new topics that continue the existing curriculum, taking into account the user's progress and weak areas. These topics are appended to the curriculum.
-4. A batch of exercises is generated for the selected topic (using `batch_size` from preferences). All exercises in the batch are generated in a single LLM request.
-5. The user sees translation sentences one by one, types the translation, and presses `Enter` to move to the next exercise.
+2. It balances new material against spaced review (`pick_next_session_topic`):
+   - **Review candidate** — practiced topics whose effective mastery decayed below 50 (mastery decays ~5%/day since `last_practiced`), weakest first.
+   - **New candidate** — the first curriculum topic with no progress record (`last_practiced` is None).
+   - With both candidates present, every 3rd session is a review (every 2nd when 5+ topics are due); with only one kind, that kind is taken.
+3. If there is nothing to review and nothing new, the app asks the LLM to generate 5 new topics that continue the existing curriculum, taking into account the user's progress and weak areas. These topics are appended to the curriculum.
+4. The loading screen shows what was picked: "Review: {topic}" or "New topic: {topic}".
+5. A batch of exercises is generated for the selected topic (using `batch_size` from preferences). All exercises in the batch are generated in a single LLM request.
+6. The user sees translation sentences one by one, types the translation, and presses `Enter` to move to the next exercise.
 
 During a session:
 
@@ -105,28 +110,21 @@ During a session:
 
 ---
 
-## Review (`r`)
-
-Shows all touched topics (topics with `last_practiced` set), not only weak ones.
-
-- Default sort: most recently practiced first.
-- Press `s` to toggle sort mode:
-  - **Last practiced** — descending.
-  - **Lowest score** — ascending, so the weakest topics appear first.
-- Each line shows topic name, difficulty, current score, and last practiced date.
-- Press `Enter` on a topic to start a review session for that topic.
-- Press `Esc` to return to the dashboard.
-
----
-
 ## Docs (`d`)
 
 - Lists touched topics (or all curriculum topics if nothing has been practiced yet).
 - `s` toggles sort.
 - `Enter` opens the selected topic's AI-generated explanation.
-- In the topic view, `↑/↓` scrolls, `e` regenerates the review, and `p` starts a practice session for that topic.
+- In the topic view, `↑/↓` or the mouse wheel scrolls, `e` regenerates the review, and `p` starts a practice session for that topic.
 - Cache is used when available; otherwise the explanation is generated live.
-- Press `Esc` to go back.
+- Press `Esc` to go back. When Docs was opened directly from another screen (Enter on a topic in Curriculum, or `d` on the session report), `Esc` returns to that screen instead of the docs list.
+
+### Mouse: scroll vs text selection
+
+On the Report, Docs, and Curriculum screens the mouse wheel scrolls the content (or moves the list selection), while the command bar stays pinned at the bottom. Because the terminal sends all mouse activity to the app in this mode, plain drag-selection is disabled; you have two ways to copy text:
+
+- Press `m` to toggle mouse capture off — drag and copy natively, then press `m` again to get wheel scrolling back. The hint bar shows which mode is active.
+- In most terminals, Shift+drag (Option+drag in iTerm2) selects text even while mouse capture is on.
 
 ---
 
@@ -137,7 +135,8 @@ After all answers are submitted, the report shows:
 - Overall session score.
 - For each exercise: the user's answer, the correct translation, errors, and commentary/feedback.
 - Updated topic scores and a list of weak topics.
-- New topics discovered during analysis.
+- New topics discovered during analysis. Only generalizable patterns (agreement rules, word-order patterns, conjugation classes) become curriculum topics; word-specific confusions (e.g. `Adjective: Caro vs Rico`) never do.
+- **Learning items** — small concrete targets (e.g. a word pair or micro-pattern such as `pequeño/pequeña`) that do not deserve a full topic. These are stored separately in the `learning_items` table, listed in the report under "Added to review", and automatically sprinkled into future exercises so weak micro-points keep reappearing. Re-discovering an existing item does not reset its score.
 
 Available keys:
 
@@ -146,8 +145,9 @@ Available keys:
 | `n` | **New topic** — start a session with the next untouched topic. |
 | `r` | **Repeat** — start a new session with the same topic. |
 | `d` | **Docs** — open the theory documentation for the current topic. |
+| `m` | **Mouse mode** — toggle between wheel scrolling and native text selection. |
 | `Esc` | Return to the dashboard. |
-| `↑/↓` | Scroll if the report is long. |
+| `↑/↓` or wheel | Scroll if the report is long. |
 
 ---
 

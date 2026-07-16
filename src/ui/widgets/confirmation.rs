@@ -2,6 +2,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use crate::ui::colors;
 
 pub fn draw_confirmation(
     frame: &mut ratatui::Frame,
@@ -17,10 +18,10 @@ pub fn draw_confirmation(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(0, 122, 255)))
+        .border_style(Style::default().fg(colors::BLUE))
         .title_style(
             Style::default()
-                .fg(Color::Rgb(0, 122, 255))
+                .fg(colors::BLUE)
                 .add_modifier(Modifier::BOLD),
         );
 

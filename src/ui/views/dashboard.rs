@@ -1,3 +1,5 @@
+use chrono::Utc;
+
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -7,15 +9,16 @@ use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap};
 use crate::app::{AppState, View};
 use crate::config::OpenCourseConfig;
 use crate::core::dashboard::{
-    CourseProgress, DailyActivity, DifficultyProgress, get_course_progress, get_daily_activity,
-    get_progress_by_difficulty,
+    CourseProgress, DailyActivity, LevelProgress, get_course_progress, get_daily_activity,
+    get_progress_by_level,
 };
 use crate::core::session::{get_due_review_topics, get_weak_review_topics};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
-use crate::ui::views::{docs, review, session};
+use crate::ui::views::{docs, session};
 use crate::ui::widgets::{ActivityChart, HintBar, Logo, StackedProgressBar};
+use crate::ui::colors;
 
 #[derive(Debug, Clone)]
 pub struct DashboardState {
@@ -26,9 +29,10 @@ pub struct DashboardState {
     pub provider: String,
     pub model: String,
     pub course: CourseProgress,
-    pub difficulty: Vec<DifficultyProgress>,
+    pub levels: Vec<LevelProgress>,
     pub activity: Vec<DailyActivity>,
     pub weak_topics: Vec<Topic>,
+    pub weak_selected: Option<usize>,
 }
 
 impl Default for DashboardState {
@@ -47,9 +51,10 @@ impl Default for DashboardState {
                 total: 0,
                 percent: 0.0,
             },
-            difficulty: Vec::new(),
+            levels: Vec::new(),
             activity: Vec::new(),
             weak_topics: Vec::new(),
+            weak_selected: None,
         }
     }
 }
@@ -59,24 +64,52 @@ impl DashboardState {
         Self::default()
     }
 
+    /// Number of weak topics shown in the dashboard block.
+    pub fn weak_visible_len(&self) -> usize {
+        self.weak_topics.len().min(5)
+    }
+
+    /// Moves the weak-topics selector with wrapping. Any arrow press activates
+    /// it: down lands on the first row, up on the last.
+    pub fn move_weak_selection(&mut self, delta: i32) {
+        let len = self.weak_visible_len();
+        if len == 0 {
+            self.weak_selected = None;
+            return;
+        }
+        let len = len as i32;
+        let next = match self.weak_selected {
+            None => {
+                if delta > 0 {
+                    0
+                } else {
+                    len - 1
+                }
+            }
+            Some(cur) => (cur as i32 + delta).rem_euclid(len),
+        };
+        self.weak_selected = Some(next as usize);
+    }
+
     pub async fn refresh(
         &mut self,
         db: &crate::db::Database,
         config: Option<&OpenCourseConfig>,
     ) -> Result<()> {
+        crate::db::curriculum::cleanup_topics(db).await?;
         let curriculum = db.curriculum().read_all().await?;
         let progress = db.progress().read_all().await?;
         let mut all_history = db.history().read_all().await?;
         all_history.sort_by(|a, b| a.date.cmp(&b.date));
 
         self.course = get_course_progress(&curriculum, &progress);
-        self.difficulty = get_progress_by_difficulty(&curriculum, &progress);
+        self.levels = get_progress_by_level(&curriculum, &progress);
         self.session_count = progress.session_count;
         self.activity = get_daily_activity(&all_history, &progress, 14, chrono::Local::now().date_naive());
 
         let cefr = config.and_then(|c| c.active_profile().self_assessed_cefr.as_deref());
-        self.due_count = get_due_review_topics(&curriculum.topics, &progress, cefr).len();
-        self.weak_topics = get_weak_review_topics(&curriculum.topics, &progress);
+        self.due_count = get_due_review_topics(&curriculum.topics, &progress, cefr, Utc::now()).len();
+        self.weak_topics = get_weak_review_topics(&curriculum.topics, &progress, Utc::now());
 
         if let Some(config) = config {
             self.profile_native = config.active_profile().native_language.clone();
@@ -89,24 +122,36 @@ impl DashboardState {
                 .unwrap_or_default();
         }
 
+        self.weak_selected = if self.weak_visible_len() > 0 {
+            Some(0)
+        } else {
+            None
+        };
+
         Ok(())
     }
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
-    let narrow = area.width < 100;
+    let narrow = area.width < 90;
     let middle_height = if narrow {
-        Constraint::Min(11)
+        Constraint::Min(12)
     } else {
-        Constraint::Length(11)
+        Constraint::Length(14)
+    };
+
+    let weak_constraint = if narrow {
+        Constraint::Length(7)
+    } else {
+        Constraint::Min(4)
     };
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6),
+            Constraint::Length(5),
             middle_height,
-            Constraint::Min(4),
+            weak_constraint,
             Constraint::Length(1),
         ])
         .split(area);
@@ -118,13 +163,13 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
 
-    draw_top(frame, top_area, state);
+    draw_top(frame, top_area, state, labels);
     draw_middle(frame, middle_area, state, labels);
     draw_weak_topics(frame, weak_area, state, labels);
-    draw_hint_bar(frame, hint_area, labels, &state.dashboard.model);
+    draw_hint_bar(frame, hint_area, state, labels);
 }
 
-fn draw_top(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+fn draw_top(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
     let block = Block::default().padding(Padding::new(1, 1, 1, 0));
     let inner = block.inner(area);
     block.render(area, frame.buffer_mut());
@@ -135,10 +180,10 @@ fn draw_top(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         .split(inner);
 
     frame.render_widget(Logo, chunks[0]);
-    frame.render_widget(profile_info(state), chunks[1]);
+    frame.render_widget(profile_info(state, labels), chunks[1]);
 }
 
-fn profile_info(state: &AppState) -> Paragraph<'static> {
+fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
     let config = state.config.as_ref();
     let native = if state.dashboard.profile_native.is_empty() {
         "-".to_string()
@@ -164,31 +209,31 @@ fn profile_info(state: &AppState) -> Paragraph<'static> {
         .and_then(|c| c.active_profile().self_assessed_cefr.as_ref())
         .map(|c| {
             Span::styled(
-                format!(" | Level: {}", c),
-                Style::default().fg(Color::Yellow),
+                format!(" | {}: {}", labels.level_label, c),
+                Style::default().fg(colors::YELLOW),
             )
         })
         .unwrap_or_else(|| Span::raw(""));
 
     let text = Text::from(vec![
         Line::from(vec![
-            Span::styled("Learning: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}: ", labels.learning), Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(format!("{} → {}", native, target)),
             cefr,
         ]),
         Line::from(vec![
-            Span::styled("Sessions: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}: ", labels.sessions), Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(state.dashboard.session_count.to_string()),
         ]),
         Line::from(vec![
             Span::styled(
-                "Due topics: ",
+                format!("{}: ", labels.due_topics),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(state.dashboard.due_count.to_string()),
         ]),
         Line::from(vec![
-            Span::styled("Provider: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}: ", labels.provider_label), Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(format!("{} / {}", provider, model)),
         ]),
     ]);
@@ -214,9 +259,9 @@ fn draw_middle(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels:
     draw_progress(frame, chunks[1], state, labels);
 }
 
-const COLOR_NEW: Color = Color::Rgb(0, 122, 255);
-const COLOR_IN_PROGRESS: Color = Color::Yellow;
-const COLOR_COMPLETED: Color = Color::Green;
+const COLOR_NEW: Color = colors::BLUE;
+const COLOR_IN_PROGRESS: Color = colors::YELLOW;
+const COLOR_COMPLETED: Color = colors::GREEN;
 
 fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
     let block = Block::default()
@@ -227,23 +272,21 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
     block.render(area, frame.buffer_mut());
 
     let course = &state.dashboard.course;
-    let compact = inner.height < 9;
+    let compact = inner.height < 14;
+    let levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
 
     if compact {
+        let mut constraints = vec![Constraint::Length(1), Constraint::Length(1)];
+        constraints.extend((0..levels.len()).map(|_| Constraint::Length(1)));
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
+            .constraints(constraints)
             .split(inner);
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled("Course: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
                 Span::styled(
                     format!("{} ({})", course.completed, labels.completed_label),
                     Style::default().fg(COLOR_COMPLETED),
@@ -262,23 +305,15 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
             chunks[0],
         );
 
-        let bar = StackedProgressBar::new(
-            course.not_started as f64,
-            course.in_progress as f64,
-            course.completed as f64,
-        );
-        frame.render_widget(bar, chunks[1]);
-
-        let difficulties = ["beginner", "intermediate", "advanced"];
-        for (i, difficulty) in difficulties.iter().enumerate() {
+        for (i, level) in levels.iter().enumerate() {
             let progress = state
                 .dashboard
-                .difficulty
+                .levels
                 .iter()
-                .find(|d| d.difficulty == *difficulty)
+                .find(|l| l.level == *level)
                 .cloned()
-                .unwrap_or(DifficultyProgress {
-                    difficulty: difficulty.to_string(),
+                .unwrap_or(LevelProgress {
+                    level: (*level).to_string(),
                     total: 0,
                     completed: 0,
                     in_progress: 0,
@@ -288,13 +323,13 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
 
             let row = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Length(20), Constraint::Min(0)])
+                .constraints([Constraint::Length(12), Constraint::Min(0)])
                 .split(chunks[2 + i]);
 
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
                     Span::styled(
-                        format!("{}: ", capitalize(difficulty)),
+                        format!("{}: ", level),
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(progress.completed.to_string(), Style::default().fg(COLOR_COMPLETED)),
@@ -306,34 +341,30 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
                 row[0],
             );
 
-            let diff_bar = StackedProgressBar::new(
+            let level_bar = StackedProgressBar::new(
                 progress.not_started as f64,
                 progress.in_progress as f64,
                 progress.completed as f64,
             );
-            frame.render_widget(diff_bar, row[1]);
+            frame.render_widget(level_bar, row[1]);
         }
         return;
     }
 
+    let mut constraints = vec![Constraint::Length(1), Constraint::Length(1)];
+    for _ in 0..levels.len() {
+        constraints.push(Constraint::Length(1));
+        constraints.push(Constraint::Length(1));
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
+        .constraints(constraints)
         .split(inner);
 
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Course: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(
                 format!("{} ({})", course.completed, labels.completed_label),
                 Style::default().fg(COLOR_COMPLETED),
@@ -352,24 +383,15 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
         chunks[0],
     );
 
-    let bar = StackedProgressBar::new(
-        course.not_started as f64,
-        course.in_progress as f64,
-        course.completed as f64,
-    );
-    frame.render_widget(bar, chunks[1]);
-
-    let difficulties = ["beginner", "intermediate", "advanced"];
-
-    for (i, difficulty) in difficulties.iter().enumerate() {
+    for (i, level) in levels.iter().enumerate() {
         let progress = state
             .dashboard
-            .difficulty
+            .levels
             .iter()
-            .find(|d| d.difficulty == *difficulty)
+            .find(|l| l.level == *level)
             .cloned()
-            .unwrap_or(DifficultyProgress {
-                difficulty: difficulty.to_string(),
+            .unwrap_or(LevelProgress {
+                level: (*level).to_string(),
                 total: 0,
                 completed: 0,
                 in_progress: 0,
@@ -377,13 +399,13 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
                 percent: 0.0,
             });
 
-        let label_idx = 3 + i * 2;
-        let bar_idx = 4 + i * 2;
+        let label_idx = 2 + i * 2;
+        let bar_idx = 3 + i * 2;
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(
-                    format!("{}: ", capitalize(difficulty)),
+                    format!("{}: ", level),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -404,12 +426,12 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
             chunks[label_idx],
         );
 
-        let diff_bar = StackedProgressBar::new(
+        let level_bar = StackedProgressBar::new(
             progress.not_started as f64,
             progress.in_progress as f64,
             progress.completed as f64,
         );
-        frame.render_widget(diff_bar, chunks[bar_idx]);
+        frame.render_widget(level_bar, chunks[bar_idx]);
     }
 }
 
@@ -453,15 +475,27 @@ fn draw_weak_topics(
             .weak_topics
             .iter()
             .take(5)
-            .map(|topic| {
+            .enumerate()
+            .map(|(i, topic)| {
+                let selected = state.dashboard.weak_selected == Some(i);
+                let (marker, name_style) = if selected {
+                    (
+                        "> ",
+                        Style::default()
+                            .fg(colors::BLUE)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("• ", Style::default().add_modifier(Modifier::BOLD))
+                };
                 Line::from(vec![
-                    Span::raw("• "),
+                    Span::styled(marker, name_style),
+                    Span::styled(topic.name.clone(), name_style),
                     Span::styled(
-                        topic.name.clone(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(" [{}]", topic.difficulty),
+                        format!(
+                            " [{}]",
+                            topic.level.as_deref().unwrap_or(&topic.difficulty)
+                        ),
                         Style::default().fg(Color::DarkGray),
                     ),
                 ])
@@ -474,18 +508,21 @@ fn draw_weak_topics(
         .render(inner, frame.buffer_mut());
 }
 
-fn draw_hint_bar(frame: &mut ratatui::Frame, area: Rect, labels: ReportLabels, model: &str) {
+fn draw_hint_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
+    let mut hints: Vec<(&str, &str)> = vec![
+        ("n", labels.start_session),
+        ("d", labels.docs),
+        ("c", labels.curriculum),
+        ("p", labels.pairs),
+        ("s", labels.settings),
+        ("q", labels.quit),
+    ];
+    if state.dashboard.weak_visible_len() > 0 {
+        hints.insert(0, ("Enter", labels.start_session));
+        hints.insert(0, ("↑↓", labels.select_topic));
+    }
     frame.render_widget(
-        HintBar::new(&[
-            ("n", labels.start_session),
-            ("r", labels.review),
-            ("d", labels.docs),
-            ("c", labels.curriculum),
-            ("p", labels.pairs),
-            ("s", labels.settings),
-            ("q", labels.quit),
-        ])
-        .model(model),
+        HintBar::new(&hints).model(state.dashboard.model.as_str()),
         area,
     );
 }
@@ -501,27 +538,35 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                 session::start_new_topic_session(state).await?;
             }
         }
-        KeyCode::Char('r') => {
-            review::load(state).await?;
-            state.review.return_to = View::Dashboard;
-            state.view = View::Review;
-        }
         KeyCode::Char('d') => {
             docs::load(state).await?;
+            state.docs.return_to = None;
             state.view = View::Docs;
         }
         KeyCode::Char('c') => state.view = View::Curriculum,
         KeyCode::Char('p') => state.view = View::Pairs,
         KeyCode::Char('s') => state.view = View::Settings,
+        KeyCode::Down | KeyCode::Char('j') => state.dashboard.move_weak_selection(1),
+        KeyCode::Up | KeyCode::Char('k') => state.dashboard.move_weak_selection(-1),
+        KeyCode::Enter => {
+            if let Some(sel) = state.dashboard.weak_selected {
+                if let Some(topic) = state
+                    .dashboard
+                    .weak_topics
+                    .iter()
+                    .take(5)
+                    .nth(sel)
+                    .cloned()
+                {
+                    state.view = View::Session;
+                    session::start_review_topic_session(state, topic.id).await?;
+                }
+            }
+        }
+        KeyCode::Esc => {
+            state.dashboard.weak_selected = None;
+        }
         _ => {}
     }
     Ok(())
-}
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
 }

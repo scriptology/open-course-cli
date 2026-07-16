@@ -2,6 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Gauge, Widget};
+use crate::ui::colors;
 
 pub struct ProgressBar {
     percent: u16,
@@ -16,7 +17,7 @@ impl ProgressBar {
         Self {
             percent: percent.clamp(0.0, 100.0) as u16,
             label: String::new(),
-            fg: Color::Green,
+            fg: colors::GREEN,
             show_label: false,
             block: None,
         }

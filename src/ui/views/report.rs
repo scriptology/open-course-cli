@@ -6,11 +6,12 @@ use ratatui::widgets::{Paragraph, Wrap};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::app::{AppState, View};
-use crate::core::session::{AnalysisResult, MentorSession};
+use crate::core::session::{AnalysisResult, MentorSession, SemanticVerdict};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
-use crate::ui::views::{docs, review, session};
+use crate::ui::views::{docs, session};
+use crate::ui::colors;
 
 #[derive(Debug, Clone)]
 pub struct ReportState {
@@ -30,6 +31,7 @@ impl Default for ReportState {
                 sentences: Vec::new(),
                 evaluated_topics: Vec::new(),
                 new_topics: Vec::new(),
+                new_learning_items: Vec::new(),
             },
             session: MentorSession {
                 id: String::new(),
@@ -48,6 +50,11 @@ impl Default for ReportState {
 impl ReportState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn scroll_by(&mut self, delta: i32) {
+        let max = self.max_scroll_offset as i32;
+        self.scroll_offset = (self.scroll_offset as i32 + delta).clamp(0, max) as u16;
     }
 }
 
@@ -73,9 +80,18 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     frame.render_widget(paragraph.scroll((state.report.scroll_offset, 0)), chunks[0]);
 
+    let mouse_hint = if state.mouse_capture {
+        "mouse: wheel scroll | m: select text"
+    } else {
+        "mouse: select text | m: wheel scroll"
+    };
+
     frame.render_widget(
-        Paragraph::new("↑/↓: scroll | n: new topic | r: repeat | w: review topics | d: docs | Esc: dashboard")
-            .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(format!(
+            "↑/↓: scroll | {} | n: new topic | r: repeat | d: docs | Esc: dashboard",
+            mouse_hint
+        ))
+        .style(Style::default().fg(Color::DarkGray)),
         chunks[1],
     );
 }
@@ -95,11 +111,6 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                 session::start_review_topic_session(state, topic_id).await?;
             }
         }
-        KeyCode::Char('w') => {
-            state.review.return_to = View::Report;
-            review::load(state).await?;
-            state.view = View::Review;
-        }
         KeyCode::Char('d') => {
             if let Some(topic_id) = state.report.target_topic_id.clone() {
                 docs::load(state).await?;
@@ -108,16 +119,16 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                         state.docs.list_state.select(Some(index));
                     }
                     docs::start_viewing(state, topic);
+                    state.docs.return_to = Some(View::Report);
                     state.view = View::Docs;
                 }
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            state.report.scroll_offset =
-                (state.report.scroll_offset + 1).min(state.report.max_scroll_offset);
+            state.report.scroll_by(1);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            state.report.scroll_offset = state.report.scroll_offset.saturating_sub(1);
+            state.report.scroll_by(-1);
         }
         _ => {}
     }
@@ -131,12 +142,10 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
         labels.per_exercise_results,
         Style::default()
             .add_modifier(Modifier::BOLD)
-            .fg(Color::Rgb(0, 122, 255)),
+            .fg(colors::BLUE),
     )]));
 
     for (i, sentence) in report.analysis.sentences.iter().enumerate() {
-        let has_errors = !sentence.errors.is_empty();
-
         let exercise = report
             .session
             .exercises
@@ -161,18 +170,21 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
             ),
         ];
 
-        if !has_errors {
-            student_line.push(Span::styled("✓ ", Style::default().fg(Color::Green)));
-        }
+        let (status_symbol, status_style) = match sentence.semantic_verdict {
+            SemanticVerdict::Correct => ("✓ ", Style::default().fg(colors::GREEN)),
+            SemanticVerdict::Acceptable => ("~ ", Style::default().fg(colors::YELLOW)),
+            SemanticVerdict::NeedsCorrection => ("✗ ", Style::default().fg(Color::Red)),
+        };
+        student_line.push(Span::styled(status_symbol, status_style));
 
         student_line.extend(student_translation_spans(
             &sentence.student_translation,
             &sentence.expected_translation,
-            has_errors,
+            !sentence.errors.is_empty(),
         ));
         lines.push(Line::from(student_line));
 
-        if has_errors {
+        if sentence.semantic_verdict == SemanticVerdict::NeedsCorrection {
             let mut correct_line = vec![
                 Span::raw("   "),
                 Span::styled(
@@ -185,6 +197,13 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
                 &sentence.student_translation,
             ));
             lines.push(Line::from(correct_line));
+        } else if !sentence.acceptable_translations.is_empty() {
+            let alts = sentence.acceptable_translations.join("; ");
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled("Also acceptable: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(alts),
+            ]));
         }
 
         for error in &sentence.errors {
@@ -194,7 +213,7 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
                     error.explanation.clone(),
                     Style::default()
                         .add_modifier(Modifier::ITALIC)
-                        .fg(Color::Yellow),
+                        .fg(colors::YELLOW),
                 ),
             ]));
         }
@@ -202,7 +221,7 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
         for comment in &sentence.per_sentence_feedback {
             lines.push(Line::from(vec![
                 Span::raw("   ↪ "),
-                Span::styled(comment.comment.clone(), Style::default().fg(Color::Yellow)),
+                Span::styled(comment.comment.clone(), Style::default().fg(colors::YELLOW)),
             ]));
         }
         lines.push(Line::from(""));
@@ -244,7 +263,7 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
             labels.topic_scores,
             Style::default()
                 .add_modifier(Modifier::BOLD)
-                .fg(Color::Rgb(0, 122, 255)),
+                .fg(colors::BLUE),
         )]));
         for topic in changed_topics {
             let is_new = new_topic_ids.contains(topic.topic_id.as_str());
@@ -257,7 +276,7 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
             let prev = topic.previous_score.unwrap_or(0.0);
             let delta = topic.score - prev;
             let score_color = if delta > 0.0 {
-                Color::Green
+                colors::GREEN
             } else if delta < 0.0 {
                 Color::Red
             } else {
@@ -274,7 +293,7 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
             if is_new {
                 spans.push(Span::styled(
                     format!(" ({})", labels.new_topic_label),
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(colors::YELLOW),
                 ));
             }
 
@@ -288,8 +307,24 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
                 Span::styled("0", Style::default().fg(Color::White)),
                 Span::styled(
                     format!(" ({})", labels.new_topic_label),
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(colors::YELLOW),
                 ),
+            ]));
+        }
+    }
+
+    if !report.analysis.new_learning_items.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            labels.new_learning_items_label,
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(colors::BLUE),
+        )]));
+        for item in &report.analysis.new_learning_items {
+            lines.push(Line::from(vec![
+                Span::raw("• "),
+                Span::raw(item.name.clone()),
             ]));
         }
     }
@@ -300,7 +335,7 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
             labels.weak_topics,
             Style::default()
                 .add_modifier(Modifier::BOLD)
-                .fg(Color::Rgb(0, 122, 255)),
+                .fg(colors::BLUE),
         )]));
         for topic in &report.weak_topics {
             lines.push(Line::from(vec![
@@ -341,7 +376,7 @@ fn student_translation_spans(text: &str, expected: &str, has_errors: bool) -> Ve
                 Style::default().fg(Color::Red)
             }
         } else {
-            Style::default().fg(Color::Green)
+            Style::default().fg(colors::GREEN)
         };
         spans.push(Span::styled(token.to_string(), style));
         spans.push(Span::raw(" "));
@@ -358,7 +393,7 @@ fn correct_answer_spans(text: &str, student: &str) -> Vec<Span<'static>> {
         let is_added = !is_word_in_text(token, student);
         let style = if is_added {
             Style::default()
-                .fg(Color::Green)
+                .fg(colors::GREEN)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
@@ -370,4 +405,25 @@ fn correct_answer_spans(text: &str, student: &str) -> Vec<Span<'static>> {
         spans.pop();
     }
     spans
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scroll_by_clamps_to_bounds() {
+        let mut state = ReportState::default();
+        state.max_scroll_offset = 10;
+
+        state.scroll_by(3);
+        assert_eq!(state.scroll_offset, 3);
+
+        state.scroll_by(-5);
+        assert_eq!(state.scroll_offset, 0);
+
+        state.scroll_by(100);
+        assert_eq!(state.scroll_offset, 10);
+    }
 }

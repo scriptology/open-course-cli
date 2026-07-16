@@ -16,13 +16,80 @@ pub struct CourseProgress {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DifficultyProgress {
-    pub difficulty: String,
+pub struct LevelProgress {
+    pub level: String,
     pub total: usize,
     pub completed: usize,
     pub in_progress: usize,
     pub not_started: usize,
     pub percent: f64,
+}
+
+fn level_from_topic(topic: &crate::db::curriculum::Topic) -> String {
+    topic
+        .level
+        .clone()
+        .unwrap_or_else(|| match topic.difficulty.as_str() {
+            "beginner" => "A1".to_string(),
+            "intermediate" => "B1".to_string(),
+            "advanced" => "C1".to_string(),
+            _ => "A1".to_string(),
+        })
+}
+
+pub fn get_progress_by_level(
+    curriculum: &Curriculum,
+    progress: &ProgressData,
+) -> Vec<LevelProgress> {
+    let progress_map: HashMap<_, _> = progress.topics.iter().map(|t| (&t.topic_id, t)).collect();
+    let levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
+
+    levels
+        .iter()
+        .map(|level| {
+            let topics: Vec<_> = curriculum
+                .topics
+                .iter()
+                .filter(|t| level_from_topic(t) == **level)
+                .collect();
+            let total = topics.len();
+            let mut completed = 0;
+            let mut in_progress = 0;
+            let mut not_started = 0;
+            let mut total_score = 0.0;
+
+            for topic in topics {
+                match progress_map.get(&topic.id) {
+                    None => not_started += 1,
+                    Some(pt) => {
+                        total_score += pt.score;
+                        if pt.score >= 80.0 {
+                            completed += 1;
+                        } else if pt.last_practiced.is_some() {
+                            in_progress += 1;
+                        } else {
+                            not_started += 1;
+                        }
+                    }
+                }
+            }
+
+            let percent = if total > 0 {
+                (total_score / total as f64).round()
+            } else {
+                0.0
+            };
+
+            LevelProgress {
+                level: (*level).to_string(),
+                total,
+                completed,
+                in_progress,
+                not_started,
+                percent,
+            }
+        })
+        .collect()
 }
 
 pub fn get_course_progress(curriculum: &Curriculum, progress: &ProgressData) -> CourseProgress {
@@ -63,61 +130,6 @@ pub fn get_course_progress(curriculum: &Curriculum, progress: &ProgressData) -> 
         total,
         percent,
     }
-}
-
-pub fn get_progress_by_difficulty(
-    curriculum: &Curriculum,
-    progress: &ProgressData,
-) -> Vec<DifficultyProgress> {
-    let progress_map: HashMap<_, _> = progress.topics.iter().map(|t| (&t.topic_id, t)).collect();
-    let difficulties = ["beginner", "intermediate", "advanced"];
-
-    difficulties
-        .iter()
-        .map(|difficulty| {
-            let topics: Vec<_> = curriculum
-                .topics
-                .iter()
-                .filter(|t| t.difficulty == *difficulty)
-                .collect();
-            let total = topics.len();
-            let mut completed = 0;
-            let mut in_progress = 0;
-            let mut not_started = 0;
-            let mut total_score = 0.0;
-
-            for topic in topics {
-                match progress_map.get(&topic.id) {
-                    None => not_started += 1,
-                    Some(pt) => {
-                        total_score += pt.score;
-                        if pt.score >= 80.0 {
-                            completed += 1;
-                        } else if pt.last_practiced.is_some() {
-                            in_progress += 1;
-                        } else {
-                            not_started += 1;
-                        }
-                    }
-                }
-            }
-
-            let percent = if total > 0 {
-                (total_score / total as f64).round()
-            } else {
-                0.0
-            };
-
-            DifficultyProgress {
-                difficulty: difficulty.to_string(),
-                total,
-                completed,
-                in_progress,
-                not_started,
-                percent,
-            }
-        })
-        .collect()
 }
 
 pub fn get_session_trend(history: &[SessionSummary], limit: usize) -> Vec<f64> {

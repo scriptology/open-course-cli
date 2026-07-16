@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
 
 pub struct Card<'a> {
     title: String,
@@ -33,6 +33,7 @@ impl<'a> Widget for Card<'a> {
         block.render(area, buf);
         Paragraph::new(Text::from(self.lines))
             .style(Style::default().fg(Color::White))
+            .wrap(Wrap { trim: true })
             .render(inner, buf);
     }
 }

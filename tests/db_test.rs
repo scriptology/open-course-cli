@@ -4,6 +4,7 @@ use open_course_cli::db::{
     Database,
     curriculum::{Difficulty, Topic},
     history::SessionSummary,
+    learning_items::{LearningItem, LearningItemsTable},
     progress::ProgressTopic,
     reviews::TopicReview,
 };
@@ -56,6 +57,9 @@ async fn progress_crud() {
     let topic = ProgressTopic {
         topic_id: "t1".to_string(),
         score: 75.0,
+        mastery: 75.0,
+        difficulty_estimate: 0.0,
+        practice_count: 2,
         last_practiced: Some("2024-01-01T00:00:00Z".to_string()),
     };
 
@@ -157,4 +161,47 @@ async fn reviews_crud() {
     table.remove_by_topic_id("t1").await.unwrap();
     let fetched = table.get_by_topic_id("t1").await.unwrap();
     assert!(fetched.is_none());
+}
+
+#[tokio::test]
+async fn learning_items_crud() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::connect(&dir.path().join("db")).await.unwrap();
+    let table = db.learning_items();
+
+    let item = LearningItem {
+        id: "es-pequeno-pequena".to_string(),
+        name: "pequeño/pequeña".to_string(),
+        description: "Adjective agreement".to_string(),
+        level: Some("A1".to_string()),
+        target_lang: "es".to_string(),
+        native_lang: "ru".to_string(),
+        score: 0.0,
+        last_practiced: None,
+        practice_count: 0,
+    };
+
+    table.upsert(&item).await.unwrap();
+    let all = table.read_all().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].id, "es-pequeno-pequena");
+
+    let updated = LearningItem {
+        score: 45.0,
+        last_practiced: Some("2024-01-01T00:00:00Z".to_string()),
+        practice_count: 1,
+        ..item.clone()
+    };
+    table.upsert(&updated).await.unwrap();
+    let all = table.read_all().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].score, 45.0);
+
+    let weak = LearningItemsTable::weakest(&all, 1);
+    assert_eq!(weak.len(), 1);
+    assert_eq!(weak[0].id, "es-pequeno-pequena");
+
+    table.reset().await.unwrap();
+    let all = table.read_all().await.unwrap();
+    assert!(all.is_empty());
 }

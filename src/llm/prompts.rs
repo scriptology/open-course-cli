@@ -1,6 +1,7 @@
 use crate::config::profile::UserProfile;
 use crate::core::session::{Exercise, NewTopicRef};
 use crate::db::curriculum::{CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty};
+use crate::db::learning_items::LearningItem;
 use crate::db::progress::ProgressTopic;
 
 pub fn build_exercise_prompt(
@@ -8,7 +9,9 @@ pub fn build_exercise_prompt(
     target_topics: &[Topic],
     side_topics: &[Topic],
     candidate_topics: &[Topic],
+    forced_learning_items: &[LearningItem],
     count: u32,
+    recent_success_rate: f64,
 ) -> String {
     let target_names = target_topics
         .iter()
@@ -45,6 +48,14 @@ pub fn build_exercise_prompt(
         ))
         .unwrap_or_default();
 
+    let recent_rate_pct = (recent_success_rate * 100.0).round() as i32;
+    let adaptive_hint = format!(
+        "Recent session success rate: {recent_rate_pct}%. Target success rate: 80%. \
+         If recent rate is below 75%, make sentences slightly easier. \
+         If recent rate is above 85%, make sentences slightly more challenging. \
+         Keep the overall complexity appropriate to the student's CEFR level."
+    );
+
     let difficulty_hint = if target_topics.is_empty() {
         "general".to_string()
     } else {
@@ -61,6 +72,19 @@ pub fn build_exercise_prompt(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let learning_items_hint = if forced_learning_items.is_empty() {
+        String::new()
+    } else {
+        let items = forced_learning_items
+            .iter()
+            .map(|li| format!("- {} ({})", li.name, li.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\nThe following learning items need extra practice. Try to naturally include ONE of them in each exercise, without distorting the target topics:\n{items}\n"
+        )
+    };
+
     format!(
         "You are a language tutor. Generate {count} connected translation exercises from {native} to {target}.
 
@@ -70,16 +94,18 @@ Side topics: {side_names}
 Native language: {native}
 {cefr_hint}
 {age_hint}
+{adaptive_hint}
 
 Use ONLY the following topic IDs when tagging exercises. Do not invent new IDs.
-{topic_list}
+{topic_list}{learning_items_hint}
 
 The {count} sentences should form a short coherent dialogue or mini-story. Keep each sentence natural and focused on the target topics (or general vocabulary if no topics are specified). Adjust the overall complexity to the student's CEFR level if provided.
 
 For each exercise output a JSON object with these fields:
 - id: unique string
 - targetSentence: sentence in {native} for the student to translate
-- expectedTranslation: correct translation in {target}
+- expectedTranslation: one natural correct translation in {target}
+- acceptableTranslations: array of 1–3 additional valid translations in {target} that are semantically equivalent but may use different wording, synonyms, or word order. Include only genuinely equivalent variants.
 - targetTopicIds: array of target topic ids from the list above (use empty array if none apply)
 - sideTopicIds: array of side topic ids from the list above (use empty array if none apply)
 - expectedPatterns: grammar patterns the student should use
@@ -119,7 +145,7 @@ pub fn build_batch_analysis_prompt(
         .join("\n");
 
     format!(
-        r#"You are a strict grammar tutor. The student translated {n} sentence(s). Evaluate each one.
+        r#"You are a strict grammar tutor. The student translated {n} sentence(s). Evaluate each one for semantic equivalence and correctness, not for matching a single wording.
 
 {blocks}
 
@@ -129,23 +155,36 @@ Use ONLY the following topic IDs when tagging errors. Do not invent new IDs.
 Evaluation rules:
 - Do NOT penalize or report missing accents, diacritics, punctuation marks (¡, ¿, ., ,, etc.), or capitalization differences.
 - Treat "i" and "í", "a" and "á", "e" and "é", etc. as equivalent.
-- Focus errors on grammar, vocabulary, word order, and missing or wrong words.
+- Accept synonyms, alternative word order, and natural paraphrases as correct or acceptable.
+- Report an error ONLY when the student's translation is semantically different, grammatically wrong, or misses/adds a meaning-bearing word.
 - Keep feedback concise and actionable.
-- Each error type must be exactly one of: "critical" | "major" | "minor".
-- For each error, include `topicIds` from the list above that the error relates to. If the error involves a concept not covered by the list, also include `newTopics` with `name`, `description`, and `level` (CEFR, e.g. "A1").
+- Each error type must be exactly one of: "critical" | "major" | "minor" | "spelling".
+- Use type "spelling" ONLY for simple typos/misspellings where the intended word is obvious (e.g. "Everty" → "Every"). Spelling errors affect the score but must NOT produce newTopics.
+- For each error, include `topicIds` from the list above that the error relates to. If the error involves a concept not covered by the list, also include `newTopics` with `name`, `description`, and `level` (CEFR, e.g. "A1"). Do NOT include `newTopics` for spelling errors.
+
+Semantic verdict rules:
+- "correct" — the translation is fully equivalent and natural.
+- "acceptable" — the meaning is preserved but there is a minor stylistic or less natural choice; include a minor or spelling note if relevant.
+- "needsCorrection" — the meaning is wrong or grammar is significantly off; list errors.
 
 New topic rules (CRITICAL):
-- Each newTopic must be a SPECIFIC, narrow grammar or vocabulary point that can be practiced through translation exercises.
+- Each newTopic must be a generalizable, reusable grammar or usage pattern that can be practiced through many translation exercises (e.g. an agreement rule, a word-order pattern, a verb conjugation class).
 - AVOID broad, abstract categories such as "Common Spelling Errors", "Grammar Basics", "Vocabulary", "Advanced Topics", "Common Mistakes", or "Fundamentals".
-- Good examples: "Relative pronouns: who vs which", "Spelling: experience vs expertise", "Word order in subordinate clauses", "Preterite of irregular verbs: venir".
-- Bad examples: "Common Spelling Errors", "Grammar mistakes", "Basic vocabulary".
-- The name should be 2-6 words and describe a concrete rule, pattern, or contrast.
+- AVOID topics tied to a single word or a single word pair. A confusion between specific words (e.g. "Adjective: Caro vs Rico") is NOT a curriculum topic: still report it in newTopics with the word-level name, and the app will store it as a vocabulary review item instead of a topic.
+- Good topic examples: "Adjective gender agreement", "Word order in subordinate clauses", "Preterite of irregular verbs: venir", "Ser vs estar with adjectives".
+- Bad topic examples: "Common Spelling Errors", "Grammar mistakes", "Basic vocabulary", "Adjective: Caro vs Rico".
+- The name should be 2-6 words and describe a concrete rule or pattern.
+- Do NOT create newTopics for spelling-only errors.
 
 Return a JSON object exactly in this shape:
 {{
   "sentences": [
     {{
       "sentenceNumber": 1,
+      "studentTranslation": "...",
+      "expectedTranslation": "...",
+      "acceptableTranslations": ["...", "..."],
+      "semanticVerdict": "correct",
       "errors": [{{ "type": "major", "pattern": "...", "explanation": "...", "topicIds": ["..."], "newTopics": [{{ "name": "...", "description": "...", "level": "A1" }}] }}],
       "perSentenceFeedback": [{{ "comment": "..." }}]
     }}

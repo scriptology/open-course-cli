@@ -19,6 +19,8 @@ use crate::llm::streaming::LlmStream;
 
 const LLM_MAX_RETRIES: usize = 3;
 
+pub(crate) const DEFAULT_MAX_TOKENS: u32 = 8192;
+
 fn is_provider_unavailable(msg: &str) -> bool {
     msg.contains("Inference is temporarily unavailable")
         || msg.contains("failover_exhausted")
@@ -52,23 +54,45 @@ fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
 
 #[async_trait]
 pub trait LlmClient: Send + Sync + Any {
-    async fn prompt(&self, prompt: &str, system: Option<&str>) -> Result<String>;
-    async fn stream_prompt(&self, prompt: &str, system: Option<&str>) -> Result<LlmStream>;
+    async fn prompt(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<String>;
+    async fn stream_prompt(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<LlmStream>;
 
     fn as_any(&self) -> &dyn Any;
 }
 
-impl dyn LlmClient {
-    pub async fn extract<T: DeserializeOwned + JsonSchema + Send + Sync + Serialize + 'static>(
-        &self,
-        prompt: &str,
-    ) -> Result<T> {
-        let client = self
-            .as_any()
-            .downcast_ref::<RigClient>()
-            .ok_or_else(|| AppError::Llm("Unsupported LLM client implementation".to_string()))?;
-        client.extract_typed::<T>(prompt).await
+/// Helper to run a typed structured-extraction call on any `LlmClient`.
+/// Works by downcasting to the known concrete implementations.
+pub(crate) async fn extract_typed<
+    T: DeserializeOwned + JsonSchema + Send + Sync + Serialize + 'static,
+>(
+    client: &dyn LlmClient,
+    prompt: &str,
+    max_tokens: u32,
+) -> Result<T> {
+    let rig = as_rig_client(client).ok_or_else(|| {
+        AppError::Llm("Unsupported LLM client implementation for structured extraction".to_string())
+    })?;
+    rig.extract_typed_impl::<T>(prompt, max_tokens).await
+}
+
+fn as_rig_client(client: &dyn LlmClient) -> Option<&RigClient> {
+    if let Some(rig) = client.as_any().downcast_ref::<RigClient>() {
+        return Some(rig);
     }
+    if let Some(diag) = client.as_any().downcast_ref::<crate::llm::diagnostics::DiagnosticLlmClient>() {
+        return as_rig_client(diag.inner());
+    }
+    None
 }
 
 enum RigClientInner {
@@ -149,9 +173,12 @@ impl RigClient {
         })
     }
 
-    async fn extract_typed<T: DeserializeOwned + JsonSchema + Send + Sync + Serialize + 'static>(
+    pub(crate) async fn extract_typed_impl<
+        T: DeserializeOwned + JsonSchema + Send + Sync + Serialize + 'static,
+    >(
         &self,
         prompt: &str,
+        max_tokens: u32,
     ) -> Result<T> {
         let mut last_err = None;
         for attempt in 1..=LLM_MAX_RETRIES {
@@ -160,14 +187,14 @@ impl RigClient {
                     let extractor = ExtractorBuilder::<T, _>::new(
                         openai::completion::CompletionModel::new(client.clone(), &self.model),
                     )
-                    .max_tokens(8192)
+                    .max_tokens(max_tokens as u64)
                     .build();
                     extractor.extract(prompt).await
                 }
                 RigClientInner::Anthropic(client) => {
                     client
                         .extractor::<T>(&self.model)
-                        .max_tokens(8192)
+                        .max_tokens(max_tokens as u64)
                         .build()
                         .extract(prompt)
                         .await
@@ -206,10 +233,11 @@ impl RigClient {
         client: &openai::Client,
         model: &str,
         system: Option<&str>,
+        max_tokens: u32,
     ) -> Agent<openai::completion::CompletionModel> {
         let builder =
             openai::completion::CompletionModel::new(client.clone(), model).into_agent_builder();
-        let builder = builder.max_tokens(8192);
+        let builder = builder.max_tokens(max_tokens as u64);
         let builder = if let Some(system) = system {
             builder.preamble(system)
         } else {
@@ -222,8 +250,9 @@ impl RigClient {
         client: &anthropic::Client,
         model: &str,
         system: Option<&str>,
+        max_tokens: u32,
     ) -> Agent<anthropic::completion::CompletionModel> {
-        let mut builder = client.agent(model).max_tokens(8192);
+        let mut builder = client.agent(model).max_tokens(max_tokens as u64);
         if let Some(system) = system {
             builder = builder.preamble(system);
         }
@@ -234,6 +263,7 @@ impl RigClient {
         client: &gemini::Client,
         model: &str,
         system: Option<&str>,
+        _max_tokens: u32,
     ) -> Agent<gemini::completion::CompletionModel> {
         let mut builder = client.agent(model);
         if let Some(system) = system {
@@ -245,22 +275,27 @@ impl RigClient {
 
 #[async_trait]
 impl LlmClient for RigClient {
-    async fn prompt(&self, prompt: &str, system: Option<&str>) -> Result<String> {
+    async fn prompt(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<String> {
         let mut last_err = None;
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
                 RigClientInner::OpenAi(client) => {
-                    Self::openai_agent(client, &self.model, system)
+                    Self::openai_agent(client, &self.model, system, max_tokens)
                         .prompt(prompt)
                         .await
                 }
                 RigClientInner::Anthropic(client) => {
-                    Self::anthropic_agent(client, &self.model, system)
+                    Self::anthropic_agent(client, &self.model, system, max_tokens)
                         .prompt(prompt)
                         .await
                 }
                 RigClientInner::Gemini(client) => {
-                    Self::gemini_agent(client, &self.model, system)
+                    Self::gemini_agent(client, &self.model, system, max_tokens)
                         .prompt(prompt)
                         .await
                 }
@@ -286,7 +321,12 @@ impl LlmClient for RigClient {
             .unwrap_or_else(|| AppError::Llm("Failed to prompt model after retries".to_string())))
     }
 
-    async fn stream_prompt(&self, prompt: &str, system: Option<&str>) -> Result<LlmStream> {
+    async fn stream_prompt(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<LlmStream> {
         match &self.inner {
             RigClientInner::OpenAi(_) => {
                 crate::llm::streaming::stream_openai_compatible(
@@ -296,6 +336,7 @@ impl LlmClient for RigClient {
                     system,
                     prompt,
                     self.reasoning_effort.as_deref(),
+                    max_tokens,
                 )
                 .await
             }
@@ -306,11 +347,12 @@ impl LlmClient for RigClient {
                     &self.model,
                     system,
                     prompt,
+                    max_tokens,
                 )
                 .await
             }
             RigClientInner::Gemini(_) => {
-                let text = self.prompt(prompt, system).await?;
+                let text = self.prompt(prompt, system, max_tokens).await?;
                 Ok(crate::llm::streaming::stream_from_text(text))
             }
         }

@@ -15,6 +15,7 @@ use crate::llm::model_listing::{ModelInfo, list_models};
 use crate::llm::provider::ProviderMeta;
 use crate::ui::views::model_check;
 use crate::ui::widgets::Logo;
+use crate::ui::colors;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -307,7 +308,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     }
     let footer_height = footer_lines.len() as u16;
 
-    let accent = Color::Rgb(0, 122, 255);
+    let accent = colors::BLUE;
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -518,7 +519,7 @@ fn render_model_step(
     if state.onboarding.model_picker_loading {
         frame.render_widget(
             Paragraph::new("Fetching available models from provider...")
-                .style(Style::default().fg(Color::Yellow)),
+                .style(Style::default().fg(colors::YELLOW)),
             area,
         );
         return;
@@ -577,7 +578,7 @@ fn render_model_step(
 
     let list = List::new(items).highlight_symbol("> ").highlight_style(
         Style::default()
-            .fg(Color::Rgb(0, 122, 255))
+            .fg(colors::BLUE)
             .add_modifier(Modifier::BOLD),
     );
 

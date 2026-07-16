@@ -1,13 +1,15 @@
 use lancedb::connect;
 
-use crate::db::curriculum::{CurriculumTable, TABLE_NAME};
+use crate::db::curriculum::{CurriculumTable, TABLE_NAME as CURRICULUM_TABLE};
 use crate::db::history::HistoryTable;
+use crate::db::learning_items::LearningItemsTable;
 use crate::db::progress::ProgressTable;
 use crate::db::reviews::ReviewsTable;
 use crate::error::Result;
 
 pub mod curriculum;
 pub mod history;
+pub mod learning_items;
 pub mod metadata;
 pub mod progress;
 pub mod reviews;
@@ -19,6 +21,7 @@ pub struct Database {
     progress: ProgressTable,
     history: HistoryTable,
     reviews: ReviewsTable,
+    learning_items: LearningItemsTable,
 }
 
 impl Database {
@@ -29,18 +32,20 @@ impl Database {
         let progress = ProgressTable::open(&connection).await?;
         let history = HistoryTable::open(&connection).await?;
         let reviews = ReviewsTable::open(&connection).await?;
+        let learning_items = LearningItemsTable::open(&connection).await?;
         Ok(Self {
             curriculum,
             progress,
             history,
             reviews,
+            learning_items,
         })
     }
 
     pub async fn recreate_curriculum_table(path: &std::path::Path) -> Result<()> {
         let uri = path.to_string_lossy().to_string();
         let connection = connect(&uri).execute().await?;
-        let _ = connection.drop_table(TABLE_NAME, &[]).await;
+        let _ = connection.drop_table(CURRICULUM_TABLE, &[]).await;
         Ok(())
     }
 
@@ -58,5 +63,9 @@ impl Database {
 
     pub fn reviews(&self) -> ReviewsTable {
         self.reviews.clone()
+    }
+
+    pub fn learning_items(&self) -> LearningItemsTable {
+        self.learning_items.clone()
     }
 }

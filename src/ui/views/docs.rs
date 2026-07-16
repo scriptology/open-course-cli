@@ -22,9 +22,32 @@ use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_topic_review;
 use crate::llm::prompts::build_topic_review_prompt;
 use crate::ui::labels::{get_docs_labels, native_language_code};
-use crate::ui::views::SortBy;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::OpenCourseStyleSheet;
+use crate::ui::colors;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SortBy {
+    #[default]
+    LastPracticed,
+    Score,
+}
+
+impl SortBy {
+    pub fn toggle(self) -> Self {
+        match self {
+            SortBy::Score => SortBy::LastPracticed,
+            SortBy::LastPracticed => SortBy::Score,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortBy::Score => "score",
+            SortBy::LastPracticed => "last practiced",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct DocsState {
@@ -37,11 +60,19 @@ pub struct DocsState {
     pub saved: bool,
     pub scroll_offset: u16,
     pub max_scroll_offset: u16,
+    /// Where to go on Esc from the topic view when docs was opened directly
+    /// (e.g. from the curriculum list). `None` means the usual docs list flow.
+    pub return_to: Option<crate::app::View>,
 }
 
 impl DocsState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn scroll_by(&mut self, delta: i32) {
+        let max = self.max_scroll_offset as i32;
+        self.scroll_offset = (self.scroll_offset as i32 + delta).clamp(0, max) as u16;
     }
 
     pub fn reset(&mut self) {
@@ -53,6 +84,7 @@ impl DocsState {
         self.saved = false;
         self.scroll_offset = 0;
         self.max_scroll_offset = 0;
+        self.return_to = None;
     }
 }
 
@@ -121,7 +153,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
@@ -131,13 +163,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         let topic = state.docs.viewing_topic.clone().unwrap();
         let header = Text::from(vec![
             Line::from(Span::styled(
-                "Docs",
+                labels.title,
                 Style::default()
-                    .fg(Color::Rgb(0, 122, 255))
+                    .fg(colors::BLUE)
                     .add_modifier(Modifier::BOLD),
             )),
+            Line::from(""),
             Line::from(Span::styled(
-                format!("{} (Sort: {})", topic.name, state.docs.sort_by.label()),
+                format!("{} ({}: {})", topic.name, labels.sort, state.docs.sort_by.label()),
                 Style::default().fg(Color::DarkGray),
             )),
         ]);
@@ -146,7 +179,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         let content = state.docs.content.nfc().collect::<String>();
         let loading_message = state.stream_status.as_deref().unwrap_or(labels.loading);
         let body = if state.docs.loading {
-            Paragraph::new(loading_message).style(Style::default().fg(Color::Yellow))
+            Paragraph::new(loading_message).style(Style::default().fg(colors::YELLOW))
         } else if content.is_empty() {
             Paragraph::new(labels.no_review).style(Style::default().fg(Color::DarkGray))
         } else {
@@ -162,6 +195,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
         frame.render_widget(body, chunks[1]);
 
+        let mouse_hint = if state.mouse_capture {
+            "wheel: scroll | m: select text"
+        } else {
+            "mouse: select text | m: wheel scroll"
+        };
         let help = if state.docs.content.is_empty() {
             format!(
                 "Esc: back to list | e: {} | p: {}",
@@ -169,8 +207,8 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             )
         } else {
             format!(
-                "↑/↓: scroll | Esc: back to list | e: {} | p: {}",
-                labels.regenerate, labels.practice
+                "↑/↓: scroll | {} | Esc: back to list | e: {} | p: {}",
+                mouse_hint, labels.regenerate, labels.practice
             )
         };
         frame.render_widget(
@@ -180,15 +218,17 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     } else {
         let header = Text::from(vec![
             Line::from(Span::styled(
-                "Docs",
+                labels.title,
                 Style::default()
-                    .fg(Color::Rgb(0, 122, 255))
+                    .fg(colors::BLUE)
                     .add_modifier(Modifier::BOLD),
             )),
+            Line::from(""),
             Line::from(Span::styled(
                 format!(
-                    "{} (Sort: {})",
+                    "{} ({}: {})",
                     labels.select_topic,
+                    labels.sort,
                     state.docs.sort_by.label()
                 ),
                 Style::default().fg(Color::DarkGray),
@@ -198,7 +238,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
         let loading_message = state.stream_status.as_deref().unwrap_or(labels.loading);
         let body = if state.docs.loading {
-            Paragraph::new(loading_message).style(Style::default().fg(Color::Yellow))
+            Paragraph::new(loading_message).style(Style::default().fg(colors::YELLOW))
         } else if state.docs.topics.is_empty() {
             Paragraph::new("No topics available.").style(Style::default().fg(Color::DarkGray))
         } else {
@@ -216,7 +256,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 .collect();
             let list = List::new(items).highlight_symbol("> ").highlight_style(
                 Style::default()
-                    .fg(Color::Rgb(0, 122, 255))
+                    .fg(colors::BLUE)
                     .add_modifier(Modifier::BOLD),
             );
             frame.render_stateful_widget(list, chunks[1], &mut state.docs.list_state);
@@ -224,7 +264,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
         frame.render_widget(
             Paragraph::new(format!(
-                "↑/↓: navigate | s: sort | Enter: view | p: {} | Esc: back",
+                "↑/↓/wheel: navigate | s: sort | Enter: view | p: {} | Esc: back",
                 labels.practice
             ))
             .style(Style::default().fg(Color::DarkGray)),
@@ -248,17 +288,19 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                 state.docs.content.clear();
                 state.docs.loading = false;
                 state.docs.scroll_offset = 0;
+                if let Some(return_to) = state.docs.return_to.take() {
+                    state.view = return_to;
+                }
             }
             KeyCode::Char('e') => request_regenerate(state),
             KeyCode::Char('p') => {
                 start_practice_from_docs(state).await?;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                state.docs.scroll_offset =
-                    (state.docs.scroll_offset + 1).min(state.docs.max_scroll_offset);
+                state.docs.scroll_by(1);
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                state.docs.scroll_offset = state.docs.scroll_offset.saturating_sub(1);
+                state.docs.scroll_by(-1);
             }
             _ => {}
         }
@@ -406,4 +448,25 @@ async fn generate_inner(
     };
     db.reviews().upsert(&review).await?;
     Ok(text)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scroll_by_clamps_to_bounds() {
+        let mut state = DocsState::default();
+        state.max_scroll_offset = 10;
+
+        state.scroll_by(3);
+        assert_eq!(state.scroll_offset, 3);
+
+        state.scroll_by(-5);
+        assert_eq!(state.scroll_offset, 0);
+
+        state.scroll_by(100);
+        assert_eq!(state.scroll_offset, 10);
+    }
 }

@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
+use crate::ui::colors;
 
 pub struct HintBar {
     hints: Vec<(String, String)>,
@@ -40,7 +41,7 @@ impl Widget for HintBar {
                     Span::styled(
                         format!("{}:", key),
                         Style::default()
-                            .fg(Color::Rgb(0, 122, 255))
+                            .fg(colors::BLUE)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(format!("{}  ", label)),

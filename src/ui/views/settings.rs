@@ -12,6 +12,8 @@ use crate::config::write_config;
 use crate::error::{AppError, Result};
 use crate::llm::model_listing::{ModelInfo, list_models};
 use crate::llm::provider::ProviderMeta;
+use crate::ui::colors;
+use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::model_check;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 
@@ -545,22 +547,26 @@ fn draw_section_picker(
     area: ratatui::layout::Rect,
     state: &mut AppState,
 ) {
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(area);
 
     frame.render_widget(
-        Paragraph::new(Span::styled(
-            "Settings",
-            Style::default()
-                .fg(Color::Rgb(0, 122, 255))
-                .add_modifier(Modifier::BOLD),
-        )),
+        Paragraph::new(Text::from(vec![
+            Line::from(Span::styled(
+                labels.settings,
+                Style::default()
+                    .fg(colors::BLUE)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ])),
         chunks[0],
     );
 
@@ -571,7 +577,7 @@ fn draw_section_picker(
 
     let list = List::new(items).highlight_symbol("> ").highlight_style(
         Style::default()
-            .fg(Color::Rgb(0, 122, 255))
+            .fg(colors::BLUE)
             .add_modifier(Modifier::BOLD),
     );
 
@@ -589,12 +595,13 @@ fn draw_section_page(
     area: ratatui::layout::Rect,
     state: &mut AppState,
 ) {
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let footer_text = build_footer(state);
     let footer_height = footer_text.lines().count() as u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(0),
             Constraint::Length(footer_height),
         ])
@@ -602,11 +609,12 @@ fn draw_section_page(
 
     let header = Text::from(vec![
         Line::from(Span::styled(
-            "Settings",
+            labels.settings,
             Style::default()
-                .fg(Color::Rgb(0, 122, 255))
+                .fg(colors::BLUE)
                 .add_modifier(Modifier::BOLD),
         )),
+        Line::from(""),
         Line::from(Span::styled(
             state.settings.section.label(),
             Style::default().fg(Color::DarkGray),

@@ -1,8 +1,9 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::{Paragraph, Widget};
+use crate::ui::colors;
 
 const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -38,6 +39,6 @@ impl Default for Spinner {
 impl Widget for Spinner {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let symbol = FRAMES[self.frame % FRAMES.len()];
-        Paragraph::new(Span::styled(symbol, Style::default().fg(Color::Yellow))).render(area, buf);
+        Paragraph::new(Span::styled(symbol, Style::default().fg(colors::YELLOW))).render(area, buf);
     }
 }

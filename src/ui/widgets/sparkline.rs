@@ -2,6 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Sparkline, Widget};
+use crate::ui::colors;
 
 pub struct SparklineChart {
     data: Vec<u64>,
@@ -17,7 +18,7 @@ impl SparklineChart {
                 .iter()
                 .map(|v| v.clamp(0.0, 100.0).round() as u64)
                 .collect(),
-            style: Style::default().fg(Color::Rgb(0, 122, 255)),
+            style: Style::default().fg(colors::BLUE),
             block: None,
             gap: false,
         }

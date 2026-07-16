@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
@@ -15,6 +15,7 @@ use crate::core::session::{
 };
 use crate::db::Database;
 use crate::db::curriculum::{Curriculum, Topic, cefr_to_numeric};
+use crate::db::learning_items::{LearningItem, is_learning_item_name};
 use crate::db::progress::ProgressTopic;
 use crate::error::{AppError, Result};
 use crate::llm::diagnostics::CheckResult;
@@ -22,9 +23,10 @@ use crate::llm::model_listing::ModelInfo;
 use crate::llm::pipeline::{generate_topic_metadata, log_debug_event};
 use crate::ui::views::{
     CurriculumState, DashboardState, DocsState, ModelCheckState, OnboardingState, PairsState,
-    ReportState, ReviewState, SessionState, SettingsState, curriculum, dashboard, docs, model_check,
-    onboarding, pairs, report, review, session, settings,
+    ReportState, SessionState, SettingsState, curriculum, dashboard, docs, model_check,
+    onboarding, pairs, report, session, settings,
 };
+use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::{ErrorBox, Spinner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +34,6 @@ pub enum View {
     Onboarding,
     Dashboard,
     Session,
-    Review,
     Docs,
     Report,
     Curriculum,
@@ -66,7 +67,6 @@ pub struct AppState {
     pub onboarding: OnboardingState,
     pub dashboard: DashboardState,
     pub session: SessionState,
-    pub review: ReviewState,
     pub docs: DocsState,
     pub curriculum: CurriculumState,
     pub settings: SettingsState,
@@ -80,6 +80,7 @@ pub struct AppState {
     pub error: Option<String>,
     pub stream_status: Option<String>,
     pub curriculum_progress: std::collections::HashMap<String, String>,
+    pub mouse_capture: bool,
 }
 
 impl AppState {
@@ -102,7 +103,6 @@ impl AppState {
             onboarding: OnboardingState::new(),
             dashboard: DashboardState::new(),
             session: SessionState::new(),
-            review: ReviewState::new(),
             docs: DocsState::new(),
             curriculum: CurriculumState::new(),
             settings: SettingsState::new(),
@@ -116,6 +116,7 @@ impl AppState {
             error: None,
             stream_status: None,
             curriculum_progress: std::collections::HashMap::new(),
+            mouse_capture: true,
         })
     }
 }
@@ -142,6 +143,7 @@ pub async fn run_app(
 
     let mut events = EventStream::new();
     let mut tick = interval(Duration::from_millis(100));
+    let mut mouse_captured = false;
 
     loop {
         terminal.draw(|frame| draw(frame, &mut state))?;
@@ -188,6 +190,12 @@ pub async fn run_app(
         if state.view == View::Quitting {
             break;
         }
+
+        let desired_capture = state.mouse_capture && view_supports_mouse(state.view);
+        if desired_capture != mouse_captured {
+            set_mouse_capture(desired_capture)?;
+            mouse_captured = desired_capture;
+        }
     }
 
     Ok(())
@@ -216,6 +224,16 @@ async fn handle_event(state: &mut AppState, event: Event) -> Result<()> {
                 return Ok(());
             }
 
+            // On mouse-enabled views `m` toggles between wheel-scroll mode and
+            // native text-selection mode (capture off).
+            if matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'))
+                && view_supports_mouse(state.view)
+            {
+                let enabled = !state.mouse_capture;
+                state.set_mouse_capture(enabled)?;
+                return Ok(());
+            }
+
             let previous_view = state.view;
             if let Err(e) = handle_key(state, key.code).await {
                 state.error = Some(e.to_string());
@@ -233,9 +251,70 @@ async fn handle_event(state: &mut AppState, event: Event) -> Result<()> {
             // The logo widget checks the allocated area and hides itself
             // automatically when it does not fit.
         }
+        Event::Mouse(mouse) => {
+            handle_mouse(state, mouse).await?;
+        }
         _ => {}
     }
     Ok(())
+}
+
+async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
+    let down = match mouse.kind {
+        MouseEventKind::ScrollDown => true,
+        MouseEventKind::ScrollUp => false,
+        _ => return Ok(()),
+    };
+    // Text views scroll by a few lines; list views move the selection one row.
+    let delta: i32 = if down { 3 } else { -3 };
+    match state.view {
+        View::Report => state.report.scroll_by(delta),
+        View::Docs if state.docs.viewing_topic.is_some() => state.docs.scroll_by(delta),
+        View::Docs => {
+            let len = state.docs.topics.len();
+            if down {
+                select_next_wrapping(&mut state.docs.list_state, len);
+            } else {
+                select_previous_wrapping(&mut state.docs.list_state, len);
+            }
+        }
+        View::Curriculum => {
+            let len = state.curriculum.topics.len();
+            if down {
+                select_next_wrapping(&mut state.curriculum.list_state, len);
+            } else {
+                select_previous_wrapping(&mut state.curriculum.list_state, len);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Views where the mouse wheel is useful and there is no text input, so mouse
+/// capture can be enabled without breaking typing.
+fn view_supports_mouse(view: View) -> bool {
+    matches!(view, View::Report | View::Docs | View::Curriculum)
+}
+
+fn set_mouse_capture(enabled: bool) -> Result<()> {
+    use ratatui::crossterm::{
+        event::{DisableMouseCapture, EnableMouseCapture},
+        execute,
+    };
+    if enabled {
+        execute!(std::io::stdout(), EnableMouseCapture)?;
+    } else {
+        execute!(std::io::stdout(), DisableMouseCapture)?;
+    }
+    Ok(())
+}
+
+impl AppState {
+    pub fn set_mouse_capture(&mut self, enabled: bool) -> Result<()> {
+        self.mouse_capture = enabled;
+        set_mouse_capture(enabled)
+    }
 }
 
 async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
@@ -248,7 +327,6 @@ async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             }
             session::handle_key(state, code).await
         }
-        View::Review => review::handle_key(state, code).await,
         View::Docs => docs::handle_key(state, code).await,
         View::Report => report::handle_key(state, code).await,
         View::Curriculum => {
@@ -415,13 +493,19 @@ async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
                             .map(|p| {
                                 p.topics
                                     .into_iter()
-                                    .map(|t| (t.topic_id, t.score))
+                                    .map(|t| (t.topic_id, t.mastery))
                                     .collect()
                             })
                             .unwrap_or_default();
 
+                        let forced_learning_item_ids = state.session.learning_item_ids.clone();
                         let scores_result =
-                            apply_analysis_to_db(&analysis, &session, &state.db).await;
+                            apply_analysis_to_db(
+                                &analysis,
+                                &session,
+                                &forced_learning_item_ids,
+                                &state.db,
+                            ).await;
                         let scores: std::collections::HashMap<String, f64> = match scores_result {
                             Ok(scores) => scores,
                             Err(e) => {
@@ -461,6 +545,7 @@ async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
                                 })
                                 .collect(),
                             new_topics: analysis.new_topics.clone(),
+                            new_learning_items: analysis.new_learning_items.clone(),
                         };
 
                         state.report = ReportState {
@@ -680,6 +765,9 @@ async fn ensure_topics_exist(
             progress.topics.push(crate::db::progress::ProgressTopic {
                 topic_id: topic.id,
                 score: initial_score,
+                mastery: initial_score,
+                difficulty_estimate: 0.0,
+                practice_count: 0,
                 last_practiced: None,
             });
         }
@@ -718,6 +806,9 @@ async fn ensure_progress_for_curriculum(db: &Database, config: &OpenCourseConfig
         progress.topics.push(ProgressTopic {
             topic_id: topic.id.clone(),
             score: initial_score,
+            mastery: initial_score,
+            difficulty_estimate: 0.0,
+            practice_count: 0,
             last_practiced: None,
         });
     }
@@ -728,12 +819,30 @@ async fn ensure_progress_for_curriculum(db: &Database, config: &OpenCourseConfig
 
 async fn ensure_new_topics(db: &Database, new_topics: &[Topic]) -> Result<()> {
     let mut progress = db.progress().read_all().await?;
+    let existing_item_ids: std::collections::HashSet<String> = db
+        .learning_items()
+        .read_all()
+        .await?
+        .into_iter()
+        .map(|li| li.id)
+        .collect();
     for topic in new_topics {
+        if is_learning_item_name(&topic.name) {
+            let item = LearningItem::from_topic(topic);
+            // Do not reset the score of an item that is already being practiced.
+            if !existing_item_ids.contains(&item.id) {
+                db.learning_items().upsert(&item).await?;
+            }
+            continue;
+        }
         db.curriculum().upsert(topic).await?;
         if !progress.topics.iter().any(|p| p.topic_id == topic.id) {
             progress.topics.push(ProgressTopic {
                 topic_id: topic.id.clone(),
                 score: 0.0,
+                mastery: 0.0,
+                difficulty_estimate: 0.0,
+                practice_count: 0,
                 last_practiced: None,
             });
         }
@@ -744,7 +853,6 @@ async fn ensure_new_topics(db: &Database, new_topics: &[Topic]) -> Result<()> {
 
 fn clear_loading(state: &mut AppState) {
     state.session.loading = false;
-    state.review.loading = false;
     state.docs.loading = false;
     state.curriculum.loading = false;
     state.stream_status = None;
@@ -794,7 +902,6 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         View::Onboarding => onboarding::draw(frame, area, state),
         View::Dashboard => dashboard::draw(frame, area, state),
         View::Session => session::draw(frame, area, state),
-        View::Review => review::draw(frame, area, state),
         View::Docs => docs::draw(frame, area, state),
         View::Report => report::draw(frame, area, state),
         View::Curriculum => curriculum::draw(frame, area, state),

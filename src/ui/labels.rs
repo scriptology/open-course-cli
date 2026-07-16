@@ -28,12 +28,15 @@ pub struct ReportLabels {
     pub next_exercise: &'static str,
     pub finish: &'static str,
     pub start_session: &'static str,
-    pub review: &'static str,
     pub docs: &'static str,
     pub curriculum: &'static str,
     pub settings: &'static str,
     pub quit: &'static str,
     pub pairs: &'static str,
+    pub language_pairs: &'static str,
+    pub current: &'static str,
+    pub switch: &'static str,
+    pub add_pair: &'static str,
     pub loading: &'static str,
     pub analyzing: &'static str,
     pub error: &'static str,
@@ -48,27 +51,38 @@ pub struct ReportLabels {
     pub no_topics: &'static str,
     pub new_label: &'static str,
     pub new_topic_label: &'static str,
+    pub new_learning_items_label: &'static str,
     pub in_progress_label: &'static str,
     pub completed_label: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ReviewLabels {
-    pub select_topic: &'static str,
-    pub sort_by_score: &'static str,
-    pub sort_by_last_practiced: &'static str,
-    pub start_review: &'static str,
-    pub no_weak_topics: &'static str,
+    pub learning: &'static str,
+    pub sessions: &'static str,
+    pub due_topics: &'static str,
+    pub provider_label: &'static str,
+    pub level_label: &'static str,
+    pub sort: &'static str,
+    pub no_curriculum_loaded: &'static str,
+    pub model_diagnostics: &'static str,
+    pub course_label: &'static str,
+    pub add_topics_label: &'static str,
+    pub delete_label: &'static str,
+    pub reset_label: &'static str,
+    pub generate_label: &'static str,
+    pub sort_progression: &'static str,
+    pub sort_score: &'static str,
+    pub review_session_label: &'static str,
+    pub new_topic_session_label: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DocsLabels {
+    pub title: &'static str,
     pub select_topic: &'static str,
     pub theory: &'static str,
     pub practice: &'static str,
     pub regenerate: &'static str,
     pub loading: &'static str,
     pub no_review: &'static str,
+    pub sort: &'static str,
 }
 
 const EN_REPORT: ReportLabels = ReportLabels {
@@ -97,13 +111,16 @@ const EN_REPORT: ReportLabels = ReportLabels {
     weak_topics_empty: "Start a session to see weak topics.",
     next_exercise: "Next exercise",
     finish: "Finish",
-    start_session: "Start session",
-    review: "Review",
+    start_session: "Random session",
     docs: "Docs",
     curriculum: "Curriculum",
     settings: "Settings",
     quit: "Quit",
     pairs: "Pairs",
+    language_pairs: "Language pairs",
+    current: "current",
+    switch: "switch",
+    add_pair: "add pair",
     loading: "Loading...",
     analyzing: "Analyzing...",
     error: "Error",
@@ -118,8 +135,26 @@ const EN_REPORT: ReportLabels = ReportLabels {
     no_topics: "No topics yet. Generate a curriculum from the dashboard.",
     new_label: "new",
     new_topic_label: "added",
+    new_learning_items_label: "Added to review",
     in_progress_label: "in progress",
     completed_label: "completed",
+    learning: "Learning",
+    sessions: "Sessions",
+    due_topics: "Due topics",
+    provider_label: "Provider",
+    level_label: "Level",
+    sort: "Sort",
+    no_curriculum_loaded: "No curriculum loaded. Press 'g' to generate.",
+    model_diagnostics: "Model diagnostics",
+    course_label: "Course",
+    add_topics_label: "add 5 topics",
+    delete_label: "delete",
+    reset_label: "reset",
+    generate_label: "generate",
+    sort_progression: "progression",
+    sort_score: "score",
+    review_session_label: "Review",
+    new_topic_session_label: "New topic",
 };
 
 const RU_REPORT: ReportLabels = ReportLabels {
@@ -148,13 +183,16 @@ const RU_REPORT: ReportLabels = ReportLabels {
     weak_topics_empty: "Начните сессию, чтобы увидеть слабые темы.",
     next_exercise: "Следующее упражнение",
     finish: "Завершить",
-    start_session: "Начать сессию",
-    review: "Повторение",
+    start_session: "Рандомная сессия",
     docs: "Документация",
     curriculum: "Программа",
     settings: "Настройки",
     quit: "Выйти",
     pairs: "Пары",
+    language_pairs: "Языковые пары",
+    current: "текущая",
+    switch: "переключить",
+    add_pair: "добавить пару",
     loading: "Загрузка...",
     analyzing: "Анализ...",
     error: "Ошибка",
@@ -169,42 +207,48 @@ const RU_REPORT: ReportLabels = ReportLabels {
     no_topics: "Тем пока нет. Сначала сгенерируйте программу в меню.",
     new_label: "новых",
     new_topic_label: "добавлена",
+    new_learning_items_label: "Добавлено на повторение",
     in_progress_label: "в процессе",
     completed_label: "завершено",
-};
-
-const EN_REVIEW: ReviewLabels = ReviewLabels {
-    select_topic: "Select a topic to review",
-    sort_by_score: "Sort by score",
-    sort_by_last_practiced: "Sort by last practiced",
-    start_review: "Start review",
-    no_weak_topics: "No weak topics yet.",
-};
-
-const RU_REVIEW: ReviewLabels = ReviewLabels {
-    select_topic: "Выберите тему для повторения",
-    sort_by_score: "Сортировать по результату",
-    sort_by_last_practiced: "Сортировать по последней практике",
-    start_review: "Начать повторение",
-    no_weak_topics: "Пока нет слабых тем.",
+    learning: "Изучение",
+    sessions: "Сессии",
+    due_topics: "Темы к повторению",
+    provider_label: "Провайдер",
+    level_label: "Уровень",
+    sort: "Сортировка",
+    no_curriculum_loaded: "Программа не загружена. Нажмите 'g' для генерации.",
+    model_diagnostics: "Диагностика модели",
+    course_label: "Курс",
+    add_topics_label: "добавить 5 тем",
+    delete_label: "удалить",
+    reset_label: "сбросить",
+    generate_label: "сгенерировать",
+    sort_progression: "порядок",
+    sort_score: "оценка",
+    review_session_label: "Повторение",
+    new_topic_session_label: "Новая тема",
 };
 
 const EN_DOCS: DocsLabels = DocsLabels {
+    title: "Docs",
     select_topic: "Select a topic",
     theory: "Theory",
     practice: "Practice",
     regenerate: "Regenerate",
     loading: "Loading...",
     no_review: "No review available.",
+    sort: "Sort",
 };
 
 const RU_DOCS: DocsLabels = DocsLabels {
+    title: "Документация",
     select_topic: "Выберите тему",
     theory: "Теория",
     practice: "Практика",
     regenerate: "Сгенерировать заново",
     loading: "Загрузка...",
     no_review: "Повторение недоступно.",
+    sort: "Сортировка",
 };
 
 const SUPPORTED_REPORT: [(&str, ReportLabels); 17] = [
@@ -225,26 +269,6 @@ const SUPPORTED_REPORT: [(&str, ReportLabels); 17] = [
     ("nl", EN_REPORT),
     ("sv", EN_REPORT),
     ("uk", EN_REPORT),
-];
-
-const SUPPORTED_REVIEW: [(&str, ReviewLabels); 17] = [
-    ("en", EN_REVIEW),
-    ("ru", RU_REVIEW),
-    ("es", EN_REVIEW),
-    ("fr", EN_REVIEW),
-    ("de", EN_REVIEW),
-    ("it", EN_REVIEW),
-    ("pt", EN_REVIEW),
-    ("zh", EN_REVIEW),
-    ("ja", EN_REVIEW),
-    ("ko", EN_REVIEW),
-    ("ar", EN_REVIEW),
-    ("hi", EN_REVIEW),
-    ("tr", EN_REVIEW),
-    ("pl", EN_REVIEW),
-    ("nl", EN_REVIEW),
-    ("sv", EN_REVIEW),
-    ("uk", EN_REVIEW),
 ];
 
 const SUPPORTED_DOCS: [(&str, DocsLabels); 17] = [
@@ -288,10 +312,6 @@ pub fn native_language_code(config: Option<&crate::config::OpenCourseConfig>) ->
 
 pub fn get_report_labels(lang: &str) -> ReportLabels {
     lookup(&SUPPORTED_REPORT, lang)
-}
-
-pub fn get_review_labels(lang: &str) -> ReviewLabels {
-    lookup(&SUPPORTED_REVIEW, lang)
 }
 
 pub fn get_docs_labels(lang: &str) -> DocsLabels {

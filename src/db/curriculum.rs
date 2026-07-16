@@ -126,6 +126,62 @@ pub fn is_abstract_topic_name(name: &str) -> bool {
     ABSTRACT_TOPIC_PATTERNS.iter().any(|p| lower.contains(p))
 }
 
+/// Returns true for topics that should be removed from the curriculum because
+/// they are too abstract or are spelling-only catch-all topics.
+pub fn should_remove_topic(name: &str) -> bool {
+    is_abstract_topic_name(name) || name.to_lowercase().starts_with("spelling")
+}
+
+/// Removes abstract/spelling topics from curriculum, progress, and reviews tables,
+/// and moves micro-topics (concrete learning items such as "X vs Y" or "Rule: example")
+/// into the `learning_items` table while preserving their scores.
+pub async fn cleanup_topics(db: &crate::db::Database) -> Result<(usize, usize)> {
+    use crate::db::learning_items::{is_learning_item_name, LearningItem};
+
+    let curriculum = db.curriculum().read_all().await?;
+    let progress_data = db.progress().read_all().await?;
+    let progress_by_id: std::collections::HashMap<String, crate::db::progress::ProgressTopic> =
+        progress_data
+            .topics
+            .into_iter()
+            .map(|t| (t.topic_id.clone(), t))
+            .collect();
+
+    let mut moved = 0usize;
+    let mut removed = 0usize;
+
+    for topic in &curriculum.topics {
+        let name = topic.name.trim();
+        let is_micro = is_learning_item_name(name)
+            && (name.contains(':')
+                || name.to_lowercase().contains(" vs ")
+                || name.contains('/'));
+        let is_bad = should_remove_topic(name);
+
+        if is_micro {
+            let mut item = LearningItem::from_topic(topic);
+            if let Some(p) = progress_by_id.get(&topic.id) {
+                item.score = p.score;
+                item.last_practiced = p.last_practiced.clone();
+                item.practice_count = p.practice_count;
+            }
+            db.learning_items().upsert(&item).await?;
+            let _ = db.curriculum().delete_by_topic_id(&topic.id).await;
+            let _ = db.progress().delete_by_topic_id(&topic.id).await;
+            let _ = db.reviews().remove_by_topic_id(&topic.id).await;
+            moved += 1;
+        } else if is_bad {
+            let _ = db.curriculum().delete_by_topic_id(&topic.id).await;
+            let _ = db.progress().delete_by_topic_id(&topic.id).await;
+            let _ = db.reviews().remove_by_topic_id(&topic.id).await;
+            let _ = db.learning_items().delete_by_id(&topic.id).await;
+            removed += 1;
+        }
+    }
+
+    Ok((moved, removed))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Topic {

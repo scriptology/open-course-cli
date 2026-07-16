@@ -11,7 +11,7 @@ use crate::config::profile::UserProfile;
 use crate::core::session::{AnalysisResult, Exercise, GrammarErrorType};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
-use crate::llm::client::LlmClient;
+use crate::llm::client::{LlmClient, DEFAULT_MAX_TOKENS};
 use crate::llm::pipeline::{
     generate_analysis, generate_exercises, generate_topic_review, looks_like_topic_review,
 };
@@ -67,18 +67,32 @@ impl DiagnosticLlmClient {
     pub fn metrics(&self) -> &StreamMetrics {
         &self.metrics
     }
+
+    pub fn inner(&self) -> &dyn LlmClient {
+        &*self.inner
+    }
 }
 
 #[async_trait]
 impl LlmClient for DiagnosticLlmClient {
-    async fn prompt(&self, prompt: &str, system: Option<&str>) -> Result<String> {
-        let text = self.inner.prompt(prompt, system).await?;
+    async fn prompt(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<String> {
+        let text = self.inner.prompt(prompt, system, max_tokens).await?;
         self.metrics.add_content(text.chars().count());
         Ok(text)
     }
 
-    async fn stream_prompt(&self, prompt: &str, system: Option<&str>) -> Result<LlmStream> {
-        let stream = self.inner.stream_prompt(prompt, system).await?;
+    async fn stream_prompt(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        max_tokens: u32,
+    ) -> Result<LlmStream> {
+        let stream = self.inner.stream_prompt(prompt, system, max_tokens).await?;
         let metrics = self.metrics.clone();
         let wrapped = stream.map(move |chunk| match chunk {
             Ok(StreamChunk::Content(text)) => {
@@ -210,16 +224,16 @@ where
 
 const CONNECTIVITY_TIMEOUT: Duration = Duration::from_secs(15);
 const STREAMING_TIMEOUT: Duration = Duration::from_secs(15);
-const EXERCISES_TIMEOUT: Duration = Duration::from_secs(60);
-const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(60);
-const TOPIC_REVIEW_TIMEOUT: Duration = Duration::from_secs(60);
+const EXERCISES_TIMEOUT: Duration = Duration::from_secs(90);
+const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(90);
+const TOPIC_REVIEW_TIMEOUT: Duration = Duration::from_secs(90);
 
 async fn run_connectivity_check(client: Arc<dyn LlmClient>) -> CheckResult {
     let wrapper = DiagnosticLlmClient::from_arc(client);
     let start = Instant::now();
     let status = match timeout(
         CONNECTIVITY_TIMEOUT,
-        wrapper.prompt("Reply with exactly: OK", None),
+        wrapper.prompt("Reply with exactly: OK", None, DEFAULT_MAX_TOKENS),
     )
     .await
     {
@@ -247,14 +261,14 @@ async fn run_streaming_check(client: Arc<dyn LlmClient>) -> CheckResult {
     let start = Instant::now();
     let status = match timeout(
         STREAMING_TIMEOUT,
-        wrapper.stream_prompt("Reply with exactly: STREAM_OK", None),
+        wrapper.stream_prompt("Reply with exactly: STREAM_OK", None, DEFAULT_MAX_TOKENS),
     )
     .await
     {
         Ok(Ok(mut stream)) => {
             let mut saw_content = false;
             loop {
-                match timeout(Duration::from_secs(5), stream.next()).await {
+                match timeout(Duration::from_secs(10), stream.next()).await {
                     Ok(Some(Ok(StreamChunk::Content(_)))) => saw_content = true,
                     Ok(Some(Ok(_))) => {}
                     Ok(Some(Err(e))) => break CheckStatus::Failed(format!("stream error: {e}")),
@@ -285,7 +299,7 @@ async fn run_exercises_check(client: Arc<dyn LlmClient>, profile: &UserProfile) 
     let wrapper = DiagnosticLlmClient::from_arc(client);
     let start = Instant::now();
     let topics = synthetic_topics(profile);
-    let prompt = build_exercise_prompt(profile, &topics[..1], &topics[1..], &topics, 1);
+    let prompt = build_exercise_prompt(profile, &topics[..1], &topics[1..], &topics, &[], 1, 0.75);
     let status = match timeout(
         EXERCISES_TIMEOUT,
         generate_exercises(&wrapper, &prompt, None, None::<&Path>),
@@ -321,7 +335,12 @@ async fn run_analysis_check(client: Arc<dyn LlmClient>, profile: &UserProfile) -
     let prompt = build_batch_analysis_prompt(profile, &[(exercise, answer)], &topics);
     let status = match timeout(
         ANALYSIS_TIMEOUT,
-        generate_analysis(&wrapper, &prompt, None, None::<&Path>),
+        generate_analysis(&wrapper,
+            &prompt,
+            1,
+            None,
+            None::<&Path>,
+        ),
     )
     .await
     {
@@ -435,6 +454,9 @@ fn synthetic_exercise(_profile: &UserProfile) -> Exercise {
         id: "diag-ex1".to_string(),
         target_sentence: "My friend works in a cafe".to_string(),
         expected_translation: "Mi amigo trabaja en un café".to_string(),
+        acceptable_translations: vec![
+            "Mi amigo labora en una cafetería".to_string(),
+        ],
         target_topic_ids: vec!["diag-coffee".to_string()],
         side_topic_ids: vec!["diag-present".to_string()],
         expected_patterns: vec!["present tense".to_string()],

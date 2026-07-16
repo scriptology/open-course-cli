@@ -1,7 +1,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::Widget;
+use crate::ui::colors;
 
 const BAR_SYMBOL: &str = "\u{2580}";
 
@@ -46,7 +47,7 @@ impl Widget for StackedProgressBar {
         if completed_width > 0 {
             for i in 0..completed_width {
                 buf[(x + i, area.y)].set_symbol(BAR_SYMBOL);
-                buf[(x + i, area.y)].set_style(Style::default().fg(Color::Green));
+                buf[(x + i, area.y)].set_style(Style::default().fg(colors::GREEN));
             }
             x += completed_width;
         }
@@ -54,7 +55,7 @@ impl Widget for StackedProgressBar {
         if in_progress_width > 0 {
             for i in 0..in_progress_width {
                 buf[(x + i, area.y)].set_symbol(BAR_SYMBOL);
-                buf[(x + i, area.y)].set_style(Style::default().fg(Color::Yellow));
+                buf[(x + i, area.y)].set_style(Style::default().fg(colors::YELLOW));
             }
             x += in_progress_width;
         }
@@ -62,7 +63,7 @@ impl Widget for StackedProgressBar {
         if not_started_width > 0 {
             for i in 0..not_started_width {
                 buf[(x + i, area.y)].set_symbol(BAR_SYMBOL);
-                buf[(x + i, area.y)].set_style(Style::default().fg(Color::Rgb(0, 122, 255)));
+                buf[(x + i, area.y)].set_style(Style::default().fg(colors::BLUE));
             }
         }
     }

@@ -65,8 +65,8 @@ In settings set Base URL to `https://opencode.ai/zen/go/v1`, then on the **Endpo
 
 The `--data-dir` directory gets a `.open-course-cli/` folder:
 
-- `config.json` — profile, provider, and preferences.
-- `db/` — LanceDB: progress, session history, curriculum topics, reviews, and topic docs.
+- `config.json` — profiles (one per language pair), provider, and preferences.
+- `pairs/{pair-id}/db/` — LanceDB for the active language pair: progress, session history, curriculum topics, reviews, and topic docs.
 - `config.json.tmp` — temporary file; safe to delete if the app crashed.
 
 ## Screen commands
@@ -83,7 +83,6 @@ The `--data-dir` directory gets a `.open-course-cli/` folder:
 | Key | Action |
 |-----|----------|
 | `n` | New session |
-| `r` | Topic review |
 | `d` | Topic documentation |
 | `c` | Curriculum list |
 | `p` | Language pairs |
@@ -109,20 +108,15 @@ After the last exercise the answers are sent to the LLM for analysis. While gene
 | Key | Action |
 |-----|----------|
 | `↑`/`↓` or `j`/`k` | Scroll the report |
+| Mouse wheel | Scroll when mouse capture is on (`m` toggles capture / text selection) |
 | `n` | New session |
-| `r` | Review |
-| `w` | Practice a weak topic |
+| `r` | Repeat the same topic |
 | `d` | Documentation |
 | `Esc` | Dashboard |
 
-### Topic review
+### Model diagnostics
 
-| Key | Action |
-|-----|----------|
-| `↑`/`↓` or `j`/`k` | Select topic |
-| `s` | Toggle sort |
-| `Enter` | Start review for the selected topic |
-| `Esc` | Back |
+Run automatically after onboarding or from the provider/model settings. Checks connectivity, streaming, exercise generation, answer analysis, and topic review against the configured provider. Choose a different model in settings if any check fails.
 
 ### Topic docs
 

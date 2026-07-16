@@ -1,9 +1,10 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Widget};
 
 use crate::core::dashboard::DailyActivity;
+use crate::ui::colors;
 
 const BAR_SYMBOL: &str = "█";
 const GAP: u16 = 1;
@@ -101,9 +102,9 @@ impl Widget for ActivityChart {
             }
 
             let segments = [
-                (h_sessions, Color::Rgb(0, 122, 255)),
-                (h_new_topics, Color::Yellow),
-                (h_completed, Color::Green),
+                (h_sessions, colors::BLUE),
+                (h_new_topics, colors::YELLOW),
+                (h_completed, colors::GREEN),
             ];
 
             let mut current_y = inner.y + inner.height - 1;

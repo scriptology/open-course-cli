@@ -1,12 +1,14 @@
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, Paragraph};
 
 use crate::app::{AppState, View};
 use crate::error::Result;
+use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::onboarding;
+use crate::ui::colors;
 
 #[derive(Debug, Clone, Default)]
 pub struct PairsState {
@@ -20,21 +22,26 @@ impl PairsState {
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
-    let accent = Color::Rgb(0, 122, 255);
+    let accent = colors::BLUE;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .split(area);
 
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+
     frame.render_widget(
-        Paragraph::new(Span::styled(
-            "Language pairs",
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        )),
+        Paragraph::new(Text::from(vec![
+            Line::from(Span::styled(
+                labels.language_pairs,
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ])),
         chunks[0],
     );
 
@@ -46,21 +53,29 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .map(|c| c.active_pair.as_str())
         .unwrap_or("");
 
+    let list_width = chunks[1].width as usize;
     let items: Vec<ListItem> = pairs
         .iter()
         .enumerate()
         .map(|(_i, pair)| {
-            let marker = if pair.id == active_id { "★ " } else { "  " };
+            let is_active = pair.id == active_id;
             let label = format!(
-                "{}{} → {}",
-                marker, pair.profile.native_language, pair.profile.target_language
+                "{} → {}",
+                pair.profile.native_language, pair.profile.target_language
             );
-            let style = if pair.id == active_id {
+            let style = if is_active {
                 Style::default().fg(accent).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
-            ListItem::new(Line::from(Span::styled(label, style)))
+            if is_active {
+                let suffix = format!(" [{}]", labels.current);
+                let padding = list_width.saturating_sub(label.chars().count() + suffix.chars().count());
+                let line = format!("{}{}{}", label, " ".repeat(padding), suffix);
+                ListItem::new(Line::from(Span::styled(line, style)))
+            } else {
+                ListItem::new(Line::from(Span::styled(label, style)))
+            }
         })
         .collect();
 
@@ -74,9 +89,12 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     list_state.select(Some(state.pairs.selected));
     frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
+    let hint = format!(
+        "↑/↓: {} | Enter: {} | a: {} | Esc: {}",
+        labels.navigate, labels.switch, labels.add_pair, labels.back
+    );
     frame.render_widget(
-        Paragraph::new("↑/↓: navigate | Enter: switch | a: add pair | Esc: back")
-            .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
         chunks[2],
     );
 }

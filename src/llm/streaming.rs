@@ -152,6 +152,7 @@ pub async fn stream_openai_compatible(
     system: Option<&str>,
     prompt: &str,
     reasoning_effort: Option<&str>,
+    max_tokens: u32,
 ) -> Result<LlmStream> {
     let client = Client::new();
     let mut messages = Vec::new();
@@ -163,7 +164,7 @@ pub async fn stream_openai_compatible(
         "model": model,
         "messages": messages,
         "stream": true,
-        "max_tokens": 8192,
+        "max_tokens": max_tokens,
     });
     if let Some(effort) = reasoning_effort {
         body["reasoning_effort"] = json!(effort);
@@ -202,11 +203,12 @@ pub async fn stream_anthropic_messages(
     model: &str,
     system: Option<&str>,
     prompt: &str,
+    max_tokens: u32,
 ) -> Result<LlmStream> {
     let client = Client::new();
     let mut body = json!({
         "model": model,
-        "max_tokens": 8192,
+        "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
         "stream": true,
     });
