@@ -16,6 +16,13 @@ cargo run -- --data-dir /path/to/project
 
 Quit with `Ctrl+C` or `Esc`/`q`.
 
+Data lives in `.open-course-cli/`:
+
+- `config.json` — provider, preferences, and one profile per language pair.
+- `pairs/{native-target}/db/` — per-pair LanceDB tables (`curriculum`, `progress`, `history`, `reviews`, `learning_items`).
+
+Each language pair is isolated; provider settings and preferences are global.
+
 ## Onboarding
 
 On the first launch a wizard asks for:
@@ -57,32 +64,6 @@ flowchart TD
     Report --> |r| Exercises
     Report --> |d| Docs[Topic docs]
 ```
-
-## Data layout
-
-```mermaid
-flowchart LR
-    subgraph "open-course-cli/"
-        Config[config.json]
-        subgraph "pairs/{native-target}/db/"
-            Curriculum[curriculum]
-            Progress[progress]
-            History[history]
-            Reviews[reviews]
-            Items[learning_items]
-        end
-    end
-```
-
-- `config.json` — global provider, preferences, and one profile per language pair.
-- `pairs/{native-target}/db/` — per-pair LanceDB tables:
-  - `curriculum` — generated course topics.
-  - `progress` — topic scores and mastery.
-  - `history` — session summaries.
-  - `reviews` — AI-generated topic explanations.
-  - `learning_items` — micro-topics (word pairs, small patterns) for spaced review.
-
-Each language pair is isolated: progress, history, curriculum, and reviews are not shared. Provider settings and preferences are global.
 
 ## Provider notes
 
