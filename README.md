@@ -65,18 +65,11 @@ flowchart TD
     Report --> |d| Docs[Topic docs]
 ```
 
-## Provider notes
+## Providers
 
-### OpenCode Go
+Supported out of the box: OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral, OpenRouter, and Ollama. Any other OpenAI-compatible endpoint can be used via the **Custom** provider.
 
-Set Base URL to `https://opencode.ai/zen/go/v1` and choose the endpoint that matches the model:
-
-- `chat/completions` — GLM, Kimi, DeepSeek, MiMo.
-- `messages` — Qwen, MiniMax.
-
-### Ollama
-
-Use base URL `http://localhost:11434/v1`. No API key is required.
+Onboarding fetches the list of available models automatically. For local Ollama no API key is needed; for custom endpoints set the base URL and pick `chat/completions` or `messages` depending on the API.
 
 ## Architecture
 
