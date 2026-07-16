@@ -73,23 +73,6 @@ Onboarding fetches the list of available models automatically. For local Ollama 
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph UI
-        Dashboard
-        Session
-        Docs
-        Curriculum
-        Settings
-    end
-
-    UI --> Core[Core logic]
-    Core --> DB[(LanceDB)]
-    Core --> LLM[rig-core]
-
-    Core --> Dashboard
-```
-
 - `src/ui/` — ratatui screens and widgets.
 - `src/core/` — session orchestration, dashboard stats, spaced-repetition logic.
 - `src/db/` — LanceDB tables and schemas.
