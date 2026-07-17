@@ -123,8 +123,9 @@ During a session:
 
 ### Mouse: scroll vs text selection
 
-On the Report, Docs, and Curriculum screens the mouse wheel scrolls the content (or moves the list selection), while the command bar stays pinned at the bottom. Because the terminal sends all mouse activity to the app in this mode, plain drag-selection is disabled; you have two ways to copy text:
+On the Dashboard, Report, Docs, and Curriculum screens the mouse wheel scrolls the content (or moves the list selection), while the command bar stays pinned at the bottom. Because the terminal sends all mouse activity to the app in this mode, plain native drag-selection is disabled; you have three ways to copy text:
 
+- On the session **Report**, drag with the left button: the app draws its own highlight and copies the selected text to the clipboard on mouse-up (via the system clipboard, with an OSC 52 fallback). A `✓ copied` note appears in the hint bar. A plain click clears the highlight.
 - Press `m` to toggle mouse capture off — drag and copy natively, then press `m` again to get wheel scrolling back. The hint bar shows which mode is active.
 - In most terminals, Shift+drag (Option+drag in iTerm2) selects text even while mouse capture is on.
 

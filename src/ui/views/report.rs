@@ -46,6 +46,8 @@ pub struct ReportState {
     pub selection: Option<Selection>,
     /// Last rendered frame, kept for extracting the selected text on mouse-up.
     pub last_frame: Option<ratatui::buffer::Buffer>,
+    /// Transient "(ok, when)" feedback shown in the hint bar after a copy.
+    pub copy_feedback: Option<(bool, std::time::Instant)>,
 }
 
 impl Default for ReportState {
@@ -71,6 +73,7 @@ impl Default for ReportState {
             target_topic_name: None,
             selection: None,
             last_frame: None,
+            copy_feedback: None,
         }
     }
 }
@@ -121,12 +124,22 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         "mouse: select text | m: wheel scroll"
     };
 
+    let mut hint_spans = Vec::new();
+    if let Some((ok, at)) = state.report.copy_feedback {
+        if at.elapsed() < std::time::Duration::from_secs(2) {
+            hint_spans.push(Span::styled(
+                if ok { "✓ copied | " } else { "copy failed | " },
+                Style::default().fg(if ok { colors::GREEN } else { Color::Red }),
+            ));
+        }
+    }
+    hint_spans.push(Span::raw(format!(
+        "↑/↓: scroll | {} | n: new topic | r: repeat | d: docs | Esc: dashboard",
+        mouse_hint
+    )));
+
     frame.render_widget(
-        Paragraph::new(format!(
-            "↑/↓: scroll | {} | n: new topic | r: repeat | d: docs | Esc: dashboard",
-            mouse_hint
-        ))
-        .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(Line::from(hint_spans)).style(Style::default().fg(Color::DarkGray)),
         chunks[1],
     );
 }

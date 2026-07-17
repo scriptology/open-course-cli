@@ -265,6 +265,7 @@ async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
     if state.view == View::Report {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                state.report.copy_feedback = None;
                 state.report.selection = Some(report::Selection {
                     start: (mouse.column, mouse.row),
                     end: (mouse.column, mouse.row),
@@ -282,10 +283,17 @@ async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
                     if sel.start == sel.end {
                         // A plain click dismisses the selection.
                         state.report.selection = None;
-                    } else if let Some(frame) = &state.report.last_frame {
-                        let text = report::extract_selection(frame, sel.start, sel.end);
+                    } else {
+                        let text = state
+                            .report
+                            .last_frame
+                            .as_ref()
+                            .map(|f| report::extract_selection(f, sel.start, sel.end))
+                            .unwrap_or_default();
                         if !text.is_empty() {
-                            copy_to_clipboard(&text);
+                            let ok = copy_to_clipboard(&text);
+                            state.report.copy_feedback =
+                                Some((ok, std::time::Instant::now()));
                         }
                     }
                 }
@@ -330,10 +338,32 @@ async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
     Ok(())
 }
 
-fn copy_to_clipboard(text: &str) {
-    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_owned())) {
-        log_debug_event("clipboard", &format!("copy failed: {e}"), None);
+/// Copies text to the system clipboard, falling back to the OSC 52 escape
+/// sequence (works in iTerm2/kitty/WezTerm and over SSH) when the native
+/// clipboard is unavailable. Returns whether either path succeeded.
+fn copy_to_clipboard(text: &str) -> bool {
+    match arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_owned())) {
+        Ok(()) => true,
+        Err(e) => {
+            log_debug_event("clipboard", &format!("arboard failed: {e}; trying OSC 52"), None);
+            osc52_copy(text)
+        }
     }
+}
+
+fn osc52_copy(text: &str) -> bool {
+    use base64::Engine as _;
+    use std::io::Write as _;
+
+    let payload = base64::engine::general_purpose::STANDARD.encode(text);
+    let mut out = std::io::stdout();
+    let ok = write!(out, "\x1b]52;c;{payload}\x07")
+        .and_then(|_| out.flush())
+        .is_ok();
+    if !ok {
+        log_debug_event("clipboard", "OSC 52 write failed", None);
+    }
+    ok
 }
 
 /// Views where the mouse wheel is useful and there is no text input, so mouse
@@ -615,6 +645,7 @@ async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
                             target_topic_name,
                             selection: None,
                             last_frame: None,
+                            copy_feedback: None,
                         };
 
                         session::reset_session(&mut state.session);

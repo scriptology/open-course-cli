@@ -4643,6 +4643,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "async-trait",
+ "base64",
  "bytes",
  "chrono",
  "clap",
