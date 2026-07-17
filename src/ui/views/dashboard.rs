@@ -1,10 +1,11 @@
 use chrono::Utc;
 
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap, calendar::Monthly};
 
 use crate::app::{AppState, View};
 use crate::config::OpenCourseConfig;
@@ -17,7 +18,8 @@ use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
-use crate::ui::widgets::{ActivityChart, HintBar, Logo, StackedProgressBar};
+use crate::ui::widgets::activity_calendar;
+use crate::ui::widgets::{HintBar, Logo, StackedProgressBar};
 use crate::ui::colors;
 
 #[derive(Debug, Clone)]
@@ -33,6 +35,8 @@ pub struct DashboardState {
     pub activity: Vec<DailyActivity>,
     pub weak_topics: Vec<Topic>,
     pub weak_selected: Option<usize>,
+    pub scroll_offset: u16,
+    pub max_scroll: u16,
 }
 
 impl Default for DashboardState {
@@ -55,6 +59,8 @@ impl Default for DashboardState {
             activity: Vec::new(),
             weak_topics: Vec::new(),
             weak_selected: None,
+            scroll_offset: 0,
+            max_scroll: 0,
         }
     }
 }
@@ -62,6 +68,12 @@ impl Default for DashboardState {
 impl DashboardState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Moves the page scroll offset, clamped to the range computed in `draw`.
+    pub fn scroll_by(&mut self, delta: i32) {
+        let max = self.max_scroll as i32;
+        self.scroll_offset = (self.scroll_offset as i32 + delta).clamp(0, max) as u16;
     }
 
     /// Number of weak topics shown in the dashboard block.
@@ -127,88 +139,125 @@ impl DashboardState {
         } else {
             None
         };
+        self.scroll_offset = 0;
 
         Ok(())
     }
 }
 
+const TOP_HEIGHT: u16 = 5;
+const PROGRESS_HEIGHT: u16 = 10; // borders(2) + course(1) + gap(1) + 6 levels
+const WEAK_HEIGHT: u16 = 7; // borders(2) + up to 5 topics
+
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
-    let narrow = area.width < 90;
-    let middle_height = if narrow {
-        Constraint::Min(12)
-    } else {
-        Constraint::Length(14)
-    };
-
-    let weak_constraint = if narrow {
-        Constraint::Length(7)
-    } else {
-        Constraint::Min(4)
-    };
-
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),
-            middle_height,
-            weak_constraint,
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-    let top_area = vertical[0];
-    let middle_area = vertical[1];
-    let weak_area = vertical[2];
-    let hint_area = vertical[3];
-
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
 
-    draw_top(frame, top_area, state, labels, narrow);
-    draw_middle(frame, middle_area, state, labels);
-    draw_weak_topics(frame, weak_area, state, labels);
-    draw_hint_bar(frame, hint_area, state, labels);
+    // The command bar stays pinned to the bottom of the screen.
+    let [content_area, hint_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
+    draw_hint_bar(frame.buffer_mut(), hint_area, state, labels);
+
+    // The page content is sized by its blocks, never squeezed: the activity
+    // calendar needs `calendar_height` rows, the progress block 10, the weak
+    // block 7. If it exceeds the viewport, it is rendered offscreen and the
+    // mouse wheel scrolls the visible window.
+    let today = chrono::Local::now().date_naive();
+    let calendar_height = activity_calendar::block_height(today);
+    let narrow = content_area.width < 90;
+    let middle_height = if narrow {
+        calendar_height + PROGRESS_HEIGHT
+    } else {
+        calendar_height.max(PROGRESS_HEIGHT)
+    };
+    let content_height = TOP_HEIGHT + middle_height + WEAK_HEIGHT;
+
+    if content_height <= content_area.height {
+        state.dashboard.scroll_offset = 0;
+        state.dashboard.max_scroll = 0;
+        let [top_area, middle_area, weak_area] = Layout::vertical([
+            Constraint::Length(TOP_HEIGHT),
+            Constraint::Length(middle_height),
+            Constraint::Min(0),
+        ])
+        .areas(content_area);
+        let buf = frame.buffer_mut();
+        draw_top(buf, top_area, state, labels, narrow);
+        draw_middle(buf, middle_area, state, labels, calendar_height, narrow);
+        draw_weak_topics(buf, weak_area, state, labels);
+    } else {
+        let max_scroll = content_height - content_area.height;
+        state.dashboard.max_scroll = max_scroll;
+        state.dashboard.scroll_offset = state.dashboard.scroll_offset.min(max_scroll);
+
+        let mut offscreen = Buffer::empty(Rect::new(0, 0, content_area.width, content_height));
+        let [top_area, middle_area, weak_area] = Layout::vertical([
+            Constraint::Length(TOP_HEIGHT),
+            Constraint::Length(middle_height),
+            Constraint::Length(WEAK_HEIGHT),
+        ])
+        .areas(offscreen.area);
+        draw_top(&mut offscreen, top_area, state, labels, narrow);
+        draw_middle(&mut offscreen, middle_area, state, labels, calendar_height, narrow);
+        draw_weak_topics(&mut offscreen, weak_area, state, labels);
+
+        blit(
+            &offscreen,
+            frame.buffer_mut(),
+            content_area.height,
+            state.dashboard.scroll_offset,
+        );
+    }
 }
 
-fn draw_top(
-    frame: &mut ratatui::Frame,
-    area: Rect,
-    state: &AppState,
-    labels: ReportLabels,
-    narrow: bool,
-) {
+/// Copies the visible window of the offscreen page into the terminal buffer,
+/// leaving the pinned hint row below the viewport untouched.
+fn blit(src: &Buffer, dst: &mut Buffer, viewport_height: u16, scroll: u16) {
+    let width = dst.area.width.min(src.area.width);
+    let height = viewport_height.min(src.area.height.saturating_sub(scroll));
+    for y in 0..height {
+        for x in 0..width {
+            dst[(x, y)] = src[(x, y + scroll)].clone();
+        }
+    }
+}
+
+fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels, narrow: bool) {
     let block = Block::default().padding(Padding::new(1, 1, 1, 0));
     let inner = block.inner(area);
-    block.render(area, frame.buffer_mut());
+    block.render(area, buf);
 
     if narrow {
-        // On narrow screens put the logo on the left and the profile info in a
-        // compact two-column grid on the right.
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(20), Constraint::Min(0)])
+        // On narrow screens stack the header vertically: the logo centered on
+        // its own row with a gap below, the profile info grid underneath.
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
             .split(inner);
 
-        frame.render_widget(Logo, chunks[0]);
+        Logo::new(Alignment::Center).render(rows[0], buf);
 
         let info_lines = profile_info_lines(state, labels);
-        let info_area = chunks[1];
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(info_area);
+            .split(rows[2]);
 
         let left = Text::from(vec![info_lines[0].clone(), info_lines[1].clone()]);
         let right = Text::from(vec![info_lines[2].clone(), info_lines[3].clone()]);
-        frame.render_widget(Paragraph::new(left).alignment(Alignment::Left), cols[0]);
-        frame.render_widget(Paragraph::new(right).alignment(Alignment::Right), cols[1]);
+        Paragraph::new(left).alignment(Alignment::Left).render(cols[0], buf);
+        Paragraph::new(right).alignment(Alignment::Right).render(cols[1], buf);
     } else {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
             .split(inner);
 
-        frame.render_widget(Logo, chunks[0]);
-        frame.render_widget(profile_info(state, labels), chunks[1]);
+        Logo::new(Alignment::Left).render(chunks[0], buf);
+        profile_info(state, labels).render(chunks[1], buf);
     }
 }
 
@@ -272,12 +321,18 @@ fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
     Paragraph::new(Text::from(profile_info_lines(state, labels))).alignment(Alignment::Right)
 }
 
-fn draw_middle(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
-    let narrow = area.width < 100;
+fn draw_middle(
+    buf: &mut Buffer,
+    area: Rect,
+    state: &AppState,
+    labels: ReportLabels,
+    calendar_height: u16,
+    narrow: bool,
+) {
     let chunks = if narrow {
         Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints([Constraint::Length(calendar_height), Constraint::Min(0)])
             .split(area)
     } else {
         Layout::default()
@@ -286,21 +341,21 @@ fn draw_middle(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels:
             .split(area)
     };
 
-    draw_session_dynamics(frame, chunks[0], state, labels);
-    draw_progress(frame, chunks[1], state, labels);
+    draw_session_dynamics(buf, chunks[0], state, labels);
+    draw_progress(buf, chunks[1], state, labels);
 }
 
 const COLOR_NEW: Color = colors::BLUE;
 const COLOR_IN_PROGRESS: Color = colors::YELLOW;
 const COLOR_COMPLETED: Color = colors::GREEN;
 
-fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
+fn draw_progress(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
     let block = Block::default()
         .title(labels.progress)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
     let inner = block.inner(area);
-    block.render(area, frame.buffer_mut());
+    block.render(area, buf);
 
     let course = &state.dashboard.course;
     let compact = inner.height < 14;
@@ -315,26 +370,24 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
             .constraints(constraints)
             .split(inner);
 
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
-                Span::styled(
-                    format!("{} ({})", course.completed, labels.completed_label),
-                    Style::default().fg(COLOR_COMPLETED),
-                ),
-                Span::raw(" / "),
-                Span::styled(
-                    format!("{} ({})", course.in_progress, labels.in_progress_label),
-                    Style::default().fg(COLOR_IN_PROGRESS),
-                ),
-                Span::raw(" / "),
-                Span::styled(
-                    format!("{} ({})", course.not_started, labels.new_label),
-                    Style::default().fg(COLOR_NEW),
-                ),
-            ])),
-            chunks[0],
-        );
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{} ({})", course.completed, labels.completed_label),
+                Style::default().fg(COLOR_COMPLETED),
+            ),
+            Span::raw(" / "),
+            Span::styled(
+                format!("{} ({})", course.in_progress, labels.in_progress_label),
+                Style::default().fg(COLOR_IN_PROGRESS),
+            ),
+            Span::raw(" / "),
+            Span::styled(
+                format!("{} ({})", course.not_started, labels.new_label),
+                Style::default().fg(COLOR_NEW),
+            ),
+        ]))
+        .render(chunks[0], buf);
 
         for (i, level) in levels.iter().enumerate() {
             let progress = state
@@ -357,27 +410,25 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
                 .constraints([Constraint::Length(12), Constraint::Min(0)])
                 .split(chunks[2 + i]);
 
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(
-                        format!("{}: ", level),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(progress.completed.to_string(), Style::default().fg(COLOR_COMPLETED)),
-                    Span::raw("/"),
-                    Span::styled(progress.in_progress.to_string(), Style::default().fg(COLOR_IN_PROGRESS)),
-                    Span::raw("/"),
-                    Span::styled(progress.not_started.to_string(), Style::default().fg(COLOR_NEW)),
-                ])),
-                row[0],
-            );
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    format!("{}: ", level),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(progress.completed.to_string(), Style::default().fg(COLOR_COMPLETED)),
+                Span::raw("/"),
+                Span::styled(progress.in_progress.to_string(), Style::default().fg(COLOR_IN_PROGRESS)),
+                Span::raw("/"),
+                Span::styled(progress.not_started.to_string(), Style::default().fg(COLOR_NEW)),
+            ]))
+            .render(row[0], buf);
 
             let level_bar = StackedProgressBar::new(
                 progress.not_started as f64,
                 progress.in_progress as f64,
                 progress.completed as f64,
             );
-            frame.render_widget(level_bar, row[1]);
+            level_bar.render(row[1], buf);
         }
         return;
     }
@@ -393,26 +444,24 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
         .constraints(constraints)
         .split(inner);
 
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(
-                format!("{} ({})", course.completed, labels.completed_label),
-                Style::default().fg(COLOR_COMPLETED),
-            ),
-            Span::raw(" / "),
-            Span::styled(
-                format!("{} ({})", course.in_progress, labels.in_progress_label),
-                Style::default().fg(COLOR_IN_PROGRESS),
-            ),
-            Span::raw(" / "),
-            Span::styled(
-                format!("{} ({})", course.not_started, labels.new_label),
-                Style::default().fg(COLOR_NEW),
-            ),
-        ])),
-        chunks[0],
-    );
+    Paragraph::new(Line::from(vec![
+        Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{} ({})", course.completed, labels.completed_label),
+            Style::default().fg(COLOR_COMPLETED),
+        ),
+        Span::raw(" / "),
+        Span::styled(
+            format!("{} ({})", course.in_progress, labels.in_progress_label),
+            Style::default().fg(COLOR_IN_PROGRESS),
+        ),
+        Span::raw(" / "),
+        Span::styled(
+            format!("{} ({})", course.not_started, labels.new_label),
+            Style::default().fg(COLOR_NEW),
+        ),
+    ]))
+    .render(chunks[0], buf);
 
     for (i, level) in levels.iter().enumerate() {
         let progress = state
@@ -433,65 +482,71 @@ fn draw_progress(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
         let label_idx = 2 + i * 2;
         let bar_idx = 3 + i * 2;
 
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    format!("{}: ", level),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    progress.completed.to_string(),
-                    Style::default().fg(COLOR_COMPLETED),
-                ),
-                Span::raw(" / "),
-                Span::styled(
-                    progress.in_progress.to_string(),
-                    Style::default().fg(COLOR_IN_PROGRESS),
-                ),
-                Span::raw(" / "),
-                Span::styled(
-                    progress.not_started.to_string(),
-                    Style::default().fg(COLOR_NEW),
-                ),
-            ])),
-            chunks[label_idx],
-        );
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("{}: ", level),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                progress.completed.to_string(),
+                Style::default().fg(COLOR_COMPLETED),
+            ),
+            Span::raw(" / "),
+            Span::styled(
+                progress.in_progress.to_string(),
+                Style::default().fg(COLOR_IN_PROGRESS),
+            ),
+            Span::raw(" / "),
+            Span::styled(
+                progress.not_started.to_string(),
+                Style::default().fg(COLOR_NEW),
+            ),
+        ]))
+        .render(chunks[label_idx], buf);
 
         let level_bar = StackedProgressBar::new(
             progress.not_started as f64,
             progress.in_progress as f64,
             progress.completed as f64,
         );
-        frame.render_widget(level_bar, chunks[bar_idx]);
+        level_bar.render(chunks[bar_idx], buf);
     }
 }
 
-fn draw_session_dynamics(
-    frame: &mut ratatui::Frame,
-    area: Rect,
-    state: &AppState,
-    labels: ReportLabels,
-) {
+fn draw_session_dynamics(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
     let block = Block::default()
         .title(labels.activity)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
-    let chart = ActivityChart::new(&state.dashboard.activity).block(block);
-    frame.render_widget(chart, area);
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    // Center the 22-column calendar grid inside the block.
+    const CALENDAR_WIDTH: u16 = 22; // 1 gutter + 7 day columns of 3
+    let cal_area = Rect {
+        x: inner.x + inner.width.saturating_sub(CALENDAR_WIDTH) / 2,
+        y: inner.y,
+        width: CALENDAR_WIDTH.min(inner.width),
+        height: inner.height,
+    };
+
+    let today = chrono::Local::now().date_naive();
+    let store = activity_calendar::build_event_store(&state.dashboard.activity, today);
+    Monthly::new(activity_calendar::chrono_to_time(today), store)
+        .default_style(Style::default())
+        .show_surrounding(Modifier::DIM)
+        .show_month_header(Modifier::BOLD)
+        .show_weekdays_header(Style::default().fg(Color::DarkGray))
+        .render(cal_area, buf);
 }
 
-fn draw_weak_topics(
-    frame: &mut ratatui::Frame,
-    area: Rect,
-    state: &AppState,
-    labels: ReportLabels,
-) {
+fn draw_weak_topics(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
     let block = Block::default()
         .title(labels.weak_topics)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
     let inner = block.inner(area);
-    block.render(area, frame.buffer_mut());
+    block.render(area, buf);
 
     let content: Vec<Line> = if state.dashboard.weak_topics.is_empty() {
         let message = if state.dashboard.session_count == 0 {
@@ -536,12 +591,12 @@ fn draw_weak_topics(
 
     Paragraph::new(Text::from(content))
         .wrap(Wrap { trim: true })
-        .render(inner, frame.buffer_mut());
+        .render(inner, buf);
 }
 
-fn draw_hint_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState, labels: ReportLabels) {
+fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
     let mut hints: Vec<(&str, &str)> = vec![
-        ("n", labels.start_session),
+        ("n", labels.start_next_label),
         ("d", labels.docs),
         ("c", labels.curriculum),
         ("p", labels.pairs),
@@ -549,13 +604,12 @@ fn draw_hint_bar(frame: &mut ratatui::Frame, area: Rect, state: &AppState, label
         ("q", labels.quit),
     ];
     if state.dashboard.weak_visible_len() > 0 {
-        hints.insert(0, ("Enter", labels.start_session));
+        hints.insert(0, ("Enter", labels.start_label));
         hints.insert(0, ("↑↓", labels.select_topic));
     }
-    frame.render_widget(
-        HintBar::new(&hints).model(state.dashboard.model.as_str()),
-        area,
-    );
+    HintBar::new(&hints)
+        .model(state.dashboard.model.as_str())
+        .render(area, buf);
 }
 
 pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {

@@ -40,6 +40,8 @@ Main hub after onboarding. Available keys:
 
 If the app starts and there is no curriculum, it redirects to the Curriculum view automatically.
 
+The **Activity** block is a GitHub-style calendar of the current month: quiet days have no background, active days are shaded in four greens computed on a relative scale (the 90th percentile of the user's own daily totals, so a single spike does not flatten the rest), and today is lightly highlighted.
+
 ---
 
 ## Language pairs (`p`)

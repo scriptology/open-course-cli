@@ -1,4 +1,4 @@
-pub mod activity_chart;
+pub mod activity_calendar;
 pub mod cards;
 pub mod confirmation;
 pub mod error_box;
@@ -11,7 +11,6 @@ pub mod stacked_progress;
 
 pub mod logo;
 
-pub use activity_chart::ActivityChart;
 pub use cards::Card;
 pub use confirmation::draw_confirmation;
 pub use error_box::ErrorBox;

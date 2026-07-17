@@ -28,6 +28,8 @@ pub struct ReportLabels {
     pub next_exercise: &'static str,
     pub finish: &'static str,
     pub start_session: &'static str,
+    pub start_next_label: &'static str,
+    pub start_label: &'static str,
     pub docs: &'static str,
     pub curriculum: &'static str,
     pub settings: &'static str,
@@ -71,6 +73,7 @@ pub struct ReportLabels {
     pub sort_score: &'static str,
     pub review_session_label: &'static str,
     pub new_topic_session_label: &'static str,
+    pub topic_label: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -111,13 +114,15 @@ const EN_REPORT: ReportLabels = ReportLabels {
     weak_topics_empty: "Start a session to see weak topics.",
     next_exercise: "Next exercise",
     finish: "Finish",
-    start_session: "Random session",
+    start_session: "Start session",
+    start_next_label: "start next topic",
+    start_label: "start",
     docs: "Docs",
     curriculum: "Curriculum",
     settings: "Settings",
     quit: "Quit",
-    pairs: "Pairs",
-    language_pairs: "Language pairs",
+    pairs: "Courses",
+    language_pairs: "Courses",
     current: "current",
     switch: "switch",
     add_pair: "add pair",
@@ -138,7 +143,7 @@ const EN_REPORT: ReportLabels = ReportLabels {
     new_learning_items_label: "Added to review",
     in_progress_label: "in progress",
     completed_label: "completed",
-    learning: "Learning",
+    learning: "Course",
     sessions: "Sessions",
     due_topics: "Due topics",
     provider_label: "Provider",
@@ -155,6 +160,7 @@ const EN_REPORT: ReportLabels = ReportLabels {
     sort_score: "score",
     review_session_label: "Review",
     new_topic_session_label: "New topic",
+    topic_label: "Topic",
 };
 
 const RU_REPORT: ReportLabels = ReportLabels {
@@ -183,13 +189,15 @@ const RU_REPORT: ReportLabels = ReportLabels {
     weak_topics_empty: "Начните сессию, чтобы увидеть слабые темы.",
     next_exercise: "Следующее упражнение",
     finish: "Завершить",
-    start_session: "Рандомная сессия",
+    start_session: "Начать сессию",
+    start_next_label: "начать следующую тему",
+    start_label: "начать",
     docs: "Документация",
     curriculum: "Программа",
     settings: "Настройки",
     quit: "Выйти",
-    pairs: "Пары",
-    language_pairs: "Языковые пары",
+    pairs: "Курсы",
+    language_pairs: "Курсы",
     current: "текущая",
     switch: "переключить",
     add_pair: "добавить пару",
@@ -210,7 +218,7 @@ const RU_REPORT: ReportLabels = ReportLabels {
     new_learning_items_label: "Добавлено на повторение",
     in_progress_label: "в процессе",
     completed_label: "завершено",
-    learning: "Изучение",
+    learning: "Курс",
     sessions: "Сессии",
     due_topics: "Темы",
     provider_label: "Провайдер",
@@ -227,6 +235,7 @@ const RU_REPORT: ReportLabels = ReportLabels {
     sort_score: "оценка",
     review_session_label: "Повторение",
     new_topic_session_label: "Новая тема",
+    topic_label: "Тема",
 };
 
 const EN_DOCS: DocsLabels = DocsLabels {

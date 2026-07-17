@@ -13,6 +13,27 @@ use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
 use crate::ui::colors;
 
+/// A drag selection on the report page, in screen coordinates. The app draws
+/// the highlight itself and copies the text to the clipboard on mouse-up, so
+/// selection works while mouse capture (wheel scroll) is on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Selection {
+    pub start: (u16, u16),
+    pub end: (u16, u16),
+}
+
+impl Selection {
+    /// Corners in reading order: top-to-bottom, left-to-right within a row.
+    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
+        let ((x1, y1), (x2, y2)) = (self.start, self.end);
+        if y1 > y2 || (y1 == y2 && x1 > x2) {
+            ((x2, y2), (x1, y1))
+        } else {
+            ((x1, y1), (x2, y2))
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ReportState {
     pub analysis: AnalysisResult,
@@ -21,6 +42,10 @@ pub struct ReportState {
     pub scroll_offset: u16,
     pub max_scroll_offset: u16,
     pub target_topic_id: Option<String>,
+    pub target_topic_name: Option<String>,
+    pub selection: Option<Selection>,
+    /// Last rendered frame, kept for extracting the selected text on mouse-up.
+    pub last_frame: Option<ratatui::buffer::Buffer>,
 }
 
 impl Default for ReportState {
@@ -43,6 +68,9 @@ impl Default for ReportState {
             scroll_offset: 0,
             max_scroll_offset: 0,
             target_topic_id: None,
+            target_topic_name: None,
+            selection: None,
+            last_frame: None,
         }
     }
 }
@@ -80,8 +108,15 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     frame.render_widget(paragraph.scroll((state.report.scroll_offset, 0)), chunks[0]);
 
+    // Keep a clean copy of the frame for text extraction, then draw the
+    // drag-selection highlight on top of it.
+    state.report.last_frame = Some(frame.buffer_mut().clone());
+    if let Some(selection) = state.report.selection {
+        highlight_selection(frame.buffer_mut(), chunks[0], selection);
+    }
+
     let mouse_hint = if state.mouse_capture {
-        "mouse: wheel scroll | m: select text"
+        "wheel: scroll | drag: copy | m: native select"
     } else {
         "mouse: select text | m: wheel scroll"
     };
@@ -135,8 +170,68 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     Ok(())
 }
 
+fn highlight_selection(buf: &mut ratatui::buffer::Buffer, area: Rect, selection: Selection) {
+    let ((x1, y1), (x2, y2)) = selection.normalized();
+    let style = Style::default().bg(colors::BLUE).fg(Color::White);
+    for y in y1..=y2 {
+        for x in x1..=x2 {
+            if x >= area.left() && x < area.right() && y >= area.top() && y < area.bottom() {
+                let cell = &mut buf[(x, y)];
+                cell.set_style(cell.style().patch(style));
+            }
+        }
+    }
+}
+
+/// Extracts the text inside a drag selection from a rendered buffer, in
+/// line-flow order: from the start column to the end of the first row, whole
+/// middle rows, and up to the end column of the last row.
+pub fn extract_selection(
+    buf: &ratatui::buffer::Buffer,
+    start: (u16, u16),
+    end: (u16, u16),
+) -> String {
+    let ((x1, y1), (x2, y2)) = Selection { start, end }.normalized();
+    let area = buf.area;
+    let right = area.width.saturating_sub(1);
+    let mut lines = Vec::new();
+    for y in y1..=y2.min(area.height.saturating_sub(1)) {
+        let (from, to) = if y1 == y2 {
+            (x1.min(right), x2.min(right))
+        } else if y == y1 {
+            (x1.min(right), right)
+        } else if y == y2 {
+            (0, x2.min(right))
+        } else {
+            (0, right)
+        };
+        let mut line = String::new();
+        for x in from..=to {
+            line.push_str(buf[(x, y)].symbol());
+        }
+        lines.push(line.trim_end().to_string());
+    }
+    while lines.first().is_some_and(String::is_empty) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
 fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(name) = &report.target_topic_name {
+        lines.push(Line::from(vec![Span::styled(
+            format!("{}: {}", labels.topic_label, name),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(colors::GREEN),
+        )]));
+        lines.push(Line::from(""));
+    }
 
     lines.push(Line::from(vec![Span::styled(
         labels.per_exercise_results,
@@ -425,5 +520,34 @@ mod tests {
 
         state.scroll_by(100);
         assert_eq!(state.scroll_offset, 10);
+    }
+
+    #[test]
+    fn report_header_shows_topic_name() {
+        let mut report = ReportState::default();
+        report.target_topic_name = Some("Preterito".to_string());
+        let lines = build_report_lines(&report, get_report_labels("ru"));
+        let header: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(header, "Тема: Preterito");
+    }
+
+    #[test]
+    fn extract_single_row_selection() {
+        let buf = ratatui::buffer::Buffer::with_lines(["hello world", "second line", "third"]);
+        assert_eq!(extract_selection(&buf, (0, 0), (4, 0)), "hello");
+        // Reversed drag normalizes to the same range.
+        assert_eq!(extract_selection(&buf, (4, 0), (0, 0)), "hello");
+    }
+
+    #[test]
+    fn extract_multi_row_selection_flows_lines() {
+        let buf = ratatui::buffer::Buffer::with_lines(["hello world", "second line", "third"]);
+        // From mid first row to mid second row: tail of row 0 + head of row 1.
+        assert_eq!(extract_selection(&buf, (5, 0), (3, 1)), " world\nseco");
+        // Whole rows in between are included fully.
+        assert_eq!(
+            extract_selection(&buf, (0, 1), (5, 2)),
+            "second line\nthird"
+        );
     }
 }

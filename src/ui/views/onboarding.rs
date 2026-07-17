@@ -325,7 +325,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .constraints([Constraint::Length(4), Constraint::Length(2)])
         .split(chunks[0]);
 
-    frame.render_widget(Logo, header_chunks[0]);
+    frame.render_widget(Logo::new(ratatui::layout::Alignment::Left), header_chunks[0]);
 
     let subtitle = Text::from(vec![
         Line::from(Span::styled(

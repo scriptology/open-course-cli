@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
@@ -260,6 +260,41 @@ async fn handle_event(state: &mut AppState, event: Event) -> Result<()> {
 }
 
 async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
+    // Drag selection on the report page: the app draws the highlight itself
+    // and copies the text on mouse-up, so it works while capture is on.
+    if state.view == View::Report {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                state.report.selection = Some(report::Selection {
+                    start: (mouse.column, mouse.row),
+                    end: (mouse.column, mouse.row),
+                });
+                return Ok(());
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(sel) = &mut state.report.selection {
+                    sel.end = (mouse.column, mouse.row);
+                }
+                return Ok(());
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(sel) = state.report.selection {
+                    if sel.start == sel.end {
+                        // A plain click dismisses the selection.
+                        state.report.selection = None;
+                    } else if let Some(frame) = &state.report.last_frame {
+                        let text = report::extract_selection(frame, sel.start, sel.end);
+                        if !text.is_empty() {
+                            copy_to_clipboard(&text);
+                        }
+                    }
+                }
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     let down = match mouse.kind {
         MouseEventKind::ScrollDown => true,
         MouseEventKind::ScrollUp => false,
@@ -268,7 +303,11 @@ async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
     // Text views scroll by a few lines; list views move the selection one row.
     let delta: i32 = if down { 3 } else { -3 };
     match state.view {
-        View::Report => state.report.scroll_by(delta),
+        View::Dashboard => state.dashboard.scroll_by(delta),
+        View::Report => {
+            state.report.selection = None;
+            state.report.scroll_by(delta);
+        }
         View::Docs if state.docs.viewing_topic.is_some() => state.docs.scroll_by(delta),
         View::Docs => {
             let len = state.docs.topics.len();
@@ -291,10 +330,19 @@ async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
     Ok(())
 }
 
+fn copy_to_clipboard(text: &str) {
+    if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_owned())) {
+        log_debug_event("clipboard", &format!("copy failed: {e}"), None);
+    }
+}
+
 /// Views where the mouse wheel is useful and there is no text input, so mouse
 /// capture can be enabled without breaking typing.
 fn view_supports_mouse(view: View) -> bool {
-    matches!(view, View::Report | View::Docs | View::Curriculum)
+    matches!(
+        view,
+        View::Dashboard | View::Report | View::Docs | View::Curriculum
+    )
 }
 
 fn set_mouse_capture(enabled: bool) -> Result<()> {
@@ -548,6 +596,15 @@ async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
                             new_learning_items: analysis.new_learning_items.clone(),
                         };
 
+                        let target_topic_name = state
+                            .session
+                            .topics
+                            .iter()
+                            .find(|t| {
+                                Some(&t.id) == state.session.target_topic_id.as_ref()
+                            })
+                            .map(|t| t.name.clone());
+
                         state.report = ReportState {
                             analysis: report_analysis,
                             session,
@@ -555,6 +612,9 @@ async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
                             scroll_offset: 0,
                             max_scroll_offset: 0,
                             target_topic_id: state.session.target_topic_id.clone(),
+                            target_topic_name,
+                            selection: None,
+                            last_frame: None,
                         };
 
                         session::reset_session(&mut state.session);

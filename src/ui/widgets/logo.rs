@@ -1,5 +1,5 @@
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Widget};
@@ -9,7 +9,15 @@ use ratatui::widgets::{Paragraph, Widget};
 /// Renders only when the allocated area is wide enough to hold the text.
 /// On smaller screens the widget draws nothing so it does not fight for
 /// space with the actual UI.
-pub struct Logo;
+pub struct Logo {
+    alignment: Alignment,
+}
+
+impl Logo {
+    pub fn new(alignment: Alignment) -> Self {
+        Self { alignment }
+    }
+}
 
 impl Widget for Logo {
     fn render(self, area: Rect, buf: &mut Buffer) {
@@ -20,6 +28,7 @@ impl Widget for Logo {
         let line = Line::from("ＯＰＥＮ  ＣＯＵＲＳＥ");
         Paragraph::new(line)
             .style(Style::default().fg(Color::White))
+            .alignment(self.alignment)
             .render(area, buf);
     }
 }
