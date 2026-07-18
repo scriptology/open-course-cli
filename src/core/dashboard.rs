@@ -38,6 +38,40 @@ fn level_from_topic(topic: &crate::db::curriculum::Topic) -> String {
         })
 }
 
+/// Calculate a dynamic current CEFR level from per-level progress.
+///
+/// Each level is weighted by the amount of curriculum material at that level
+/// multiplied by the average score (`total * percent`). The weighted average
+/// of CEFR values (A1=1..C2=6) is rounded to the nearest level. This means a
+/// level with many active topics pulls the result toward itself, while a
+/// fully mastered but small level has less influence.
+///
+/// Returns `None` when there is no progress yet, so the UI can fall back to
+/// the self-assessed CEFR from the profile.
+pub fn calculate_current_level(levels: &[LevelProgress]) -> Option<String> {
+    let cefr_order = ["A1", "A2", "B1", "B2", "C1", "C2"];
+    let mut total_weight = 0.0;
+    let mut weighted_sum = 0.0;
+
+    for (idx, level) in levels.iter().enumerate() {
+        if level.total == 0 || level.percent <= 0.0 {
+            continue;
+        }
+        let weight = level.total as f64 * level.percent;
+        let value = (idx + 1) as f64;
+        total_weight += weight;
+        weighted_sum += value * weight;
+    }
+
+    if total_weight == 0.0 {
+        return None;
+    }
+
+    let avg = weighted_sum / total_weight;
+    let level_idx = (avg.round() as usize).clamp(1, 6) - 1;
+    Some(cefr_order[level_idx].to_string())
+}
+
 pub fn get_progress_by_level(
     curriculum: &Curriculum,
     progress: &ProgressData,

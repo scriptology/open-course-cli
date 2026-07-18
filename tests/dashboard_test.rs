@@ -1,5 +1,5 @@
 use open_course_cli::core::dashboard::{
-    get_course_progress, get_daily_activity, get_progress_by_level,
+    calculate_current_level, get_course_progress, get_daily_activity, get_progress_by_level,
 };
 use open_course_cli::db::curriculum::{Curriculum, Difficulty, Topic};
 use open_course_cli::db::history::SessionSummary;
@@ -99,19 +99,13 @@ fn progress_by_level() {
     };
 
     let by_level = get_progress_by_level(&curriculum, &progress);
-    let a1 = by_level
-        .iter()
-        .find(|d| d.level == "A1")
-        .unwrap();
+    let a1 = by_level.iter().find(|d| d.level == "A1").unwrap();
     assert_eq!(a1.total, 2);
     assert_eq!(a1.completed, 1);
     assert_eq!(a1.in_progress, 0);
     assert_eq!(a1.not_started, 1);
 
-    let c1 = by_level
-        .iter()
-        .find(|d| d.level == "C1")
-        .unwrap();
+    let c1 = by_level.iter().find(|d| d.level == "C1").unwrap();
     assert_eq!(c1.total, 0);
 }
 
@@ -171,7 +165,6 @@ fn daily_activity() {
     assert_eq!(day3.new_topics, 0);
     assert_eq!(day3.completed_topics, 0);
 }
-
 
 #[test]
 fn weak_selection_activates_and_wraps() {
@@ -251,4 +244,83 @@ fn weak_selection_defaults_to_first() {
         None
     };
     assert_eq!(state.weak_selected, None);
+}
+
+fn level_progress(level: &str, percent: f64) -> open_course_cli::core::dashboard::LevelProgress {
+    open_course_cli::core::dashboard::LevelProgress {
+        level: level.to_string(),
+        total: 1,
+        completed: 0,
+        in_progress: 0,
+        not_started: 0,
+        percent,
+    }
+}
+
+#[test]
+fn current_level_returns_none_without_progress() {
+    let levels = [
+        level_progress("A1", 0.0),
+        level_progress("A2", 0.0),
+        level_progress("B1", 0.0),
+        level_progress("B2", 0.0),
+        level_progress("C1", 0.0),
+        level_progress("C2", 0.0),
+    ];
+    assert_eq!(calculate_current_level(&levels), None);
+}
+
+#[test]
+fn current_level_is_a1_when_only_a1_has_progress() {
+    let levels = [
+        level_progress("A1", 80.0),
+        level_progress("A2", 0.0),
+        level_progress("B1", 0.0),
+        level_progress("B2", 0.0),
+        level_progress("C1", 0.0),
+        level_progress("C2", 0.0),
+    ];
+    assert_eq!(calculate_current_level(&levels), Some("A1".to_string()));
+}
+
+#[test]
+fn current_level_rounds_weighted_average() {
+    // A1=1 with 80%, A2=2 with 80% -> avg = (1*80 + 2*80) / 160 = 1.5 -> A2
+    let levels = [
+        level_progress("A1", 80.0),
+        level_progress("A2", 80.0),
+        level_progress("B1", 0.0),
+        level_progress("B2", 0.0),
+        level_progress("C1", 0.0),
+        level_progress("C2", 0.0),
+    ];
+    assert_eq!(calculate_current_level(&levels), Some("A2".to_string()));
+}
+
+#[test]
+fn current_level_can_go_down() {
+    // A1 mastered, B1 barely touched -> weighted average closer to A1
+    let levels = [
+        level_progress("A1", 100.0),
+        level_progress("A2", 0.0),
+        level_progress("B1", 10.0),
+        level_progress("B2", 0.0),
+        level_progress("C1", 0.0),
+        level_progress("C2", 0.0),
+    ];
+    assert_eq!(calculate_current_level(&levels), Some("A1".to_string()));
+}
+
+#[test]
+fn current_level_trends_up_with_higher_level_progress() {
+    // A1 not touched, A2 and B1 equally progressed -> avg = 2.5 -> B1
+    let levels = [
+        level_progress("A1", 0.0),
+        level_progress("A2", 80.0),
+        level_progress("B1", 80.0),
+        level_progress("B2", 0.0),
+        level_progress("C1", 0.0),
+        level_progress("C2", 0.0),
+    ];
+    assert_eq!(calculate_current_level(&levels), Some("B1".to_string()));
 }

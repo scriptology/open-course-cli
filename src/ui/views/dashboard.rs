@@ -10,17 +10,17 @@ use ratatui::widgets::{Block, Borders, Padding, Paragraph, Widget, Wrap, calenda
 use crate::app::{AppState, View};
 use crate::config::OpenCourseConfig;
 use crate::core::dashboard::{
-    CourseProgress, DailyActivity, LevelProgress, get_course_progress, get_daily_activity,
-    get_progress_by_level,
+    CourseProgress, DailyActivity, LevelProgress, calculate_current_level, get_course_progress,
+    get_daily_activity, get_progress_by_level,
 };
 use crate::core::session::{get_due_review_topics, get_weak_review_topics};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
+use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
 use crate::ui::widgets::activity_calendar;
 use crate::ui::widgets::{HintBar, Logo, StackedProgressBar};
-use crate::ui::colors;
 
 #[derive(Debug, Clone)]
 pub struct DashboardState {
@@ -37,6 +37,7 @@ pub struct DashboardState {
     pub weak_selected: Option<usize>,
     pub scroll_offset: u16,
     pub max_scroll: u16,
+    pub current_level: Option<String>,
 }
 
 impl Default for DashboardState {
@@ -61,6 +62,7 @@ impl Default for DashboardState {
             weak_selected: None,
             scroll_offset: 0,
             max_scroll: 0,
+            current_level: None,
         }
     }
 }
@@ -116,11 +118,18 @@ impl DashboardState {
 
         self.course = get_course_progress(&curriculum, &progress);
         self.levels = get_progress_by_level(&curriculum, &progress);
+        self.current_level = calculate_current_level(&self.levels);
         self.session_count = progress.session_count;
-        self.activity = get_daily_activity(&all_history, &progress, 14, chrono::Local::now().date_naive());
+        self.activity = get_daily_activity(
+            &all_history,
+            &progress,
+            14,
+            chrono::Local::now().date_naive(),
+        );
 
         let cefr = config.and_then(|c| c.active_profile().self_assessed_cefr.as_deref());
-        self.due_count = get_due_review_topics(&curriculum.topics, &progress, cefr, Utc::now()).len();
+        self.due_count =
+            get_due_review_topics(&curriculum.topics, &progress, cefr, Utc::now()).len();
         self.weak_topics = get_weak_review_topics(&curriculum.topics, &progress, Utc::now());
 
         if let Some(config) = config {
@@ -197,7 +206,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         ])
         .areas(offscreen.area);
         draw_top(&mut offscreen, top_area, state, labels, narrow);
-        draw_middle(&mut offscreen, middle_area, state, labels, calendar_height, narrow);
+        draw_middle(
+            &mut offscreen,
+            middle_area,
+            state,
+            labels,
+            calendar_height,
+            narrow,
+        );
         draw_weak_topics(&mut offscreen, weak_area, state, labels);
 
         blit(
@@ -248,8 +264,12 @@ fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels
 
         let left = Text::from(vec![info_lines[0].clone(), info_lines[1].clone()]);
         let right = Text::from(vec![info_lines[2].clone(), info_lines[3].clone()]);
-        Paragraph::new(left).alignment(Alignment::Left).render(cols[0], buf);
-        Paragraph::new(right).alignment(Alignment::Right).render(cols[1], buf);
+        Paragraph::new(left)
+            .alignment(Alignment::Left)
+            .render(cols[0], buf);
+        Paragraph::new(right)
+            .alignment(Alignment::Right)
+            .render(cols[1], buf);
     } else {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -284,7 +304,13 @@ fn profile_info_lines(state: &AppState, labels: ReportLabels) -> Vec<Line<'stati
         state.dashboard.model.clone()
     };
     let cefr = config
-        .and_then(|c| c.active_profile().self_assessed_cefr.as_ref())
+        .and_then(|c| {
+            state
+                .dashboard
+                .current_level
+                .as_deref()
+                .or(c.active_profile().self_assessed_cefr.as_deref())
+        })
         .map(|c| {
             Span::styled(
                 format!(" | {}: {}", labels.level_label, c),
@@ -295,12 +321,18 @@ fn profile_info_lines(state: &AppState, labels: ReportLabels) -> Vec<Line<'stati
 
     vec![
         Line::from(vec![
-            Span::styled(format!("{}: ", labels.learning), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}: ", labels.learning),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(format!("{} → {}", native, target)),
             cefr,
         ]),
         Line::from(vec![
-            Span::styled(format!("{}: ", labels.sessions), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}: ", labels.sessions),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(state.dashboard.session_count.to_string()),
         ]),
         Line::from(vec![
@@ -311,7 +343,10 @@ fn profile_info_lines(state: &AppState, labels: ReportLabels) -> Vec<Line<'stati
             Span::raw(state.dashboard.due_count.to_string()),
         ]),
         Line::from(vec![
-            Span::styled(format!("{}: ", labels.provider_label), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}: ", labels.provider_label),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(format!("{} / {}", provider, model)),
         ]),
     ]
@@ -371,7 +406,10 @@ fn draw_progress(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
             .split(inner);
 
         Paragraph::new(Line::from(vec![
-            Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}: ", labels.course_label),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 format!("{} ({})", course.completed, labels.completed_label),
                 Style::default().fg(COLOR_COMPLETED),
@@ -415,11 +453,20 @@ fn draw_progress(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
                     format!("{}: ", level),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(progress.completed.to_string(), Style::default().fg(COLOR_COMPLETED)),
+                Span::styled(
+                    progress.completed.to_string(),
+                    Style::default().fg(COLOR_COMPLETED),
+                ),
                 Span::raw("/"),
-                Span::styled(progress.in_progress.to_string(), Style::default().fg(COLOR_IN_PROGRESS)),
+                Span::styled(
+                    progress.in_progress.to_string(),
+                    Style::default().fg(COLOR_IN_PROGRESS),
+                ),
                 Span::raw("/"),
-                Span::styled(progress.not_started.to_string(), Style::default().fg(COLOR_NEW)),
+                Span::styled(
+                    progress.not_started.to_string(),
+                    Style::default().fg(COLOR_NEW),
+                ),
             ]))
             .render(row[0], buf);
 
@@ -445,7 +492,10 @@ fn draw_progress(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
         .split(inner);
 
     Paragraph::new(Line::from(vec![
-        Span::styled(format!("{}: ", labels.course_label), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{}: ", labels.course_label),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             format!("{} ({})", course.completed, labels.completed_label),
             Style::default().fg(COLOR_COMPLETED),
@@ -578,10 +628,7 @@ fn draw_weak_topics(buf: &mut Buffer, area: Rect, state: &AppState, labels: Repo
                     Span::styled(marker, name_style),
                     Span::styled(topic.name.clone(), name_style),
                     Span::styled(
-                        format!(
-                            " [{}]",
-                            topic.level.as_deref().unwrap_or(&topic.difficulty)
-                        ),
+                        format!(" [{}]", topic.level.as_deref().unwrap_or(&topic.difficulty)),
                         Style::default().fg(Color::DarkGray),
                     ),
                 ])
@@ -635,14 +682,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Up | KeyCode::Char('k') => state.dashboard.move_weak_selection(-1),
         KeyCode::Enter => {
             if let Some(sel) = state.dashboard.weak_selected {
-                if let Some(topic) = state
-                    .dashboard
-                    .weak_topics
-                    .iter()
-                    .take(5)
-                    .nth(sel)
-                    .cloned()
-                {
+                if let Some(topic) = state.dashboard.weak_topics.iter().take(5).nth(sel).cloned() {
                     state.view = View::Session;
                     session::start_review_topic_session(state, topic.id).await?;
                 }
