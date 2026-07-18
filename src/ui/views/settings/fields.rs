@@ -1,5 +1,4 @@
 use crate::config::OpenCourseConfig;
-use crate::config::profile::HintMode;
 use crate::config::write_config;
 use crate::db::curriculum::CEFR_LEVELS;
 use crate::error::{AppError, Result};
@@ -95,8 +94,12 @@ static FIELDS: &[FieldDef] = &[
         section: Section::Session,
         index: 0,
         label: "Batch size",
-        text_input: true,
-        display: |config: &OpenCourseConfig| config.preferences.batch_size.to_string(),
+        text_input: false,
+        display: |config: &OpenCourseConfig| {
+            let size = config.preferences.batch_size;
+            let suffix = if size == 3 { " (recommended)" } else { "" };
+            format!("{}{}", size, suffix)
+        },
         load: |config: &OpenCourseConfig| config.preferences.batch_size.to_string(),
         apply: |config: &mut OpenCourseConfig, value: &str| -> Result<()> {
             let size = value
@@ -106,27 +109,6 @@ static FIELDS: &[FieldDef] = &[
                 return Err(AppError::Config("Batch size must be 2-5".to_string()));
             }
             config.preferences.batch_size = size;
-            Ok(())
-        },
-    },
-    FieldDef {
-        section: Section::Session,
-        index: 1,
-        label: "Hint mode",
-        text_input: false,
-        display: |config: &OpenCourseConfig| match config.preferences.hint_mode {
-            HintMode::Auto => "auto".to_string(),
-            HintMode::OnDemand => "on-demand".to_string(),
-        },
-        load: |config: &OpenCourseConfig| match config.preferences.hint_mode {
-            HintMode::Auto => "auto".to_string(),
-            HintMode::OnDemand => "on-demand".to_string(),
-        },
-        apply: |config: &mut OpenCourseConfig, _value: &str| -> Result<()> {
-            config.preferences.hint_mode = match config.preferences.hint_mode {
-                HintMode::Auto => HintMode::OnDemand,
-                HintMode::OnDemand => HintMode::Auto,
-            };
             Ok(())
         },
     },

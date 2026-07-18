@@ -146,7 +146,9 @@ fn build_footer(state: &AppState) -> String {
 
     let mut lines = vec![String::new()];
     if state.settings.section == Section::Data {
-        lines[0] = "Tab/Shift+Tab: action | Enter: reset | Esc: back".to_string();
+        lines[0] = "↑/↓: action | Enter: reset | Esc: back".to_string();
+    } else if state.settings.section == Section::Session {
+        lines[0] = "↑/↓: change | Enter: save | Esc: back".to_string();
     } else {
         lines[0] = "Tab/Shift+Tab: field | Enter: save | Esc: back".to_string();
     }
@@ -357,6 +359,34 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             state.settings.loaded_field = None;
             state.settings.error = None;
         }
+        KeyCode::Up | KeyCode::Char('k') => match state.settings.section {
+            Section::Session => {
+                if let Some(config) = state.config.as_mut() {
+                    let current = config.preferences.batch_size;
+                    config.preferences.batch_size = if current <= 2 { 5 } else { current - 1 };
+                }
+            }
+            Section::Data => {
+                state.settings.prev_field();
+                state.settings.loaded_field = None;
+                state.settings.error = None;
+            }
+            _ => {}
+        },
+        KeyCode::Down | KeyCode::Char('j') => match state.settings.section {
+            Section::Session => {
+                if let Some(config) = state.config.as_mut() {
+                    let current = config.preferences.batch_size;
+                    config.preferences.batch_size = if current >= 5 { 2 } else { current + 1 };
+                }
+            }
+            Section::Data => {
+                state.settings.next_field();
+                state.settings.loaded_field = None;
+                state.settings.error = None;
+            }
+            _ => {}
+        },
         KeyCode::Enter => {
             if state.settings.section == Section::Data {
                 if let Some(action) = ResetAction::from_field(state.settings.active_field) {
