@@ -386,14 +386,22 @@ async fn handle_update_key(state: &mut AppState, code: KeyCode) -> Result<()> {
 }
 
 async fn run_installer_and_exit(state: &mut AppState) -> Result<()> {
+    use ratatui::crossterm::execute;
+    use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
+    use std::io::{stdout, Write};
+
     let latest = state
         .update
         .latest_version
         .clone()
         .unwrap_or_else(|| "latest".to_string());
-    println!("Installing open-course-cli {latest}...");
 
-    ratatui::crossterm::terminal::disable_raw_mode()?;
+    // Restore the normal terminal before handing control to the installer.
+    disable_raw_mode()?;
+    execute!(stdout(), LeaveAlternateScreen)?;
+    stdout().flush()?;
+
+    println!("Installing open-course-cli {latest}...");
 
     let status = std::process::Command::new("sh")
         .arg("-c")
