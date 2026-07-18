@@ -196,4 +196,36 @@ impl ProviderConfig {
             } => reasoning_effort.as_deref(),
         }
     }
+
+    /// Returns a copy with a different API key.
+    pub fn with_api_key(mut self, api_key: Option<String>) -> Self {
+        match &mut self {
+            ProviderConfig::ApiKey { api_key: slot, .. } => *slot = api_key,
+        }
+        self
+    }
+
+    /// Returns a copy with a different model.
+    pub fn with_model(mut self, model: String) -> Self {
+        match &mut self {
+            ProviderConfig::ApiKey { model: slot, .. } => *slot = model,
+        }
+        self
+    }
+
+    /// Returns a copy with a different base URL.
+    pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
+        match &mut self {
+            ProviderConfig::ApiKey { base_url: slot, .. } => *slot = base_url,
+        }
+        self
+    }
+
+    /// Returns a copy with a different endpoint.
+    pub fn with_endpoint(mut self, endpoint: Option<String>) -> Self {
+        match &mut self {
+            ProviderConfig::ApiKey { endpoint: slot, .. } => *slot = endpoint,
+        }
+        self
+    }
 }

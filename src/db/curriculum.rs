@@ -132,6 +132,25 @@ pub fn should_remove_topic(name: &str) -> bool {
     is_abstract_topic_name(name) || name.to_lowercase().starts_with("spelling")
 }
 
+/// Splits `topics` into (kept, removed), merging fuzzy name duplicates (same
+/// criterion as `learning_items::is_duplicate_name`). The first topic of
+/// each duplicate group is kept, so the result is deterministic.
+pub fn dedupe(topics: Vec<Topic>) -> (Vec<Topic>, Vec<Topic>) {
+    use crate::db::learning_items::is_duplicate_name;
+
+    let mut kept: Vec<Topic> = Vec::new();
+    let mut removed: Vec<Topic> = Vec::new();
+    for topic in topics {
+        let kept_names: Vec<String> = kept.iter().map(|t| t.name.clone()).collect();
+        if is_duplicate_name(&kept_names, &topic.name).is_some() {
+            removed.push(topic);
+        } else {
+            kept.push(topic);
+        }
+    }
+    (kept, removed)
+}
+
 /// Removes abstract/spelling topics from curriculum, progress, and reviews tables,
 /// and moves micro-topics (concrete learning items such as "X vs Y" or "Rule: example")
 /// into the `learning_items` table while preserving their scores.
@@ -514,4 +533,52 @@ fn topics_from_record_batch(batch: &RecordBatch) -> Result<Curriculum> {
         target_language: target_col.value(0).to_string(),
         native_language: native_col.value(0).to_string(),
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_topic(id: &str, name: &str) -> Topic {
+        Topic {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            difficulty: "beginner".to_string(),
+            level: None,
+            order: None,
+            tags: vec![],
+            target_lang: "es".to_string(),
+            native_lang: "ru".to_string(),
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn dedupe_removes_duplicate_topic_names() {
+        let topics = vec![
+            make_topic("t1", "Conjugation patterns"),
+            make_topic("t2", "Conjugation Patterns"),
+            make_topic("t3", "Word stress rules"),
+        ];
+        let (kept, removed) = dedupe(topics);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(removed.len(), 1);
+        // The first topic of the duplicate group is kept.
+        assert_eq!(kept[0].id, "t1");
+        assert_eq!(kept[1].id, "t3");
+        assert_eq!(removed[0].id, "t2");
+    }
+
+    #[test]
+    fn dedupe_keeps_distinct_topics() {
+        let topics = vec![
+            make_topic("t1", "Prepositions with events"),
+            make_topic("t2", "Countable vs uncountable nouns"),
+        ];
+        let (kept, removed) = dedupe(topics);
+        assert_eq!(kept.len(), 2);
+        assert!(removed.is_empty());
+    }
 }

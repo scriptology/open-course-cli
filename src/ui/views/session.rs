@@ -6,8 +6,8 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wid
 
 use crate::app::{AppState, LlmResult, View};
 use crate::core::session::{
-    AnalysisResult, Exercise, MentorSession, NextSessionTopic, advance_exercise,
-    is_session_complete, pick_next_session_topic, record_answer, select_side_topics,
+    AnalysisResult, Exercise, MentorSession, NextSessionTopic, pick_next_session_topic,
+    select_side_topics,
 };
 use crate::db::curriculum::Topic;
 use crate::db::learning_items::{LearningItem, LearningItemsTable};
@@ -395,7 +395,14 @@ pub(crate) async fn start_exercises_for_topic(
             "No topics available. Generate a curriculum first.".to_string(),
         ));
     }
-    let side_topics = select_side_topics(&all_topics, std::slice::from_ref(&target_topic), 3);
+    let progress = state.db.progress().read_all().await.unwrap_or_default();
+    let side_topics = select_side_topics(
+        &all_topics,
+        std::slice::from_ref(&target_topic),
+        3,
+        &progress,
+        chrono::Utc::now(),
+    );
 
     let candidate_topics: Vec<Topic> = std::iter::once(&target_topic)
         .chain(side_topics.iter())
@@ -493,16 +500,16 @@ pub async fn maybe_start_pending_new_topic(state: &mut AppState) -> Result<()> {
 
 async fn submit_answer(state: &mut AppState) -> Result<()> {
     let answer = state.session.input.clone();
-    let session = state
+    let mut session = state
         .session
         .mentor_session
         .take()
         .ok_or_else(|| AppError::Config("No active session".to_string()))?;
     let idx = session.current_exercise_index;
-    let session = record_answer(&session, idx, answer);
-    let session = advance_exercise(&session);
+    session.record_answer(idx, answer);
+    session.advance_exercise();
 
-    if is_session_complete(&session) {
+    if session.is_complete() {
         state.session.mentor_session = Some(session);
         finish_session(state).await?;
     } else {

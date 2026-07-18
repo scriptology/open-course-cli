@@ -22,6 +22,30 @@ pub struct ProgressTopic {
     pub last_practiced: Option<String>,
 }
 
+impl ProgressTopic {
+    /// A fresh, never-practiced progress entry starting at `initial_score`.
+    pub fn initial(topic_id: String, initial_score: f64) -> Self {
+        Self {
+            topic_id,
+            score: initial_score,
+            mastery: initial_score,
+            difficulty_estimate: 0.0,
+            practice_count: 0,
+            last_practiced: None,
+        }
+    }
+}
+
+/// Starting score for a newly added topic: material below the user's CEFR
+/// level is treated as already familiar (100), everything else starts at 0.
+pub fn initial_topic_score(topic_cefr: i32, user_cefr: i32) -> f64 {
+    if topic_cefr > 0 && topic_cefr < user_cefr {
+        100.0
+    } else {
+        0.0
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProgressData {
     pub version: i32,

@@ -4,6 +4,7 @@ pub mod confirmation;
 pub mod error_box;
 pub mod hint_bar;
 pub mod markdown_style;
+pub mod model_picker;
 pub mod progress_bar;
 pub mod sparkline;
 pub mod spinner;

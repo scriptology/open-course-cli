@@ -13,7 +13,7 @@ use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::llm::client::{LlmClient, DEFAULT_MAX_TOKENS};
 use crate::llm::pipeline::{
-    generate_analysis, generate_exercises, generate_topic_review, looks_like_topic_review,
+    generate_analysis, generate_exercises, generate_topic_review, is_valid_topic_review,
 };
 use crate::llm::prompts::{
     build_batch_analysis_prompt, build_exercise_prompt, build_topic_review_prompt,
@@ -370,7 +370,7 @@ async fn run_topic_review_check(client: Arc<dyn LlmClient>, profile: &UserProfil
     .await
     {
         Ok(Ok(text)) => {
-            if looks_like_topic_review(&text) {
+            if is_valid_topic_review(&text) {
                 CheckStatus::Passed
             } else {
                 CheckStatus::Failed("output doesn't look like a topic review".to_string())

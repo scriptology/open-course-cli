@@ -34,7 +34,6 @@ async fn render_dashboard_at_various_sizes() {
         Arc::new(AtomicBool::new(false)),
         tx,
     )
-    .await
     .unwrap();
     state.view = View::Dashboard;
 

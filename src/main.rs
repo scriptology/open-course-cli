@@ -56,6 +56,12 @@ async fn main() -> anyhow::Result<()> {
         if moved > 0 || removed > 0 {
             eprintln!("Cleaned up {moved} micro-topics and removed {removed} stale topics");
         }
+        let (removed_items, removed_topics) = dedupe_tables(&db).await?;
+        if removed_items > 0 || removed_topics > 0 {
+            eprintln!(
+                "Removed {removed_items} duplicate learning items and {removed_topics} duplicate topics"
+            );
+        }
         Arc::new(db)
     } else {
         let fallback_db = config::open_course_dir(&data_dir).join("db");
@@ -63,6 +69,12 @@ async fn main() -> anyhow::Result<()> {
         let (moved, removed) = cleanup_topics(&db).await?;
         if moved > 0 || removed > 0 {
             eprintln!("Cleaned up {moved} micro-topics and removed {removed} stale topics");
+        }
+        let (removed_items, removed_topics) = dedupe_tables(&db).await?;
+        if removed_items > 0 || removed_topics > 0 {
+            eprintln!(
+                "Removed {removed_items} duplicate learning items and {removed_topics} duplicate topics"
+            );
         }
         Arc::new(db)
     };
@@ -109,4 +121,25 @@ fn setup_panic_hook() {
         println!();
         original(info);
     }));
+}
+
+/// One-off startup maintenance: removes fuzzy-duplicate learning items and
+/// curriculum topics left over from earlier versions. Idempotent — does
+/// nothing when there are no duplicates.
+async fn dedupe_tables(db: &Database) -> anyhow::Result<(usize, usize)> {
+    let items = db.learning_items().read_all().await?;
+    let (_, removed_items) = open_course_cli::db::learning_items::dedupe(items);
+    for item in &removed_items {
+        db.learning_items().delete_by_id(&item.id).await?;
+    }
+
+    let curriculum = db.curriculum().read_all().await?;
+    let (_, removed_topics) = open_course_cli::db::curriculum::dedupe(curriculum.topics);
+    for topic in &removed_topics {
+        db.curriculum().delete_by_topic_id(&topic.id).await?;
+        let _ = db.progress().delete_by_topic_id(&topic.id).await;
+        let _ = db.reviews().remove_by_topic_id(&topic.id).await;
+    }
+
+    Ok((removed_items.len(), removed_topics.len()))
 }

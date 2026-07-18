@@ -129,6 +129,98 @@ fn has_target_language_word(name: &str) -> bool {
     })
 }
 
+/// Grammar labels and generic connectors (English and Russian) that carry no
+/// meaning when matching item names against session text or against each
+/// other for deduplication.
+const STOP_WORDS: &[&str] = &[
+    "adverb", "verb", "verbs", "noun", "adjective", "article", "preposition", "vs", "and", "or",
+    "the", "a", "an", "with", "for", "in", "on", "at", "of", "to", "с", "для", "и", "или", "по",
+    "на", "в", "от", "из",
+];
+
+/// Content words of `text`: split on non-letter (Unicode) characters,
+/// normalize each token (NFKD, alphanumeric-only, lowercase — same logic as
+/// the report view's word matching), then drop stop words and tokens shorter
+/// than 2 characters.
+pub(crate) fn significant_words(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphabetic())
+        .map(normalize_token)
+        .filter(|w| w.chars().count() >= 2 && !STOP_WORDS.contains(&w.as_str()))
+        .collect()
+}
+
+/// Whether any of `words` appears in `text` as a whole normalized word —
+/// never as a substring ("in" does not match "inside").
+pub(crate) fn text_contains_any_word(text: &str, words: &[String]) -> bool {
+    text.split(|c: char| !c.is_alphabetic())
+        .map(normalize_token)
+        .any(|w| !w.is_empty() && words.contains(&w))
+}
+
+fn normalize_token(word: &str) -> String {
+    word.nfkd()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Fuzzy duplicate detection on name words. Returns the index of the first
+/// `existing` name duplicating `candidate`: Jaccard similarity of the
+/// significant-word sets ≥ 0.8, or one set containing the other (both
+/// non-empty). Names with no significant words never count as duplicates.
+pub fn is_duplicate_name(existing: &[String], candidate: &str) -> Option<usize> {
+    let candidate_words: std::collections::HashSet<String> =
+        significant_words(candidate).into_iter().collect();
+    if candidate_words.is_empty() {
+        return None;
+    }
+    for (i, name) in existing.iter().enumerate() {
+        let existing_words: std::collections::HashSet<String> =
+            significant_words(name).into_iter().collect();
+        if existing_words.is_empty() {
+            continue;
+        }
+        let intersection = candidate_words.intersection(&existing_words).count();
+        if intersection == 0 {
+            continue;
+        }
+        let union = candidate_words.union(&existing_words).count();
+        let jaccard = intersection as f64 / union as f64;
+        let subset = candidate_words.is_subset(&existing_words)
+            || existing_words.is_subset(&candidate_words);
+        if jaccard >= 0.8 || subset {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Splits `items` into (kept, removed), merging fuzzy name duplicates (same
+/// criterion as `is_duplicate_name`). From each duplicate group the item
+/// with the highest practice_count is kept (ties: higher score, then
+/// earliest in the input order), so the result is deterministic.
+pub fn dedupe(items: Vec<LearningItem>) -> (Vec<LearningItem>, Vec<LearningItem>) {
+    let mut kept: Vec<LearningItem> = Vec::new();
+    let mut removed: Vec<LearningItem> = Vec::new();
+    for item in items {
+        let kept_names: Vec<String> = kept.iter().map(|k| k.name.clone()).collect();
+        match is_duplicate_name(&kept_names, &item.name) {
+            Some(pos) => {
+                let replace = item.practice_count > kept[pos].practice_count
+                    || (item.practice_count == kept[pos].practice_count
+                        && item.score > kept[pos].score);
+                if replace {
+                    removed.push(std::mem::replace(&mut kept[pos], item));
+                } else {
+                    removed.push(item);
+                }
+            }
+            None => kept.push(item),
+        }
+    }
+    (kept, removed)
+}
+
 fn schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
         Field::new("id", DataType::Utf8, false),
@@ -142,6 +234,11 @@ fn schema() -> Arc<Schema> {
         Field::new("practice_count", DataType::Int32, false),
     ]))
 }
+
+/// Score below which a learning item still counts as weak. Mirrors
+/// `core::session::MASTERY_THRESHOLD`; the db layer cannot import from
+/// core, so the constant is deliberately duplicated here.
+const ITEM_MASTERY_THRESHOLD: f64 = 50.0;
 
 #[derive(Clone)]
 pub struct LearningItemsTable {
@@ -190,17 +287,18 @@ impl LearningItemsTable {
         Ok(())
     }
 
-    /// Return the `n` weakest learning items: lowest score first, then least
-    /// recently practiced. Prefers items with score < 50.
+    /// Return up to `n` weakest learning items: lowest score first, then
+    /// least recently practiced (never-practiced first). Only items with
+    /// score below `ITEM_MASTERY_THRESHOLD` qualify — items at or above the
+    /// threshold have graduated and are never returned, so the result may
+    /// be shorter than `n` (no padding).
     pub fn weakest(items: &[LearningItem], n: usize) -> Vec<LearningItem> {
-        let mut sorted: Vec<LearningItem> = items.to_vec();
-        sorted.sort_by(|a, b| {
-            let weak_a = if a.score < 50.0 { 0 } else { 1 };
-            let weak_b = if b.score < 50.0 { 0 } else { 1 };
-            match weak_a.cmp(&weak_b) {
-                std::cmp::Ordering::Equal => {}
-                other => return other,
-            }
+        let mut qualified: Vec<LearningItem> = items
+            .iter()
+            .filter(|i| i.score < ITEM_MASTERY_THRESHOLD)
+            .cloned()
+            .collect();
+        qualified.sort_by(|a, b| {
             let score_cmp = a
                 .score
                 .partial_cmp(&b.score)
@@ -215,7 +313,7 @@ impl LearningItemsTable {
                 (None, None) => std::cmp::Ordering::Equal,
             }
         });
-        sorted.into_iter().take(n).collect()
+        qualified.into_iter().take(n).collect()
     }
 }
 
@@ -346,5 +444,131 @@ mod tests {
         assert!(!is_learning_item_name("Adjective placement"));
         assert!(!is_learning_item_name("Common Spelling Errors"));
         assert!(!is_learning_item_name("Present tense verbs"));
+    }
+
+    fn make_item(
+        id: &str,
+        name: &str,
+        score: f64,
+        last_practiced: Option<&str>,
+        practice_count: i32,
+    ) -> LearningItem {
+        LearningItem {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            level: None,
+            target_lang: "es".to_string(),
+            native_lang: "ru".to_string(),
+            score,
+            last_practiced: last_practiced.map(|s| s.to_string()),
+            practice_count,
+        }
+    }
+
+    #[test]
+    fn significant_words_strip_labels_and_stop_words() {
+        assert_eq!(
+            significant_words("Adverb: вслух → out loud/aloud"),
+            vec!["вслух", "out", "loud", "aloud"]
+        );
+        assert_eq!(significant_words("Verb: remind vs notice"), vec!["remind", "notice"]);
+        assert!(significant_words("Verb vs Noun").is_empty());
+        // Accents are normalized away.
+        assert_eq!(significant_words("pequeño/pequeña"), vec!["pequeno", "pequena"]);
+    }
+
+    #[test]
+    fn weakest_skips_graduated_items() {
+        let items = vec![
+            make_item("a", "a-item", 30.0, None, 1),
+            make_item("b", "b-item", 50.0, None, 1),
+            make_item("c", "c-item", 80.0, None, 1),
+        ];
+        let weak = LearningItemsTable::weakest(&items, 3);
+        assert_eq!(weak.len(), 1);
+        assert_eq!(weak[0].id, "a");
+    }
+
+    #[test]
+    fn weakest_does_not_pad_to_n() {
+        let items = vec![
+            make_item("a", "a-item", 10.0, None, 1),
+            make_item("b", "b-item", 90.0, None, 1),
+        ];
+        let weak = LearningItemsTable::weakest(&items, 5);
+        assert_eq!(weak.len(), 1);
+    }
+
+    #[test]
+    fn weakest_orders_by_score_then_recency() {
+        let items = vec![
+            make_item("recent", "recent-item", 40.0, Some("2024-01-10T00:00:00Z"), 1),
+            make_item("never", "never-item", 40.0, None, 0),
+            make_item("older", "older-item", 40.0, Some("2024-01-01T00:00:00Z"), 1),
+            make_item("weakest", "weakest-item", 10.0, Some("2024-02-01T00:00:00Z"), 5),
+        ];
+        let weak = LearningItemsTable::weakest(&items, 4);
+        let ids: Vec<&str> = weak.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["weakest", "never", "older", "recent"]);
+    }
+
+    #[test]
+    fn duplicate_name_detection() {
+        let existing = vec!["Verb: remind vs notice".to_string()];
+        assert!(is_duplicate_name(&existing, "Verbs: remind vs notice").is_some());
+
+        let existing = vec!["in time vs on time".to_string()];
+        assert!(is_duplicate_name(&existing, "On time vs In time").is_some());
+
+        let existing = vec!["Prepositions with events".to_string()];
+        assert!(is_duplicate_name(&existing, "Countable vs uncountable nouns").is_none());
+
+        // Names that reduce to no significant words never dedupe.
+        let existing = vec!["Verb vs Noun".to_string()];
+        assert!(is_duplicate_name(&existing, "Adverb or Adjective").is_none());
+    }
+
+    #[test]
+    fn dedupe_merges_duplicates_keeping_most_practiced() {
+        let items = vec![
+            make_item("a", "Verb: remind vs notice", 10.0, None, 1),
+            make_item("b", "Verbs: remind vs notice", 40.0, None, 5),
+            make_item("c", "Countable vs uncountable nouns", 20.0, None, 2),
+        ];
+        let (kept, removed) = dedupe(items);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(removed.len(), 1);
+        let kept_ids: Vec<&str> = kept.iter().map(|i| i.id.as_str()).collect();
+        assert!(kept_ids.contains(&"b"));
+        assert!(kept_ids.contains(&"c"));
+        assert_eq!(removed[0].id, "a");
+    }
+
+    #[test]
+    fn dedupe_keeps_distinct_items() {
+        let items = vec![
+            make_item("a", "pequeño/pequeña", 10.0, None, 1),
+            make_item("b", "caro vs rico", 40.0, None, 5),
+        ];
+        let (kept, removed) = dedupe(items);
+        assert_eq!(kept.len(), 2);
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn dedupe_tie_breaks_by_score_then_insertion_order() {
+        let items = vec![
+            make_item("first", "remind vs notice", 30.0, None, 2),
+            // Same practice_count but higher score -> replaces the keeper.
+            make_item("second", "Remind vs notice", 50.0, None, 2),
+            // Fully tied with the keeper -> the earlier one stays.
+            make_item("third", "remind VS notice", 50.0, None, 2),
+        ];
+        let (kept, removed) = dedupe(items);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].id, "second");
+        let removed_ids: Vec<&str> = removed.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(removed_ids, ["first", "third"]);
     }
 }

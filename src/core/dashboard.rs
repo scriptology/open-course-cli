@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use chrono::NaiveDate;
 
+use crate::core::session::COMPLETED_THRESHOLD;
 use crate::db::curriculum::Curriculum;
 use crate::db::history::SessionSummary;
 use crate::db::progress::ProgressData;
@@ -63,7 +64,7 @@ pub fn get_progress_by_level(
                     None => not_started += 1,
                     Some(pt) => {
                         total_score += pt.score;
-                        if pt.score >= 80.0 {
+                        if pt.score >= COMPLETED_THRESHOLD {
                             completed += 1;
                         } else if pt.last_practiced.is_some() {
                             in_progress += 1;
@@ -106,7 +107,7 @@ pub fn get_course_progress(curriculum: &Curriculum, progress: &ProgressData) -> 
             None => not_started += 1,
             Some(pt) => {
                 total_score += pt.score;
-                if pt.score >= 80.0 {
+                if pt.score >= COMPLETED_THRESHOLD {
                     completed += 1;
                 } else if pt.last_practiced.is_some() {
                     in_progress += 1;
@@ -194,7 +195,7 @@ pub fn get_daily_activity(
     }
 
     for pt in &progress.topics {
-        if pt.score < 80.0 {
+        if pt.score < COMPLETED_THRESHOLD {
             continue;
         }
         if let Some(rfc) = pt.last_practiced.as_deref() {
