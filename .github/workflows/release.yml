@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g. v0.2.0). If empty, builds only without creating a release."
+        description: "Version tag to release, e.g. v0.2.0. Leave empty to build artifacts only without creating a release."
         required: false
         default: ""
 
