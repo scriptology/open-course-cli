@@ -6,3 +6,4 @@ pub mod error;
 pub mod event;
 pub mod llm;
 pub mod ui;
+pub mod update;

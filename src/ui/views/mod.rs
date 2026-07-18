@@ -7,6 +7,7 @@ pub mod pairs;
 pub mod report;
 pub mod session;
 pub mod settings;
+pub mod update;
 pub mod utils;
 
 pub use curriculum::CurriculumState;
@@ -18,3 +19,4 @@ pub use pairs::PairsState;
 pub use report::ReportState;
 pub use session::SessionState;
 pub use settings::SettingsState;
+pub use update::UpdateState;

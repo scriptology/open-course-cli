@@ -254,7 +254,15 @@ fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels
             ])
             .split(inner);
 
-        Logo::new(Alignment::Center).render(rows[0], buf);
+        let logo_row = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(10)])
+            .split(rows[0]);
+        Logo::new(Alignment::Center).render(logo_row[0], buf);
+        Paragraph::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Right)
+            .render(logo_row[1], buf);
 
         let info_lines = profile_info_lines(state, labels);
         let cols = Layout::default()
@@ -276,7 +284,15 @@ fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels
             .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
             .split(inner);
 
-        Logo::new(Alignment::Left).render(chunks[0], buf);
+        let left_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(22), Constraint::Min(0)])
+            .split(chunks[0]);
+        Logo::new(Alignment::Left).render(left_chunks[0], buf);
+        Paragraph::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Left)
+            .render(left_chunks[1], buf);
         profile_info(state, labels).render(chunks[1], buf);
     }
 }

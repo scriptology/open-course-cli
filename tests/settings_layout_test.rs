@@ -6,6 +6,7 @@ use open_course_cli::app::{AppState, View};
 use open_course_cli::config::profile::{UserPreferences, UserProfile};
 use open_course_cli::config::{OpenCourseConfig, ProviderConfig, ProviderId};
 use open_course_cli::db::Database;
+use open_course_cli::ui::views::dashboard;
 use open_course_cli::ui::views::settings::{self, Section};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -214,4 +215,54 @@ async fn settings_profile_enter_saves_age() {
         Some("Saved".to_string()),
         "Enter should show a success message"
     );
+}
+
+#[tokio::test]
+async fn dashboard_header_shows_version() {
+    let mut state = setup_state().await;
+    state.view = View::Dashboard;
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| dashboard::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    let expected = format!("v{}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        text.contains(&expected),
+        "Dashboard header should show current version: {}",
+        expected
+    );
+}
+
+#[tokio::test]
+async fn update_available_prompt_renders() {
+    use open_course_cli::ui::views::update;
+
+    let mut state = setup_state().await;
+    state.view = View::UpdateAvailable;
+    state.update.latest_version = Some("9.9.9".to_string());
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| update::draw(f, f.area(), &state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("Update available"),
+        "Prompt should show update title"
+    );
+    assert!(
+        text.contains("Latest: v9.9.9"),
+        "Prompt should show latest version"
+    );
+    assert!(
+        text.contains("y: install"),
+        "Prompt should offer install action"
+    );
+    assert!(text.contains("n: skip"), "Prompt should offer skip action");
 }

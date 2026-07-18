@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+};
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
@@ -18,12 +20,12 @@ use crate::db::curriculum::{Curriculum, Topic};
 use crate::error::{AppError, Result};
 use crate::llm::diagnostics::CheckResult;
 use crate::llm::model_listing::ModelInfo;
+use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::views::{
     CurriculumState, DashboardState, DocsState, ModelCheckState, OnboardingState, PairsState,
-    ReportState, SessionState, SettingsState, curriculum, dashboard, docs, model_check,
-    onboarding, pairs, report, session, settings,
+    ReportState, SessionState, SettingsState, UpdateState, curriculum, dashboard, docs,
+    model_check, onboarding, pairs, report, session, settings, update,
 };
-use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::{ErrorBox, Spinner};
 
 use llm_results::apply_llm_result;
@@ -39,6 +41,7 @@ pub enum View {
     Settings,
     ModelCheck,
     Pairs,
+    UpdateAvailable,
     Quitting,
 }
 
@@ -72,6 +75,7 @@ pub struct AppState {
     pub report: ReportState,
     pub model_check: ModelCheckState,
     pub pairs: PairsState,
+    pub update: UpdateState,
     pub quit_requested: Arc<AtomicBool>,
     pub llm_tx: mpsc::Sender<LlmResult>,
     pub spinner: Spinner,
@@ -108,6 +112,7 @@ impl AppState {
             report: ReportState::new(),
             model_check: ModelCheckState::new(),
             pairs: PairsState::new(),
+            update: UpdateState::new(),
             quit_requested,
             llm_tx,
             spinner: Spinner::new(),
@@ -129,15 +134,25 @@ pub async fn run_app(
 ) -> Result<()> {
     let (llm_tx, mut llm_rx) = mpsc::channel::<LlmResult>(16);
     let mut state = AppState::new(data_dir, db, config, quit_requested.clone(), llm_tx)?;
-    state
-        .dashboard
-        .refresh(&state.db, state.config.as_ref())
-        .await?;
-    if let Err(e) = state.curriculum.load(&state.db).await {
-        state.error = Some(e.to_string());
+
+    if let Some(latest) = crate::update::latest_release_version().await? {
+        if crate::update::is_newer(crate::update::CURRENT_VERSION, &latest) {
+            state.view = View::UpdateAvailable;
+            state.update.latest_version = Some(latest);
+        }
     }
-    if state.view == View::Dashboard && state.curriculum.topics.is_empty() {
-        state.view = View::Curriculum;
+
+    if state.view != View::UpdateAvailable {
+        state
+            .dashboard
+            .refresh(&state.db, state.config.as_ref())
+            .await?;
+        if let Err(e) = state.curriculum.load(&state.db).await {
+            state.error = Some(e.to_string());
+        }
+        if state.view == View::Dashboard && state.curriculum.topics.is_empty() {
+            state.view = View::Curriculum;
+        }
     }
 
     let mut events = EventStream::new();
@@ -352,8 +367,67 @@ async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         View::Settings => settings::handle_key(state, code).await,
         View::ModelCheck => model_check::handle_key(state, code).await,
         View::Pairs => pairs::handle_key(state, code).await,
+        View::UpdateAvailable => handle_update_key(state, code).await,
         View::Quitting => Ok(()),
     }
+}
+
+async fn handle_update_key(state: &mut AppState, code: KeyCode) -> Result<()> {
+    match code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            run_installer_and_exit(state).await?;
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Enter => {
+            continue_to_app(state).await?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn run_installer_and_exit(state: &mut AppState) -> Result<()> {
+    let latest = state
+        .update
+        .latest_version
+        .clone()
+        .unwrap_or_else(|| "latest".to_string());
+    println!("Installing open-course-cli {latest}...");
+
+    ratatui::crossterm::terminal::disable_raw_mode()?;
+
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(crate::update::install_command())
+        .status()?;
+
+    if !status.success() {
+        ratatui::crossterm::terminal::enable_raw_mode()?;
+        state.error = Some("Installer failed. Press any key to continue.".to_string());
+        return Ok(());
+    }
+
+    state.view = View::Quitting;
+    Ok(())
+}
+
+async fn continue_to_app(state: &mut AppState) -> Result<()> {
+    state.update.latest_version = None;
+    if state.config.is_some() {
+        state.view = View::Dashboard;
+        state
+            .dashboard
+            .refresh(&state.db, state.config.as_ref())
+            .await?;
+        if let Err(e) = state.curriculum.load(&state.db).await {
+            state.error = Some(e.to_string());
+        }
+        if state.view == View::Dashboard && state.curriculum.topics.is_empty() {
+            state.view = View::Curriculum;
+        }
+    } else {
+        state.view = View::Onboarding;
+    }
+    Ok(())
 }
 
 pub(crate) fn clear_loading(state: &mut AppState) {
@@ -413,6 +487,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         View::Settings => settings::draw(frame, area, state),
         View::ModelCheck => model_check::draw(frame, area, state),
         View::Pairs => pairs::draw(frame, area, state),
+        View::UpdateAvailable => update::draw(frame, area, state),
         View::Quitting => {}
     }
 }
