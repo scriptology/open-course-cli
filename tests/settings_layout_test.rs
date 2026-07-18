@@ -3,10 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use open_course_cli::app::{AppState, View};
-use open_course_cli::config::{
-    OpenCourseConfig, ProviderConfig, ProviderId,
-};
 use open_course_cli::config::profile::{UserPreferences, UserProfile};
+use open_course_cli::config::{OpenCourseConfig, ProviderConfig, ProviderId};
 use open_course_cli::db::Database;
 use open_course_cli::ui::views::settings::{self, Section};
 use ratatui::Terminal;
@@ -148,7 +146,10 @@ async fn settings_session_shows_batch_size_selector() {
         .unwrap();
 
     let text = buffer_text(&terminal);
-    assert!(text.contains("Batch size"), "Session should show Batch size");
+    assert!(
+        text.contains("Batch size"),
+        "Session should show Batch size"
+    );
     assert!(
         text.contains("recommended"),
         "Batch size 3 should be marked recommended"
@@ -175,6 +176,9 @@ async fn settings_data_lists_reset_actions() {
         .unwrap();
 
     let text = buffer_text(&terminal);
-    assert!(text.contains("Reset progress"), "Data should show reset actions");
+    assert!(
+        text.contains("Reset progress"),
+        "Data should show reset actions"
+    );
     assert!(text.contains("Reset all"), "Data should show Reset all");
 }

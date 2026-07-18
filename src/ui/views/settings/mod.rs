@@ -131,10 +131,7 @@ fn build_body(state: &AppState) -> Text<'static> {
         let marker = if is_active { "> " } else { "  " };
         let label = fields::field_label(state.settings.section, i);
 
-        if is_active
-            && state.settings.section != Section::Data
-            && state.settings.is_text_field()
-        {
+        if is_active && state.settings.section != Section::Data && state.settings.is_text_field() {
             let value = &state.settings.input;
             let cursor = state.settings.cursor;
             let prefix = format!("{}{}: ", marker, label);
@@ -431,10 +428,10 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Delete if state.settings.is_text_field() => {
             remove_at(&mut state.settings.input, &mut state.settings.cursor);
         }
-        KeyCode::Left | KeyCode::Char('h') if state.settings.is_text_field() => {
-            if state.settings.cursor > 0 {
-                state.settings.cursor -= 1;
-            }
+        KeyCode::Left | KeyCode::Char('h')
+            if state.settings.is_text_field() && state.settings.cursor > 0 =>
+        {
+            state.settings.cursor -= 1;
         }
         KeyCode::Right | KeyCode::Char('l') if state.settings.is_text_field() => {
             let len = state.settings.input.chars().count();
@@ -474,11 +471,7 @@ fn remove_before(input: &mut String, cursor: &mut usize) {
         return;
     }
     let byte_pos: usize = input.chars().take(*cursor).map(|c| c.len_utf8()).sum();
-    let prev_byte_pos: usize = input
-        .chars()
-        .take(*cursor - 1)
-        .map(|c| c.len_utf8())
-        .sum();
+    let prev_byte_pos: usize = input.chars().take(*cursor - 1).map(|c| c.len_utf8()).sum();
     input.replace_range(prev_byte_pos..byte_pos, "");
     *cursor -= 1;
 }
@@ -489,10 +482,6 @@ fn remove_at(input: &mut String, cursor: &mut usize) {
         return;
     }
     let byte_pos: usize = input.chars().take(*cursor).map(|c| c.len_utf8()).sum();
-    let next_byte_pos: usize = input
-        .chars()
-        .take(*cursor + 1)
-        .map(|c| c.len_utf8())
-        .sum();
+    let next_byte_pos: usize = input.chars().take(*cursor + 1).map(|c| c.len_utf8()).sum();
     input.replace_range(byte_pos..next_byte_pos, "");
 }
