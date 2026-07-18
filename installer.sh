@@ -38,9 +38,11 @@ main() {
 
     if [ -w "$INSTALL_DIR" ]; then
         mv "$TMP_DIR/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+        ln -sf "$INSTALL_DIR/$BIN_NAME" "$INSTALL_DIR/opencourse"
     else
         say "Installing to $INSTALL_DIR requires sudo."
         sudo mv "$TMP_DIR/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+        sudo ln -sf "$INSTALL_DIR/$BIN_NAME" "$INSTALL_DIR/opencourse"
     fi
 
     rm -rf "$TMP_DIR"
@@ -48,9 +50,11 @@ main() {
     case ":$PATH:" in
         *":$INSTALL_DIR:"*)
             say "Installed $BIN_NAME $RELEASE to $INSTALL_DIR"
+            say "You can run: open-course-cli or opencourse"
             ;;
         *)
             say "Installed $BIN_NAME $RELEASE to $INSTALL_DIR"
+            say "You can run: open-course-cli or opencourse"
             say "Add it to your PATH:"
             say "  export PATH=\"$INSTALL_DIR:\$PATH\""
             ;;

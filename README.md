@@ -10,7 +10,15 @@ The fastest way to get the latest release:
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/scriptology/open-course-cli/releases/latest/download/open-course-cli-installer.sh | sh
 ```
 
-The installer detects macOS (Apple Silicon / Intel) and Linux x86_64, then downloads the matching binary into `~/.local/bin` (or `/usr/local/bin` if writable). Add the directory to your PATH if needed:
+The installer detects macOS (Apple Silicon / Intel) and Linux x86_64, then downloads the matching binary into `~/.local/bin` (or `/usr/local/bin` if writable). It also creates a symlink `opencourse`, so both commands work:
+
+```bash
+open-course-cli
+# or
+opencourse
+```
+
+Add the directory to your PATH if needed:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
