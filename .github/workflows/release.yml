@@ -97,6 +97,12 @@ jobs:
           VERSION="${{ inputs.version || github.ref_name }}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout release files
+        if: startsWith(steps.meta.outputs.version, 'v')
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.version }}
+
       - name: Download artifacts
         if: startsWith(steps.meta.outputs.version, 'v')
         uses: actions/download-artifact@v4
@@ -105,13 +111,19 @@ jobs:
           pattern: open-course-cli-${{ steps.meta.outputs.version }}-*
           merge-multiple: true
 
+      - name: Copy installer script
+        if: startsWith(steps.meta.outputs.version, 'v')
+        run: cp installer.sh dist/open-course-cli-installer.sh
+
       - name: Create Release
         if: startsWith(steps.meta.outputs.version, 'v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.version }}
           name: ${{ steps.meta.outputs.version }}
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/open-course-cli-installer.sh
           generate_release_notes: true
           draft: false
           prerelease: false
