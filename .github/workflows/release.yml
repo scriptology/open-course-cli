@@ -36,6 +36,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "25.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install cross-compilation tools (macOS Intel)
         if: matrix.target == 'x86_64-apple-darwin'
         run: |
