@@ -158,6 +158,10 @@ async fn settings_session_shows_batch_size_selector() {
         !text.contains("Hint mode"),
         "Session should not show Hint mode"
     );
+    assert!(text.contains("  2"), "Session should show option 2");
+    assert!(text.contains("> 3"), "Session should highlight option 3");
+    assert!(text.contains("  4"), "Session should show option 4");
+    assert!(text.contains("  5"), "Session should show option 5");
 }
 
 #[tokio::test]

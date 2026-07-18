@@ -11,6 +11,7 @@ use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use crate::app::{AppState, View};
 use crate::config::OpenCourseConfig;
 use crate::config::provider::ProviderId;
+use crate::config::write_config;
 use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{get_report_labels, native_language_code};
@@ -57,6 +58,7 @@ pub struct SettingsState {
     pub cursor: usize,
     pub error: Option<String>,
     pub success: Option<String>,
+    pub session_batch_idx: usize,
     pub pending_reset: Option<ResetAction>,
     pub in_section: bool,
     pub section_list_state: ListState,
@@ -85,6 +87,7 @@ impl SettingsState {
             cursor: 0,
             error: None,
             success: None,
+            session_batch_idx: 0,
             pending_reset: None,
             in_section: false,
             section_list_state,
@@ -126,6 +129,21 @@ fn build_body(state: &AppState) -> Text<'static> {
     }
 
     let mut lines = vec![];
+
+    if state.settings.section == Section::Session {
+        let sizes = [2u32, 3, 4, 5];
+        lines.push(Line::from("Batch size:"));
+        for (idx, size) in sizes.iter().enumerate() {
+            let marker = if idx == state.settings.session_batch_idx {
+                "> "
+            } else {
+                "  "
+            };
+            let suffix = if *size == 3 { " (recommended)" } else { "" };
+            lines.push(Line::from(format!("{}{}{}", marker, size, suffix)));
+        }
+        return Text::from(lines);
+    }
 
     let count = state.settings.field_count();
     for i in 0..count {
@@ -390,9 +408,8 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         }
         KeyCode::Up | KeyCode::Char('k') => match state.settings.section {
             Section::Session => {
-                if let Some(config) = state.config.as_mut() {
-                    let current = config.preferences.batch_size;
-                    config.preferences.batch_size = if current <= 2 { 5 } else { current - 1 };
+                if state.settings.session_batch_idx > 0 {
+                    state.settings.session_batch_idx -= 1;
                 }
                 state.settings.success = None;
             }
@@ -406,9 +423,8 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         },
         KeyCode::Down | KeyCode::Char('j') => match state.settings.section {
             Section::Session => {
-                if let Some(config) = state.config.as_mut() {
-                    let current = config.preferences.batch_size;
-                    config.preferences.batch_size = if current >= 5 { 2 } else { current + 1 };
+                if state.settings.session_batch_idx < 3 {
+                    state.settings.session_batch_idx += 1;
                 }
                 state.settings.success = None;
             }
@@ -424,6 +440,18 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             if state.settings.section == Section::Data {
                 if let Some(action) = ResetAction::from_field(state.settings.active_field) {
                     state.settings.pending_reset = Some(action);
+                }
+            } else if state.settings.section == Section::Session {
+                if let Some(config) = state.config.as_mut() {
+                    let size = (state.settings.session_batch_idx as u32) + 2;
+                    config.preferences.batch_size = size;
+                    if let Err(e) = write_config(config, &state.data_dir) {
+                        state.settings.error = Some(e.to_string());
+                        state.settings.success = None;
+                    } else {
+                        state.settings.error = None;
+                        state.settings.success = Some("Saved".to_string());
+                    }
                 }
             } else if let Some(config) = state.config.as_mut() {
                 if let Err(e) = state.settings.save(config, &state.data_dir) {

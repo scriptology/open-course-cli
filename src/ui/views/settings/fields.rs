@@ -151,6 +151,10 @@ impl SettingsState {
                 .unwrap_or_default(),
         };
         self.cursor = self.input.chars().count();
+        if self.section == Section::Session {
+            let size = config.preferences.batch_size;
+            self.session_batch_idx = (size.saturating_sub(2)).min(3) as usize;
+        }
     }
 
     pub(super) fn apply_input(&mut self, config: &mut OpenCourseConfig) -> Result<()> {
