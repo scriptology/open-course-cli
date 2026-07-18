@@ -41,10 +41,6 @@ jobs:
         run: |
           rustup target add x86_64-apple-darwin
 
-      - name: Install cross
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
       - name: Install Linux dependencies
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
@@ -53,12 +49,7 @@ jobs:
 
       - name: Build release binary
         shell: bash
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package binary
         shell: bash
