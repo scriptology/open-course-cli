@@ -5,9 +5,17 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. v0.2.0). If empty, builds only without creating a release."
+        required: false
+        default: ""
 
 permissions:
   contents: write
+
+env:
+  RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
 
 jobs:
   build:
@@ -19,13 +27,10 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            arch: arm64
           - target: x86_64-apple-darwin
             os: macos-latest
-            arch: x86_64
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            arch: x86_64
 
     steps:
       - name: Checkout
@@ -45,10 +50,9 @@ jobs:
           version: "25.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install cross-compilation tools (macOS Intel)
+      - name: Install macOS Intel target
         if: matrix.target == 'x86_64-apple-darwin'
-        run: |
-          rustup target add x86_64-apple-darwin
+        run: rustup target add x86_64-apple-darwin
 
       - name: Install Linux dependencies
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -63,16 +67,13 @@ jobs:
       - name: Package binary
         shell: bash
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION="${{ env.RELEASE_VERSION }}"
           BINARY="target/${{ matrix.target }}/release/open-course-cli"
-          if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
-            BINARY="${BINARY}.exe"
-          fi
           mkdir -p dist
           if [ -f "$BINARY" ]; then
             cp "$BINARY" dist/
             cd dist
-            tar -czf "open-course-cli-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz" open-course-cli
+            tar -czf "open-course-cli-${VERSION}-${{ matrix.target }}.tar.gz" open-course-cli
           else
             echo "Binary not found at $BINARY"
             exit 1
@@ -81,24 +82,27 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: open-course-cli-${{ github.ref_name }}-${{ matrix.target }}
-          path: dist/open-course-cli-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          name: open-course-cli-${{ env.RELEASE_VERSION }}-${{ matrix.target }}
+          path: dist/open-course-cli-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
 
   release:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    if: startsWith(env.RELEASE_VERSION, 'v')
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: open-course-cli-*
+          pattern: open-course-cli-${{ env.RELEASE_VERSION }}-*
           merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          name: ${{ env.RELEASE_VERSION }}
           files: dist/*.tar.gz
           generate_release_notes: true
           draft: false
