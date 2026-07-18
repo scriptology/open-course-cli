@@ -89,20 +89,28 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(env.RELEASE_VERSION, 'v')
     steps:
+      - name: Compute release version
+        id: meta
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version || github.ref_name }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Download artifacts
+        if: startsWith(steps.meta.outputs.version, 'v')
         uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: open-course-cli-${{ env.RELEASE_VERSION }}-*
+          pattern: open-course-cli-${{ steps.meta.outputs.version }}-*
           merge-multiple: true
 
       - name: Create Release
+        if: startsWith(steps.meta.outputs.version, 'v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_VERSION }}
-          name: ${{ env.RELEASE_VERSION }}
+          tag_name: ${{ steps.meta.outputs.version }}
+          name: ${{ steps.meta.outputs.version }}
           files: dist/*.tar.gz
           generate_release_notes: true
           draft: false
