@@ -230,24 +230,29 @@ fn endpoint_for_known_provider(provider: ProviderId) -> &'static str {
     }
 }
 
-fn advance_provider_setup_step(state: &mut AppState) {
+pub fn advance_provider_setup_step(state: &mut AppState) {
     let provider = state.settings.provider_setup_provider;
+    let meta = ProviderMeta::for_provider(provider);
     let next = match state.settings.provider_setup_step {
-        ProviderSetupStep::SelectProvider => ProviderSetupStep::BaseUrl,
+        ProviderSetupStep::SelectProvider => {
+            if provider == ProviderId::Custom {
+                ProviderSetupStep::BaseUrl
+            } else if meta.requires_api_key {
+                ProviderSetupStep::ApiKey
+            } else {
+                ProviderSetupStep::Model
+            }
+        }
         ProviderSetupStep::BaseUrl => {
             if provider == ProviderId::Custom {
                 ProviderSetupStep::Endpoint
+            } else if meta.requires_api_key {
+                ProviderSetupStep::ApiKey
             } else {
-                let meta = ProviderMeta::for_provider(provider);
-                if meta.requires_api_key {
-                    ProviderSetupStep::ApiKey
-                } else {
-                    ProviderSetupStep::Model
-                }
+                ProviderSetupStep::Model
             }
         }
         ProviderSetupStep::Endpoint => {
-            let meta = ProviderMeta::for_provider(provider);
             if meta.requires_api_key {
                 ProviderSetupStep::ApiKey
             } else {
@@ -275,25 +280,36 @@ fn advance_provider_setup_step(state: &mut AppState) {
 
 fn go_back_provider_setup_step(state: &mut AppState) {
     let provider = state.settings.provider_setup_provider;
+    let meta = ProviderMeta::for_provider(provider);
     let prev = match state.settings.provider_setup_step {
         ProviderSetupStep::SelectProvider => {
             state.settings.in_section = false;
             return;
         }
         ProviderSetupStep::BaseUrl => ProviderSetupStep::SelectProvider,
-        ProviderSetupStep::Endpoint => ProviderSetupStep::BaseUrl,
+        ProviderSetupStep::Endpoint => {
+            if provider == ProviderId::Custom {
+                ProviderSetupStep::BaseUrl
+            } else {
+                ProviderSetupStep::SelectProvider
+            }
+        }
         ProviderSetupStep::ApiKey => {
             if provider == ProviderId::Custom {
                 ProviderSetupStep::Endpoint
+            } else if meta.requires_api_key {
+                ProviderSetupStep::SelectProvider
             } else {
-                ProviderSetupStep::BaseUrl
+                ProviderSetupStep::SelectProvider
             }
         }
         ProviderSetupStep::Model => {
             if provider == ProviderId::Custom {
                 ProviderSetupStep::Endpoint
-            } else {
+            } else if meta.requires_api_key {
                 ProviderSetupStep::ApiKey
+            } else {
+                ProviderSetupStep::SelectProvider
             }
         }
     };

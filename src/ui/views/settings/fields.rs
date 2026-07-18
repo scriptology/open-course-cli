@@ -47,11 +47,9 @@ static FIELDS: &[FieldDef] = &[
                 None
             } else {
                 match value.parse::<u32>() {
-                    Ok(age) if (1..=120).contains(&age) => Some(age),
+                    Ok(age) if (14..=100).contains(&age) => Some(age),
                     _ => {
-                        return Err(AppError::Config(format!(
-                            "Age must be a number between 1 and 120: {value}"
-                        )));
+                        return Err(AppError::Config("invalid age".to_string()));
                     }
                 }
             };

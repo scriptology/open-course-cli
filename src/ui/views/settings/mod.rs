@@ -14,12 +14,15 @@ use crate::config::provider::ProviderId;
 use crate::config::write_config;
 use crate::error::Result;
 use crate::ui::colors;
-use crate::ui::labels::{get_report_labels, native_language_code};
+use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::{draw_confirmation, model_picker};
 
 pub use data::ResetAction;
-pub use provider_setup::{ProviderSetupStep, jump_to_model_selection, spawn_provider_model_load};
+pub use provider_setup::{
+    ProviderSetupStep, advance_provider_setup_step, jump_to_model_selection,
+    spawn_provider_model_load,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Section {
@@ -118,7 +121,7 @@ impl SettingsState {
     }
 }
 
-fn build_body(state: &AppState) -> Text<'static> {
+fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
     let config = match state.config.as_ref() {
         Some(c) => c,
         None => return Text::from("No configuration available. Press Esc to return."),
@@ -132,6 +135,8 @@ fn build_body(state: &AppState) -> Text<'static> {
 
     if state.settings.section == Section::Session {
         let sizes = [2u32, 3, 4, 5];
+        let saved_size = config.preferences.batch_size;
+        let saved_idx = sizes.iter().position(|&s| s == saved_size).unwrap_or(0);
         lines.push(Line::from("Batch size:"));
         for (idx, size) in sizes.iter().enumerate() {
             let marker = if idx == state.settings.session_batch_idx {
@@ -140,7 +145,24 @@ fn build_body(state: &AppState) -> Text<'static> {
                 "  "
             };
             let suffix = if *size == 3 { " (recommended)" } else { "" };
-            lines.push(Line::from(format!("{}{}{}", marker, size, suffix)));
+            let content = format!("{}{}{}", marker, size, suffix);
+            let is_saved = idx == saved_idx;
+            let is_cursor = idx == state.settings.session_batch_idx;
+            if is_saved {
+                lines.push(Line::from(Span::styled(
+                    content,
+                    Style::default().bg(colors::BLUE).fg(Color::White),
+                )));
+            } else if is_cursor {
+                lines.push(Line::from(Span::styled(
+                    content,
+                    Style::default()
+                        .fg(colors::GREEN)
+                        .add_modifier(Modifier::BOLD),
+                )));
+            } else {
+                lines.push(Line::from(content));
+            }
         }
         return Text::from(lines);
     }
@@ -158,7 +180,7 @@ fn build_body(state: &AppState) -> Text<'static> {
             let before: String = value.chars().take(cursor).collect();
             let at = value.chars().nth(cursor).unwrap_or(' ');
             let after: String = value.chars().skip(cursor + 1).collect();
-            lines.push(Line::from(vec![
+            let mut spans = vec![
                 Span::raw(prefix),
                 Span::raw(before),
                 Span::styled(
@@ -166,7 +188,15 @@ fn build_body(state: &AppState) -> Text<'static> {
                     Style::default().bg(Color::White).fg(Color::Black),
                 ),
                 Span::raw(after),
-            ]));
+            ];
+            if state.settings.error.is_some() && state.settings.section == Section::Profile {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    labels.invalid_value.to_string(),
+                    Style::default().fg(Color::Red),
+                ));
+            }
+            lines.push(Line::from(spans));
         } else {
             let value = fields::field_value(config, state.settings.section, i);
             lines.push(Line::from(format!("{}{}: {}", marker, label, value)));
@@ -185,19 +215,11 @@ fn build_footer(state: &AppState) -> String {
     if state.settings.section == Section::Data {
         lines[0] = "↑/↓: action | Enter: reset | Esc: back".to_string();
     } else if state.settings.section == Section::Session {
-        lines[0] = "↑/↓: change | Enter: save | Esc: back".to_string();
+        lines[0] = "↑/↓: select | Esc: back".to_string();
     } else if state.settings.section == Section::Profile {
         lines[0] = "←/→: move caret | Type: edit | Enter: save | Esc: back".to_string();
     } else {
         lines[0] = "Tab/Shift+Tab: field | Enter: save | Esc: back".to_string();
-    }
-
-    if let Some(err) = &state.settings.error {
-        lines.push(err.clone());
-    }
-
-    if let Some(success) = &state.settings.success {
-        lines.push(success.clone());
     }
 
     lines.join("\n")
@@ -285,25 +307,25 @@ fn draw_section_page(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(2),
             Constraint::Min(0),
             Constraint::Length(footer_height),
         ])
         .split(area);
 
-    let header = Text::from(vec![
-        Line::from(Span::styled(
+    let header = Text::from(Line::from(vec![
+        Span::styled(
             labels.settings,
             Style::default()
                 .fg(colors::BLUE)
                 .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
+        ),
+        Span::raw(" / "),
+        Span::styled(
             state.settings.section.label(),
             Style::default().fg(Color::DarkGray),
-        )),
-    ]);
+        ),
+    ]));
     frame.render_widget(Paragraph::new(header), chunks[0]);
 
     // The provider wizard's model list renders as a real list widget; every
@@ -324,7 +346,7 @@ fn draw_section_page(
         model_picker::draw_model_list(frame, body_chunks[1], &state.settings.model_picker, None);
     } else {
         frame.render_widget(
-            Paragraph::new(build_body(state)).style(Style::default().fg(Color::White)),
+            Paragraph::new(build_body(state, labels)).style(Style::default().fg(Color::White)),
             chunks[1],
         );
     }
@@ -447,19 +469,17 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                     config.preferences.batch_size = size;
                     if let Err(e) = write_config(config, &state.data_dir) {
                         state.settings.error = Some(e.to_string());
-                        state.settings.success = None;
                     } else {
                         state.settings.error = None;
-                        state.settings.success = Some("Saved".to_string());
+                        state.settings.in_section = false;
                     }
                 }
             } else if let Some(config) = state.config.as_mut() {
                 if let Err(e) = state.settings.save(config, &state.data_dir) {
                     state.settings.error = Some(e.to_string());
-                    state.settings.success = None;
                 } else {
                     state.settings.error = None;
-                    state.settings.success = Some("Saved".to_string());
+                    state.settings.in_section = false;
                 }
             }
         }
