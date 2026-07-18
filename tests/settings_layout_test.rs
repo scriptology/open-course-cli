@@ -182,3 +182,32 @@ async fn settings_data_lists_reset_actions() {
     );
     assert!(text.contains("Reset all"), "Data should show Reset all");
 }
+
+#[tokio::test]
+async fn settings_profile_enter_saves_age() {
+    use ratatui::crossterm::event::KeyCode;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Profile;
+    state.settings.active_field = 0;
+
+    // Simulate the active input being loaded for the Age field
+    state.settings.input = "42".to_string();
+    state.settings.cursor = 2;
+    settings::handle_key(&mut state, KeyCode::Enter)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        state.config.as_ref().unwrap().active_profile().age,
+        Some(42),
+        "Enter should save the edited age"
+    );
+    assert_eq!(
+        state.settings.success,
+        Some("Saved".to_string()),
+        "Enter should show a success message"
+    );
+}

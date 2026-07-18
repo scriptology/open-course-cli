@@ -56,6 +56,7 @@ pub struct SettingsState {
     pub input: String,
     pub cursor: usize,
     pub error: Option<String>,
+    pub success: Option<String>,
     pub pending_reset: Option<ResetAction>,
     pub in_section: bool,
     pub section_list_state: ListState,
@@ -83,6 +84,7 @@ impl SettingsState {
             input: String::new(),
             cursor: 0,
             error: None,
+            success: None,
             pending_reset: None,
             in_section: false,
             section_list_state,
@@ -174,6 +176,10 @@ fn build_footer(state: &AppState) -> String {
 
     if let Some(err) = &state.settings.error {
         lines.push(err.clone());
+    }
+
+    if let Some(success) = &state.settings.success {
+        lines.push(success.clone());
     }
 
     lines.join("\n")
@@ -349,6 +355,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                 state.settings.active_field = 0;
                 state.settings.loaded_field = None;
                 state.settings.error = None;
+                state.settings.success = None;
                 state.settings.in_section = true;
                 if section == Section::Provider {
                     provider_setup::init_provider_setup(state);
@@ -367,16 +374,19 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Esc => {
             state.settings.in_section = false;
             state.settings.error = None;
+            state.settings.success = None;
         }
         KeyCode::Char('\t') | KeyCode::Tab => {
             state.settings.next_field();
             state.settings.loaded_field = None;
             state.settings.error = None;
+            state.settings.success = None;
         }
         KeyCode::BackTab => {
             state.settings.prev_field();
             state.settings.loaded_field = None;
             state.settings.error = None;
+            state.settings.success = None;
         }
         KeyCode::Up | KeyCode::Char('k') => match state.settings.section {
             Section::Session => {
@@ -384,11 +394,13 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                     let current = config.preferences.batch_size;
                     config.preferences.batch_size = if current <= 2 { 5 } else { current - 1 };
                 }
+                state.settings.success = None;
             }
             Section::Data => {
                 state.settings.prev_field();
                 state.settings.loaded_field = None;
                 state.settings.error = None;
+                state.settings.success = None;
             }
             _ => {}
         },
@@ -398,11 +410,13 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                     let current = config.preferences.batch_size;
                     config.preferences.batch_size = if current >= 5 { 2 } else { current + 1 };
                 }
+                state.settings.success = None;
             }
             Section::Data => {
                 state.settings.next_field();
                 state.settings.loaded_field = None;
                 state.settings.error = None;
+                state.settings.success = None;
             }
             _ => {}
         },
@@ -414,19 +428,24 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             } else if let Some(config) = state.config.as_mut() {
                 if let Err(e) = state.settings.save(config, &state.data_dir) {
                     state.settings.error = Some(e.to_string());
+                    state.settings.success = None;
                 } else {
                     state.settings.error = None;
+                    state.settings.success = Some("Saved".to_string());
                 }
             }
         }
         KeyCode::Char(c) if state.settings.is_text_field() => {
             insert_char(&mut state.settings.input, &mut state.settings.cursor, c);
+            state.settings.success = None;
         }
         KeyCode::Backspace if state.settings.is_text_field() => {
             remove_before(&mut state.settings.input, &mut state.settings.cursor);
+            state.settings.success = None;
         }
         KeyCode::Delete if state.settings.is_text_field() => {
             remove_at(&mut state.settings.input, &mut state.settings.cursor);
+            state.settings.success = None;
         }
         KeyCode::Left | KeyCode::Char('h')
             if state.settings.is_text_field() && state.settings.cursor > 0 =>
