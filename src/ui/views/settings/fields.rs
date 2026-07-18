@@ -2,8 +2,8 @@ use crate::config::OpenCourseConfig;
 use crate::config::write_config;
 use crate::error::{AppError, Result};
 
-use super::{Section, SettingsState};
 use super::data::ResetAction;
+use super::{Section, SettingsState};
 
 /// Declarative description of an editable field in the Profile/Session
 /// sections: how to display it, how to load it into the input box and how to
