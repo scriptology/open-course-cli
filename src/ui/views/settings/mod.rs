@@ -121,7 +121,7 @@ fn build_body(state: &AppState) -> String {
         return provider_setup::build_provider_setup_body(state, config);
     }
 
-    let mut lines = vec![String::new()];
+    let mut lines = vec![];
 
     let count = state.settings.field_count();
     for i in 0..count {
@@ -190,7 +190,7 @@ fn draw_section_picker(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(2),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
@@ -240,7 +240,7 @@ fn draw_section_page(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(3),
             Constraint::Min(0),
             Constraint::Length(footer_height),
         ])
