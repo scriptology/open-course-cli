@@ -1,6 +1,5 @@
 use crate::config::OpenCourseConfig;
 use crate::config::write_config;
-use crate::db::curriculum::CEFR_LEVELS;
 use crate::error::{AppError, Result};
 
 use super::{Section, SettingsState};
@@ -55,37 +54,6 @@ static FIELDS: &[FieldDef] = &[
                         )));
                     }
                 }
-            };
-            Ok(())
-        },
-    },
-    FieldDef {
-        section: Section::Profile,
-        index: 1,
-        label: "CEFR",
-        text_input: true,
-        display: |config: &OpenCourseConfig| {
-            config
-                .active_profile()
-                .self_assessed_cefr
-                .clone()
-                .unwrap_or_else(|| "(none)".to_string())
-        },
-        load: |config: &OpenCourseConfig| {
-            config
-                .active_profile()
-                .self_assessed_cefr
-                .clone()
-                .unwrap_or_default()
-        },
-        apply: |config: &mut OpenCourseConfig, value: &str| -> Result<()> {
-            if !value.is_empty() && !CEFR_LEVELS.contains(&value.to_uppercase().as_str()) {
-                return Err(AppError::Config(format!("Invalid CEFR level: {value}")));
-            }
-            config.active_profile_mut().self_assessed_cefr = if value.is_empty() {
-                None
-            } else {
-                Some(value.to_uppercase())
             };
             Ok(())
         },
@@ -182,6 +150,7 @@ impl SettingsState {
                 .map(|f| (f.load)(config))
                 .unwrap_or_default(),
         };
+        self.cursor = self.input.chars().count();
     }
 
     pub(super) fn apply_input(&mut self, config: &mut OpenCourseConfig) -> Result<()> {

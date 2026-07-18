@@ -54,6 +54,7 @@ pub struct SettingsState {
     pub section: Section,
     pub active_field: usize,
     pub input: String,
+    pub cursor: usize,
     pub error: Option<String>,
     pub pending_reset: Option<ResetAction>,
     pub in_section: bool,
@@ -80,6 +81,7 @@ impl SettingsState {
             section: Section::default(),
             active_field: 0,
             input: String::new(),
+            cursor: 0,
             error: None,
             pending_reset: None,
             in_section: false,
@@ -111,14 +113,14 @@ impl SettingsState {
     }
 }
 
-fn build_body(state: &AppState) -> String {
+fn build_body(state: &AppState) -> Text<'static> {
     let config = match state.config.as_ref() {
         Some(c) => c,
-        None => return "No configuration available. Press Esc to return.".to_string(),
+        None => return Text::from("No configuration available. Press Esc to return."),
     };
 
     if state.settings.section == Section::Provider && state.settings.in_section {
-        return provider_setup::build_provider_setup_body(state, config);
+        return Text::from(provider_setup::build_provider_setup_body(state, config));
     }
 
     let mut lines = vec![];
@@ -128,15 +130,37 @@ fn build_body(state: &AppState) -> String {
         let is_active = i == state.settings.active_field;
         let marker = if is_active { "> " } else { "  " };
         let label = fields::field_label(state.settings.section, i);
-        let value = if is_active && state.settings.section != Section::Data {
-            state.settings.input.clone()
+
+        if is_active
+            && state.settings.section != Section::Data
+            && state.settings.is_text_field()
+        {
+            let value = &state.settings.input;
+            let cursor = state.settings.cursor;
+            let prefix = format!("{}{}: ", marker, label);
+            let before: String = value.chars().take(cursor).collect();
+            let at = value.chars().nth(cursor).unwrap_or(' ');
+            let after: String = value.chars().skip(cursor + 1).collect();
+            lines.push(Line::from(vec![
+                Span::raw(prefix),
+                Span::raw(before),
+                Span::styled(
+                    at.to_string(),
+                    Style::default().bg(Color::White).fg(Color::Black),
+                ),
+                Span::raw(after),
+            ]));
         } else {
-            fields::field_value(config, state.settings.section, i)
-        };
-        lines.push(format!("{}{}: {}", marker, label, value));
+            let value = if is_active && state.settings.section != Section::Data {
+                state.settings.input.clone()
+            } else {
+                fields::field_value(config, state.settings.section, i)
+            };
+            lines.push(Line::from(format!("{}{}: {}", marker, label, value)));
+        }
     }
 
-    lines.join("\n")
+    Text::from(lines)
 }
 
 fn build_footer(state: &AppState) -> String {
@@ -149,6 +173,8 @@ fn build_footer(state: &AppState) -> String {
         lines[0] = "↑/↓: action | Enter: reset | Esc: back".to_string();
     } else if state.settings.section == Section::Session {
         lines[0] = "↑/↓: change | Enter: save | Esc: back".to_string();
+    } else if state.settings.section == Section::Profile {
+        lines[0] = "←/→: move caret | Type: edit | Enter: save | Esc: back".to_string();
     } else {
         lines[0] = "Tab/Shift+Tab: field | Enter: save | Esc: back".to_string();
     }
@@ -401,13 +427,76 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             }
         }
         KeyCode::Char(c) if state.settings.is_text_field() => {
-            state.settings.input.push(c);
+            insert_char(&mut state.settings.input, &mut state.settings.cursor, c);
         }
         KeyCode::Backspace if state.settings.is_text_field() => {
-            state.settings.input.pop();
+            remove_before(&mut state.settings.input, &mut state.settings.cursor);
+        }
+        KeyCode::Delete if state.settings.is_text_field() => {
+            remove_at(&mut state.settings.input, &mut state.settings.cursor);
+        }
+        KeyCode::Left | KeyCode::Char('h') if state.settings.is_text_field() => {
+            if state.settings.cursor > 0 {
+                state.settings.cursor -= 1;
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') if state.settings.is_text_field() => {
+            let len = state.settings.input.chars().count();
+            if state.settings.cursor < len {
+                state.settings.cursor += 1;
+            }
+        }
+        KeyCode::Home if state.settings.is_text_field() => {
+            state.settings.cursor = 0;
+        }
+        KeyCode::End if state.settings.is_text_field() => {
+            state.settings.cursor = state.settings.input.chars().count();
         }
         _ => {}
     }
 
     Ok(())
+}
+
+fn clamp_cursor(input: &str, cursor: &mut usize) {
+    let len = input.chars().count();
+    if *cursor > len {
+        *cursor = len;
+    }
+}
+
+fn insert_char(input: &mut String, cursor: &mut usize, c: char) {
+    clamp_cursor(input, cursor);
+    let byte_pos: usize = input.chars().take(*cursor).map(|c| c.len_utf8()).sum();
+    input.insert(byte_pos, c);
+    *cursor += 1;
+}
+
+fn remove_before(input: &mut String, cursor: &mut usize) {
+    clamp_cursor(input, cursor);
+    if *cursor == 0 {
+        return;
+    }
+    let byte_pos: usize = input.chars().take(*cursor).map(|c| c.len_utf8()).sum();
+    let prev_byte_pos: usize = input
+        .chars()
+        .take(*cursor - 1)
+        .map(|c| c.len_utf8())
+        .sum();
+    input.replace_range(prev_byte_pos..byte_pos, "");
+    *cursor -= 1;
+}
+
+fn remove_at(input: &mut String, cursor: &mut usize) {
+    clamp_cursor(input, cursor);
+    if *cursor >= input.chars().count() {
+        return;
+    }
+    let byte_pos: usize = input.chars().take(*cursor).map(|c| c.len_utf8()).sum();
+    let next_byte_pos: usize = input
+        .chars()
+        .take(*cursor + 1)
+        .map(|c| c.len_utf8())
+        .sum();
+    input.replace_range(byte_pos..next_byte_pos, "");
 }
