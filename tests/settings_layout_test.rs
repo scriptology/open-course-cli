@@ -1,0 +1,180 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+use open_course_cli::app::{AppState, View};
+use open_course_cli::config::{
+    OpenCourseConfig, ProviderConfig, ProviderId,
+};
+use open_course_cli::config::profile::{UserPreferences, UserProfile};
+use open_course_cli::db::Database;
+use open_course_cli::ui::views::settings::{self, Section};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+
+fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+    let buffer = terminal.backend().buffer();
+    let area = buffer.area();
+    let mut out = String::new();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            out.push_str(buffer[(x, y)].symbol());
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn make_test_config() -> OpenCourseConfig {
+    let profile = UserProfile {
+        native_language: "ru".to_string(),
+        target_language: "en".to_string(),
+        age: Some(38),
+        self_assessed_cefr: Some("B1".to_string()),
+    };
+    let provider_config = ProviderConfig::ApiKey {
+        api_key: Some("test-key".to_string()),
+        model: "gpt-4".to_string(),
+        base_url: None,
+        endpoint: None,
+        reasoning_effort: None,
+    };
+    let mut config = OpenCourseConfig::new(ProviderId::OpenAi, provider_config, profile);
+    config.preferences = UserPreferences {
+        batch_size: 3,
+        hint_mode: open_course_cli::config::profile::HintMode::Auto,
+    };
+    config
+}
+
+async fn setup_state() -> AppState {
+    let dir = tempfile::TempDir::new().unwrap();
+    let db = Database::connect(&dir.path().join("db")).await.unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    AppState::new(
+        PathBuf::from(dir.path()),
+        Arc::new(db),
+        Some(make_test_config()),
+        Arc::new(AtomicBool::new(false)),
+        tx,
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "layout inspection helper, prints settings screens"]
+async fn render_settings_screens() {
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Section picker
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+    println!("=== Settings picker ===");
+    println!("{}", buffer_text(&terminal));
+
+    // Profile section
+    state.settings.in_section = true;
+    state.settings.section = Section::Profile;
+    state.settings.active_field = 0;
+    // ensure_input_loaded will load the field when draw is called
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+    println!("=== Profile ===");
+    println!("{}", buffer_text(&terminal));
+
+    // Session section
+    state.settings.section = Section::Session;
+    state.settings.active_field = 0;
+    // ensure_input_loaded will load the field when draw is called
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+    println!("=== Session ===");
+    println!("{}", buffer_text(&terminal));
+
+    // Data section
+    state.settings.section = Section::Data;
+    state.settings.active_field = 0;
+    // ensure_input_loaded will load the field when draw is called
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+    println!("=== Data ===");
+    println!("{}", buffer_text(&terminal));
+}
+
+#[tokio::test]
+async fn settings_profile_shows_age_without_cefr() {
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Profile;
+    state.settings.active_field = 0;
+    // ensure_input_loaded will load the field when draw is called
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    assert!(text.contains("Age"), "Profile should show Age");
+    assert!(
+        !text.contains("CEFR"),
+        "Profile should not show CEFR in settings"
+    );
+}
+
+#[tokio::test]
+async fn settings_session_shows_batch_size_selector() {
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Session;
+    state.settings.active_field = 0;
+    // ensure_input_loaded will load the field when draw is called
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    assert!(text.contains("Batch size"), "Session should show Batch size");
+    assert!(
+        text.contains("recommended"),
+        "Batch size 3 should be marked recommended"
+    );
+    assert!(
+        !text.contains("Hint mode"),
+        "Session should not show Hint mode"
+    );
+}
+
+#[tokio::test]
+async fn settings_data_lists_reset_actions() {
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Data;
+    state.settings.active_field = 0;
+    // ensure_input_loaded will load the field when draw is called
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    assert!(text.contains("Reset progress"), "Data should show reset actions");
+    assert!(text.contains("Reset all"), "Data should show Reset all");
+}

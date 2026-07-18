@@ -151,11 +151,7 @@ fn build_body(state: &AppState) -> Text<'static> {
                 Span::raw(after),
             ]));
         } else {
-            let value = if is_active && state.settings.section != Section::Data {
-                state.settings.input.clone()
-            } else {
-                fields::field_value(config, state.settings.section, i)
-            };
+            let value = fields::field_value(config, state.settings.section, i);
             lines.push(Line::from(format!("{}{}: {}", marker, label, value)));
         }
     }
