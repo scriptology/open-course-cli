@@ -14,8 +14,10 @@ First launch shows a step-by-step onboarding wizard:
 4. **CEFR level** — required selector: `A1`, `A2`, `B1`, `B2`, `C1`, `C2`.
 5. **Batch size** — required selector: `2`, `3`, `4`, `5` exercises per session.
 6. **Provider** — select LLM provider (OpenAI, Anthropic, Google, DeepSeek, Mistral, OpenRouter, Ollama, Custom).
-7. **API key** — enter API key (optional where provider allows).
-8. **Base URL** — required for Custom/Ollama; skipped for others.
+7. **API key** — enter API key, or leave blank to fall back to the provider's well-known environment
+   variable if set (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`,
+   `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`; not applicable to Ollama/Custom).
+8. **Base URL** — only shown for Custom/Ollama; skipped entirely for other providers.
 9. **Model** — pick from discovered models or type model ID manually.
 
 After saving the config, the app runs **Model diagnostics** (connectivity, streaming, exercise generation, analysis, topic review). Once diagnostics finish, the app opens the **Curriculum** view, where you press `g` to generate the initial curriculum.
@@ -157,7 +159,8 @@ Available keys:
 
 Sections:
 
-- **Provider**: provider, API key, base URL, endpoint, model.
+- **Provider**: provider, API key (falls back to the provider's environment variable when left
+  blank — see Onboarding), base URL, endpoint, model.
 - **Profile**: age and CEFR for the active pair. To change languages, add a new pair from the Pairs screen.
 - **Session**: batch size (2–5), hint mode (auto/on-demand).
 - **Data**: reset progress, history, curriculum, reviews, or all data.

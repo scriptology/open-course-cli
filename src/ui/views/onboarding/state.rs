@@ -58,16 +58,17 @@ impl OnboardingState {
                 Step::Cefr,
             ],
         };
+        let default_provider = ProviderId::all()[0];
         Self {
             mode,
             steps,
             active: 0,
             input: String::new(),
-            provider: ProviderId::Custom,
-            provider_index: ProviderId::all().len().saturating_sub(1),
+            provider: default_provider,
+            provider_index: 0,
             model: String::new(),
             api_key: String::new(),
-            base_url: base_url_default(ProviderId::Custom).to_string(),
+            base_url: base_url_default(default_provider).to_string(),
             native_language: String::new(),
             target_language: String::new(),
             age: String::new(),
@@ -82,15 +83,42 @@ impl OnboardingState {
         self.steps[self.active]
     }
 
+    pub(super) fn is_step_visible(&self, step: Step) -> bool {
+        match step {
+            Step::BaseUrl => shows_base_url_step(self.provider),
+            _ => true,
+        }
+    }
+
+    pub(super) fn go_forward(&mut self) {
+        while self.active < self.steps.len() - 1 {
+            self.active += 1;
+            if self.is_step_visible(self.current_step()) {
+                break;
+            }
+        }
+        self.load_input();
+    }
+
+    pub(super) fn go_back(&mut self) {
+        while self.active > 0 {
+            self.active -= 1;
+            if self.is_step_visible(self.current_step()) {
+                break;
+            }
+        }
+        self.load_input();
+    }
+
     pub(super) fn set_provider(&mut self, provider: ProviderId) {
+        if self.base_url.is_empty() || self.base_url == base_url_default(self.provider) {
+            self.base_url = base_url_default(provider).to_string();
+        }
         self.provider = provider;
         self.provider_index = ProviderId::all()
             .iter()
             .position(|p| *p == provider)
             .unwrap_or(ProviderId::all().len().saturating_sub(1));
-        if self.base_url.is_empty() || self.base_url == base_url_default(self.provider) {
-            self.base_url = base_url_default(provider).to_string();
-        }
     }
 
     pub(super) fn load_input(&mut self) {
@@ -191,5 +219,115 @@ impl OnboardingState {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn api_key_step_index(state: &OnboardingState) -> usize {
+        state.steps.iter().position(|s| *s == Step::ApiKey).unwrap()
+    }
+
+    fn base_url_step_index(state: &OnboardingState) -> usize {
+        state.steps.iter().position(|s| *s == Step::BaseUrl).unwrap()
+    }
+
+    fn model_step_index(state: &OnboardingState) -> usize {
+        state.steps.iter().position(|s| *s == Step::Model).unwrap()
+    }
+
+    #[test]
+    fn defaults_to_first_provider() {
+        let state = OnboardingState::new();
+        assert_eq!(state.provider, ProviderId::all()[0]);
+        assert_eq!(state.provider_index, 0);
+    }
+
+    #[test]
+    fn set_provider_does_not_leak_stale_base_url() {
+        let mut state = OnboardingState::new();
+        state.set_provider(ProviderId::Custom);
+        assert_eq!(state.base_url, base_url_default(ProviderId::Custom));
+
+        state.set_provider(ProviderId::Google);
+        assert_eq!(state.base_url, base_url_default(ProviderId::Google));
+        assert!(state.base_url.is_empty());
+    }
+
+    #[test]
+    fn set_provider_keeps_user_edited_base_url() {
+        let mut state = OnboardingState::new();
+        state.set_provider(ProviderId::Custom);
+        state.base_url = "https://my-custom-endpoint.example".to_string();
+
+        state.set_provider(ProviderId::Ollama);
+        assert_eq!(state.base_url, "https://my-custom-endpoint.example");
+    }
+
+    #[test]
+    fn base_url_step_visible_only_for_custom_and_ollama() {
+        let mut state = OnboardingState::new();
+        for provider in ProviderId::all() {
+            state.provider = *provider;
+            assert_eq!(
+                state.is_step_visible(Step::BaseUrl),
+                shows_base_url_step(*provider)
+            );
+        }
+    }
+
+    #[test]
+    fn other_steps_are_always_visible() {
+        let state = OnboardingState::new();
+        for step in Step::all() {
+            if *step != Step::BaseUrl {
+                assert!(state.is_step_visible(*step));
+            }
+        }
+    }
+
+    #[test]
+    fn go_forward_skips_base_url_when_not_required() {
+        let mut state = OnboardingState::new();
+        state.set_provider(ProviderId::Google);
+        state.active = api_key_step_index(&state);
+
+        state.go_forward();
+
+        assert_eq!(state.active, model_step_index(&state));
+    }
+
+    #[test]
+    fn go_forward_stops_on_base_url_when_required() {
+        let mut state = OnboardingState::new();
+        state.set_provider(ProviderId::Custom);
+        state.active = api_key_step_index(&state);
+
+        state.go_forward();
+
+        assert_eq!(state.active, base_url_step_index(&state));
+    }
+
+    #[test]
+    fn go_back_skips_base_url_when_not_required() {
+        let mut state = OnboardingState::new();
+        state.set_provider(ProviderId::Google);
+        state.active = model_step_index(&state);
+
+        state.go_back();
+
+        assert_eq!(state.active, api_key_step_index(&state));
+    }
+
+    #[test]
+    fn go_back_from_first_step_is_a_no_op() {
+        let mut state = OnboardingState::new();
+        state.active = 0;
+
+        state.go_back();
+
+        assert_eq!(state.active, 0);
     }
 }

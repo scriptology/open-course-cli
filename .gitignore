@@ -1,6 +1,9 @@
 /target
 .open-course-cli/
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # macOS
 .DS_Store
 

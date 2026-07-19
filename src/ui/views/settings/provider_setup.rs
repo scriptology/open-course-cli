@@ -96,7 +96,19 @@ pub(super) fn build_provider_setup_body(state: &AppState, config: &OpenCourseCon
         }
         ProviderSetupStep::ApiKey => {
             let masked = "*".repeat(state.settings.input.chars().count());
-            format!("API key: {}", masked)
+            match meta.env_key {
+                Some(name) if state.settings.input.is_empty() => format!(
+                    "API key: {}\n\nLeave empty to use the {} environment variable{}",
+                    masked,
+                    name,
+                    if std::env::var(name).is_ok() {
+                        " (currently set)"
+                    } else {
+                        " (not currently set)"
+                    }
+                ),
+                _ => format!("API key: {}", masked),
+            }
         }
         ProviderSetupStep::Model => {
             if state.settings.model_picker.loading {
@@ -161,11 +173,12 @@ pub fn spawn_provider_model_load(state: &mut AppState) {
         return;
     };
 
+    let meta = ProviderMeta::for_provider(provider);
     model_picker::spawn_load(
         &mut state.settings.model_picker,
         state.llm_tx.clone(),
         provider,
-        provider_config.api_key().map(|s| s.to_string()),
+        meta.resolve_api_key(provider_config.api_key()),
         provider_config.base_url().map(|s| s.to_string()),
         LlmResult::Models,
     );
@@ -455,9 +468,17 @@ async fn handle_api_key_step(state: &mut AppState, code: KeyCode) -> Result<()> 
                 let provider = state.settings.provider_setup_provider;
                 let meta = ProviderMeta::for_provider(provider);
                 let value = state.settings.input.trim().to_string();
-                if meta.requires_api_key && !meta.api_key_optional && value.is_empty() {
+                if meta.requires_api_key
+                    && !meta.api_key_optional
+                    && value.is_empty()
+                    && meta.resolve_api_key(None).is_none()
+                {
+                    let hint = meta
+                        .env_key
+                        .map(|name| format!(" or set the {name} environment variable"))
+                        .unwrap_or_default();
                     state.settings.error =
-                        Some("API key is required for this provider".to_string());
+                        Some(format!("API key is required for this provider{hint}"));
                     return Ok(());
                 }
                 if let Some(provider_config) = config.providers.get(&provider) {

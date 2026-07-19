@@ -94,11 +94,19 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     frame.render_widget(Paragraph::new(subtitle), header_chunks[1]);
 
     // Step card with border.
-    let progress = format!(
-        "Step {} of {}",
-        state.onboarding.active + 1,
-        state.onboarding.steps.len()
-    );
+    let visible_steps: Vec<Step> = state
+        .onboarding
+        .steps
+        .iter()
+        .filter(|s| state.onboarding.is_step_visible(**s))
+        .copied()
+        .collect();
+    let current_position = visible_steps
+        .iter()
+        .position(|s| *s == step)
+        .map(|i| i + 1)
+        .unwrap_or(1);
+    let progress = format!("Step {} of {}", current_position, visible_steps.len());
     let title = format!("{} — {}", step.label(), progress);
     let card_block = Block::default()
         .borders(Borders::ALL)
@@ -231,8 +239,7 @@ async fn advance_onboarding(state: &mut AppState) -> Result<()> {
     if state.onboarding.active == state.onboarding.steps.len() - 1 {
         finish_onboarding(state).await?;
     } else {
-        state.onboarding.active += 1;
-        state.onboarding.load_input();
+        state.onboarding.go_forward();
         if state.onboarding.current_step() == Step::Model {
             spawn_model_fetch(state);
         }
@@ -290,10 +297,10 @@ fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfi
             Some(onboarding.api_key.clone())
         },
         model: onboarding.model.clone(),
-        base_url: if onboarding.base_url.is_empty() {
-            None
-        } else {
+        base_url: if steps::shows_base_url_step(onboarding.provider) && !onboarding.base_url.is_empty() {
             Some(onboarding.base_url.clone())
+        } else {
+            None
         },
         endpoint: None,
         reasoning_effort: None,
@@ -306,22 +313,22 @@ fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfi
 
 fn spawn_model_fetch(state: &mut AppState) {
     let provider_id = state.onboarding.provider;
+    let meta = ProviderMeta::for_provider(provider_id);
     let api_key = state.onboarding.api_key.clone();
-    let base_url = if state.onboarding.base_url.is_empty() {
-        ProviderMeta::for_provider(provider_id)
-            .default_base_url
-            .map(|s| s.to_string())
-    } else {
+    let base_url = if steps::shows_base_url_step(provider_id) && !state.onboarding.base_url.is_empty()
+    {
         Some(state.onboarding.base_url.clone())
+    } else {
+        meta.default_base_url.map(|s| s.to_string())
     };
 
     state.onboarding.model_picker.reset();
 
-    let api_key = if api_key.is_empty() {
+    let api_key = meta.resolve_api_key(if api_key.is_empty() {
         None
     } else {
-        Some(api_key)
-    };
+        Some(api_key.as_str())
+    });
     model_picker::spawn_load(
         &mut state.onboarding.model_picker,
         state.llm_tx.clone(),
