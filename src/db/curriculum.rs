@@ -37,11 +37,7 @@ pub const CURRICULUM_DOMAIN_DESCRIPTIONS: &[(&str, &str)] = &[
     ),
     (
         "lexicon-vocabulary",
-        "Thematic vocabulary sets, collocations, idioms, false friends, register-specific words",
-    ),
-    (
-        "pragmatics-discourse",
-        "Connectors, discourse markers, politeness, formal/informal register, speech acts",
+        "Thematic vocabulary sets, collocations, idioms, and false friends",
     ),
     (
         "written-conventions",
@@ -49,7 +45,7 @@ pub const CURRICULUM_DOMAIN_DESCRIPTIONS: &[(&str, &str)] = &[
     ),
     (
         "text-types",
-        "Narrative, descriptive, argumentative, official, informal, and literary texts",
+        "Narrative, descriptive, argumentative, personal, and literary texts",
     ),
 ];
 

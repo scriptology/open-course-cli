@@ -41,12 +41,10 @@ pub fn build_exercise_prompt(
         .map(|c| format!("Proficiency level (self-assessed): {c}"))
         .unwrap_or_default();
 
-    let age_hint = profile
-        .age
-        .map(|age| format!(
-            "Student age: {age}. Use age-appropriate contexts. Avoid school, kindergarten, or other child-specific scenarios unless the age makes them clearly relevant."
-        ))
-        .unwrap_or_default();
+    let age = profile.age.unwrap_or(18);
+    let age_hint = format!(
+        "Student age: {age}. Use contexts and examples that fit the life experience of a typical {age}-year-old."
+    );
 
     let recent_rate_pct = (recent_success_rate * 100.0).round() as i32;
     let adaptive_hint = format!(
@@ -257,10 +255,10 @@ pub fn build_curriculum_extension_prompt(
         .map(|p| format!("- {}: score {:.0}", p.topic_id, p.score))
         .collect();
     let cefr = profile.self_assessed_cefr.as_deref().unwrap_or("beginner");
-    let age_hint = profile
-        .age
-        .map(|age| format!("Student age: {age}. Avoid childish topics unless appropriate."))
-        .unwrap_or_else(|| "Student age: not specified.".to_string());
+    let age = profile.age.unwrap_or(18);
+    let age_hint = format!(
+        "Student age: {age}. Use contexts and examples that fit the life experience of a typical {age}-year-old."
+    );
     format!(
         "You are expanding a language learning curriculum for {target} for a {native} speaker.\n\
         Goal: general fluency.\n\
@@ -273,7 +271,7 @@ pub fn build_curriculum_extension_prompt(
         Generate exactly {count} new topics that extend or refine the existing curriculum. Consider:\n\
         1. Filling gaps between existing topics (e.g., if 'Preterite: Regular -ar Verbs' exists but 'Preterite: Irregular Verbs' does not, add the missing one).\n\
         2. Reinforcing weak areas if any.\n\
-        3. Adding related grammar, vocabulary, usage, or register topics not yet covered.\n\
+        3. Adding related grammar or vocabulary topics not yet covered.\n\
         4. Progressing toward C2 from the student's current level.\n\n\
         The new topics must NOT duplicate existing topics by name or concept.\n\n\
         Return a JSON object:\n\
@@ -343,16 +341,16 @@ pub fn build_curriculum_level_prompt(
         .map(|(i, (name, desc))| format!("{}. {} — {}", i + 1, name, desc))
         .collect::<Vec<_>>()
         .join("\n");
-    let age_hint = profile
-        .age
-        .map(|age| format!("The student is {age} years old. Avoid school, kindergarten, or other child-specific scenarios unless the age makes them clearly relevant."))
-        .unwrap_or_else(|| "The student's age is not specified; keep contexts neutral and broadly applicable.".to_string());
+    let age = profile.age.unwrap_or(18);
+    let age_hint = format!(
+        "The student is {age} years old. Use contexts and examples that fit the life experience of a typical {age}-year-old."
+    );
     format!(
         "You are a senior professor of linguistics and language pedagogy. You are designing a focused {target} course for a {native} speaker.\n\
         \n\
         {age_hint}\n\
         \n\
-        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native} to {target} or analyzing written {target}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\
+        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native} to {target}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\
         \n\
         Your current task: produce around {count} focused {target} topics a learner must master to progress from CEFR {previous} to CEFR {level}. Cover each translatable domain listed below with a few concrete, narrow topics. Prefer small, actionable topics that fit 1–2 translation exercises.\n\
         \n\
@@ -445,7 +443,7 @@ pub fn build_curriculum_domain_prompt(
         "You are a senior professor of linguistics and language pedagogy. You are designing {target} topics for CEFR level {level} for a {native} speaker.\n\n\
         Focus ONLY on the following domain. Do not include topics from other domains.\n\
         Domain: {domain} — {domain_description}\n\n\
-        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native} to {target} or analyzing written {target}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\n\
+        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native} to {target}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\n\
         Generate exactly {count} focused, narrow {target} topics in this domain that a learner must master to progress at CEFR {level}. Each topic should be small enough to practice in 1–2 translation exercises.\n\n\
         All topics must have:\n\
         - difficulty: \"{difficulty}\"\n\
