@@ -54,12 +54,7 @@ fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
 
 #[async_trait]
 pub trait LlmClient: Send + Sync + Any {
-    async fn prompt(
-        &self,
-        prompt: &str,
-        system: Option<&str>,
-        max_tokens: u32,
-    ) -> Result<String>;
+    async fn prompt(&self, prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String>;
     async fn stream_prompt(
         &self,
         prompt: &str,
@@ -89,7 +84,10 @@ fn as_rig_client(client: &dyn LlmClient) -> Option<&RigClient> {
     if let Some(rig) = client.as_any().downcast_ref::<RigClient>() {
         return Some(rig);
     }
-    if let Some(diag) = client.as_any().downcast_ref::<crate::llm::diagnostics::DiagnosticLlmClient>() {
+    if let Some(diag) = client
+        .as_any()
+        .downcast_ref::<crate::llm::diagnostics::DiagnosticLlmClient>()
+    {
         return as_rig_client(diag.inner());
     }
     None
@@ -112,7 +110,7 @@ pub struct RigClient {
 impl RigClient {
     pub fn from_config(config: &ProviderConfig, provider_id: ProviderId) -> Result<Self> {
         let meta = ProviderMeta::for_provider(provider_id);
-        let api_key = config.api_key();
+        let api_key = meta.resolve_api_key(config.api_key());
         let model = config.model().to_string();
         let base_url = config.base_url().or(meta.default_base_url);
 
@@ -122,7 +120,7 @@ impl RigClient {
             )));
         }
 
-        let api_key = api_key.unwrap_or_default().to_string();
+        let api_key = api_key.unwrap_or_default();
         let reasoning_effort = config.reasoning_effort().map(|s| s.to_string());
 
         let (inner, base_url) = match provider_id {
@@ -130,12 +128,16 @@ impl RigClient {
                 let base_url = base_url.unwrap_or("https://api.anthropic.com");
                 let client = anthropic::ClientBuilder::new(&api_key)
                     .base_url(base_url)
-                    .build();
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (RigClientInner::Anthropic(client), base_url.to_string())
             }
             ProviderId::Google => {
                 let base_url = base_url.unwrap_or("https://generativelanguage.googleapis.com");
-                let client = gemini::Client::from_url(&api_key, base_url);
+                let client = gemini::client::ClientBuilder::new(&api_key)
+                    .base_url(base_url)
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (RigClientInner::Gemini(client), base_url.to_string())
             }
             ProviderId::Custom if config.endpoint() == "messages" => {
@@ -147,7 +149,8 @@ impl RigClient {
                 let anthropic_base = base_url.trim_end_matches("/v1").trim_end_matches('/');
                 let client = anthropic::ClientBuilder::new(&api_key)
                     .base_url(anthropic_base)
-                    .build();
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (
                     RigClientInner::Anthropic(client),
                     anthropic_base.to_string(),
@@ -159,7 +162,10 @@ impl RigClient {
                         "Provider {provider_id:?} requires a base URL"
                     ))
                 })?;
-                let client = openai::Client::from_url(&api_key, base_url);
+                let client = openai::ClientBuilder::new(&api_key)
+                    .base_url(base_url)
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (RigClientInner::OpenAi(client), base_url.to_string())
             }
         };
@@ -184,7 +190,7 @@ impl RigClient {
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
                 RigClientInner::OpenAi(client) => {
-                    let extractor = ExtractorBuilder::<T, _>::new(
+                    let extractor = ExtractorBuilder::<_, T>::new(
                         openai::completion::CompletionModel::new(client.clone(), &self.model),
                     )
                     .max_tokens(max_tokens as u64)
@@ -200,11 +206,15 @@ impl RigClient {
                         .await
                 }
                 RigClientInner::Gemini(client) => {
-                    client
+                    let mut extractor = client
                         .extractor::<T>(&self.model)
-                        .build()
-                        .extract(prompt)
-                        .await
+                        .max_tokens(max_tokens as u64);
+                    if let Some(params) =
+                        ProviderMeta::for_provider(ProviderId::Google).rig_additional_params()
+                    {
+                        extractor = extractor.additional_params(params);
+                    }
+                    extractor.build().extract(prompt).await
                 }
             };
 
@@ -263,9 +273,13 @@ impl RigClient {
         client: &gemini::Client,
         model: &str,
         system: Option<&str>,
-        _max_tokens: u32,
+        max_tokens: u32,
     ) -> Agent<gemini::completion::CompletionModel> {
-        let mut builder = client.agent(model);
+        let mut builder = client.agent(model).max_tokens(max_tokens as u64);
+        if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params()
+        {
+            builder = builder.additional_params(params);
+        }
         if let Some(system) = system {
             builder = builder.preamble(system);
         }
@@ -275,12 +289,7 @@ impl RigClient {
 
 #[async_trait]
 impl LlmClient for RigClient {
-    async fn prompt(
-        &self,
-        prompt: &str,
-        system: Option<&str>,
-        max_tokens: u32,
-    ) -> Result<String> {
+    async fn prompt(&self, prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String> {
         let mut last_err = None;
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
@@ -360,5 +369,93 @@ impl LlmClient for RigClient {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_env_var<F: FnOnce()>(name: &str, value: Option<&str>, f: F) {
+        let _guard = crate::llm::env_test_lock::LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let original = std::env::var(name).ok();
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+        f();
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+
+    fn config(
+        api_key: Option<&str>,
+        base_url: Option<&str>,
+        endpoint: Option<&str>,
+    ) -> ProviderConfig {
+        ProviderConfig::ApiKey {
+            api_key: api_key.map(str::to_string),
+            model: "test-model".to_string(),
+            base_url: base_url.map(str::to_string),
+            endpoint: endpoint.map(str::to_string),
+            reasoning_effort: None,
+        }
+    }
+
+    #[test]
+    fn missing_api_key_without_env_var_errors() {
+        with_env_var("ANTHROPIC_API_KEY", None, || {
+            let cfg = config(None, None, None);
+            let result = RigClient::from_config(&cfg, ProviderId::Anthropic);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn env_var_fallback_allows_construction_without_configured_key() {
+        with_env_var("ANTHROPIC_API_KEY", Some("env-anthropic-key"), || {
+            let cfg = config(None, None, None);
+            let client = RigClient::from_config(&cfg, ProviderId::Anthropic)
+                .expect("should fall back to env var");
+            assert_eq!(client.api_key, "env-anthropic-key");
+        });
+    }
+
+    #[test]
+    fn configured_key_takes_priority_over_env_var() {
+        with_env_var("OPENAI_API_KEY", Some("env-openai-key"), || {
+            let cfg = config(
+                Some("configured-key"),
+                Some("https://api.openai.com/v1"),
+                None,
+            );
+            let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
+            assert_eq!(client.api_key, "configured-key");
+        });
+    }
+
+    #[test]
+    fn custom_provider_without_base_url_errors() {
+        with_env_var("OPENAI_API_KEY", None, || {
+            let cfg = config(Some("key"), None, None);
+            let result = RigClient::from_config(&cfg, ProviderId::Custom);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn google_builds_with_default_base_url() {
+        let cfg = config(Some("gemini-key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+        assert_eq!(client.base_url, "https://generativelanguage.googleapis.com");
+        assert!(matches!(client.inner, RigClientInner::Gemini(_)));
     }
 }

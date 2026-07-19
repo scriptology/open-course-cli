@@ -1,10 +1,10 @@
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::AppState;
 use crate::ui::colors;
+use crate::ui::widgets::build_footer;
 use crate::update::CURRENT_VERSION;
 
 #[derive(Debug, Default)]
@@ -55,22 +55,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         chunks[0],
     );
 
-    let footer_text = Line::from(vec![
-        Span::styled(
-            "y",
-            Style::default()
-                .fg(colors::BLUE)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(": install  "),
-        Span::styled(
-            "n",
-            Style::default()
-                .fg(colors::BLUE)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(": skip"),
-    ]);
+    let footer_text = build_footer(&[("y", "install"), ("n", "skip"), ("?", "help")]);
     frame.render_widget(
         Paragraph::new(footer_text).alignment(Alignment::Center),
         chunks[1],

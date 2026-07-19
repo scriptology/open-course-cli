@@ -477,7 +477,8 @@ async fn apply_analysis_to_db_updates_learning_items() {
         new_learning_items: vec![],
     };
 
-    apply_analysis_to_db(&analysis,
+    apply_analysis_to_db(
+        &analysis,
         &session,
         &["es-pequeno-pequena".to_string()],
         &db,
@@ -917,7 +918,6 @@ async fn acceptable_translation_grows_mastery() {
     assert!(t1.score > 50.0);
 }
 
-
 fn practiced(id: &str, mastery: f64, days_ago: i64) -> ProgressTopic {
     ProgressTopic {
         topic_id: id.to_string(),
@@ -989,7 +989,12 @@ fn pick_next_reviews_every_second_session_on_backlog() {
         .collect();
     topics.push(make_topic("n1", Difficulty::Beginner));
     // Upcoming session #2 with 5 due topics -> review.
-    let progress = progress_with((1..=5).map(|i| practiced(&format!("d{i}"), 20.0, 0)).collect(), 1);
+    let progress = progress_with(
+        (1..=5)
+            .map(|i| practiced(&format!("d{i}"), 20.0, 0))
+            .collect(),
+        1,
+    );
 
     match pick_next_session_topic(&topics, &progress, Utc::now()) {
         NextSessionTopic::Review(t) => assert_eq!(t.id, "d1"),

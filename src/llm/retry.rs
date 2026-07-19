@@ -48,7 +48,9 @@ pub(crate) struct RetryConfig<'a> {
 /// 3. structured extraction via tool-calling / response_format (only for
 ///    clients that support it; `extract` yields `Ok(None)` when the
 ///    extraction succeeded but the data was unusable).
+///
 /// On total failure the last response is dumped and a detailed error returned.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn generate_with_retries<T, P, X, XFut>(
     client: &dyn LlmClient,
     prompt: &str,
@@ -243,7 +245,8 @@ pub async fn generate_analysis(
             )
         },
         || async move {
-            let analysis = extract_typed::<AnalysisResult>(client, prompt, MAX_TOKENS_ANALYSIS).await?;
+            let analysis =
+                extract_typed::<AnalysisResult>(client, prompt, MAX_TOKENS_ANALYSIS).await?;
             Ok(validate_analysis_sentences(analysis, expected_sentence_count, 0, 0).ok())
         },
         |cleaned| analysis_parse_errors(cleaned, expected_sentence_count),

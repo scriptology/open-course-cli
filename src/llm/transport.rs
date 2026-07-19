@@ -45,11 +45,7 @@ pub(crate) fn send_status(label: &str, stream_tx: Option<&mpsc::Sender<LlmResult
     }
 }
 
-pub(crate) fn send_stream_status(
-    tx: &mpsc::Sender<LlmResult>,
-    level: Option<&str>,
-    status: &str,
-) {
+pub(crate) fn send_stream_status(tx: &mpsc::Sender<LlmResult>, level: Option<&str>, status: &str) {
     if let Some(level) = level {
         let _ = tx.try_send(LlmResult::CurriculumStreamChunk {
             level: level.to_string(),
@@ -148,9 +144,7 @@ pub(crate) async fn stream_or_prompt(
             Err(e) => {
                 log_debug_event(
                     "stream",
-                    &format!(
-                        "Streaming chunk failed ({e}), falling back to non-streaming prompt"
-                    ),
+                    &format!("Streaming chunk failed ({e}), falling back to non-streaming prompt"),
                     None,
                 );
                 return prompt_fallback(client, prompt, system, max_tokens).await;

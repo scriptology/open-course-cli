@@ -38,8 +38,7 @@ async fn handle_provider_key(state: &mut AppState, code: KeyCode) -> Result<()> 
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
         KeyCode::Up | KeyCode::Char('k') => {
             let idx = state.onboarding.provider_index;
@@ -90,20 +89,21 @@ async fn handle_provider_key(state: &mut AppState, code: KeyCode) -> Result<()> 
 }
 
 async fn handle_base_url_key(state: &mut AppState, code: KeyCode) -> Result<()> {
+    use super::steps::shows_base_url_step;
+    let editable = shows_base_url_step(state.onboarding.provider);
     match code {
         KeyCode::Esc => handle_esc(state),
         KeyCode::Char('\t') | KeyCode::Tab | KeyCode::Enter => {
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab | KeyCode::Up if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(c) if editable => {
             state.onboarding.input.push(c);
             state.onboarding.error.clear();
         }
-        KeyCode::Backspace => {
+        KeyCode::Backspace if editable => {
             state.onboarding.input.pop();
         }
         _ => {}
@@ -199,19 +199,14 @@ fn cycle_choice(state: &mut AppState, field: &ChoiceField, backwards: bool) {
     state.onboarding.error.clear();
 }
 
-async fn handle_choice_key(
-    state: &mut AppState,
-    code: KeyCode,
-    field: &ChoiceField,
-) -> Result<()> {
+async fn handle_choice_key(state: &mut AppState, code: KeyCode, field: &ChoiceField) -> Result<()> {
     match code {
         KeyCode::Esc => handle_esc(state),
         KeyCode::Enter | KeyCode::Char('\t') | KeyCode::Tab => {
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
         KeyCode::Up | KeyCode::Char('k') => cycle_choice(state, field, true),
         KeyCode::Down | KeyCode::Char('j') => cycle_choice(state, field, false),
@@ -251,8 +246,7 @@ async fn handle_text_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab | KeyCode::Up if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
         KeyCode::Char(c) => {
             state.onboarding.input.push(c);

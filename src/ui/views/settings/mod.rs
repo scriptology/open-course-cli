@@ -16,7 +16,7 @@ use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{draw_confirmation, model_picker};
+use crate::ui::widgets::{build_footer, draw_confirmation, model_picker};
 
 pub use data::ResetAction;
 pub use provider_setup::{
@@ -50,6 +50,23 @@ impl Section {
             Section::Session,
             Section::Data,
         ]
+    }
+}
+
+impl SettingsState {
+    pub fn is_text_input_active(&self) -> bool {
+        if self.section == Section::Provider {
+            match self.provider_setup_step {
+                ProviderSetupStep::ApiKey => true,
+                ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
+                    self.provider_setup_provider == ProviderId::Custom
+                }
+                ProviderSetupStep::Model => self.model_picker.manual,
+                ProviderSetupStep::SelectProvider => false,
+            }
+        } else {
+            self.is_text_field()
+        }
     }
 }
 
@@ -206,23 +223,31 @@ fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
     Text::from(lines)
 }
 
-fn build_footer(state: &AppState) -> String {
+fn footer_text(state: &AppState) -> String {
     if state.settings.section == Section::Provider && state.settings.in_section {
         return provider_setup::build_provider_setup_footer(state);
     }
 
-    let mut lines = vec![String::new()];
-    if state.settings.section == Section::Data {
-        lines[0] = "↑/↓: action | Enter: reset | Esc: back".to_string();
-    } else if state.settings.section == Section::Session {
-        lines[0] = "↑/↓: select | Esc: back".to_string();
-    } else if state.settings.section == Section::Profile {
-        lines[0] = "←/→: move caret | Type: edit | Enter: save | Esc: back".to_string();
-    } else {
-        lines[0] = "Tab/Shift+Tab: field | Enter: save | Esc: back".to_string();
+    match state.settings.section {
+        Section::Data => build_footer(&[
+            ("↑/↓", "action"),
+            ("Enter", "reset"),
+            ("Esc", "back"),
+            ("?", "help"),
+        ]),
+        Section::Session => build_footer(&[("↑/↓", "select"), ("Esc", "back"), ("?", "help")]),
+        Section::Profile => build_footer(&[
+            ("←/→", "move caret"),
+            ("Type", "edit"),
+            ("Enter", "save"),
+            ("Esc", "back"),
+        ]),
+        Section::Provider => build_footer(&[
+            ("Tab/Shift+Tab", "field"),
+            ("Enter", "save"),
+            ("Esc", "back"),
+        ]),
     }
-
-    lines.join("\n")
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
@@ -290,8 +315,13 @@ fn draw_section_picker(
     frame.render_stateful_widget(list, chunks[1], &mut state.settings.section_list_state);
 
     frame.render_widget(
-        Paragraph::new("↑/↓: navigate | Enter: open | Esc: back")
-            .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(build_footer(&[
+            ("↑/↓", "navigate"),
+            ("Enter", "open"),
+            ("Esc", "back"),
+            ("?", "help"),
+        ]))
+        .style(Style::default().fg(Color::DarkGray)),
         chunks[2],
     );
 }
@@ -302,7 +332,7 @@ fn draw_section_page(
     state: &mut AppState,
 ) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
-    let footer_text = build_footer(state);
+    let footer_text = self::footer_text(state);
     let footer_height = footer_text.lines().count() as u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)

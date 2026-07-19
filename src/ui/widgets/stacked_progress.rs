@@ -1,8 +1,8 @@
+use crate::ui::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::Widget;
-use crate::ui::colors;
 
 const BAR_SYMBOL: &str = "\u{2580}";
 

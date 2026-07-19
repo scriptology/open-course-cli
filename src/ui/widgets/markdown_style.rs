@@ -1,6 +1,6 @@
+use crate::ui::colors;
 use ratatui::style::{Color, Modifier, Style};
 use tui_markdown::StyleSheet;
-use crate::ui::colors;
 
 #[derive(Debug, Clone, Copy)]
 pub struct OpenCourseStyleSheet;

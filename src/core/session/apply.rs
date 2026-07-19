@@ -208,9 +208,7 @@ pub async fn apply_analysis_to_db(
             }
         };
         if !progress.topics.iter().any(|p| p.topic_id == topic_id) {
-            progress
-                .topics
-                .push(ProgressTopic::initial(topic_id, 0.0));
+            progress.topics.push(ProgressTopic::initial(topic_id, 0.0));
         }
     }
 
@@ -354,9 +352,10 @@ fn legacy_item_exercise_score(
                 let explanation_lower = error.explanation.to_lowercase();
                 if pattern_lower.contains(&item_name_lower)
                     || explanation_lower.contains(&item_name_lower)
-                    || error.new_topics.iter().any(|nt| {
-                        nt.name.to_lowercase().contains(&item_name_lower)
-                    })
+                    || error
+                        .new_topics
+                        .iter()
+                        .any(|nt| nt.name.to_lowercase().contains(&item_name_lower))
                 {
                     return 0.0;
                 }

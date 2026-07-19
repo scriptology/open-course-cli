@@ -12,11 +12,11 @@ use crate::llm::client::{DEFAULT_MAX_TOKENS, extract_typed};
 use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_curriculum as generate_curriculum_llm;
 use crate::llm::prompts::build_curriculum_extension_prompt;
+use crate::ui::colors;
 use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::docs;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::draw_confirmation;
-use crate::ui::colors;
+use crate::ui::widgets::{build_footer, draw_confirmation};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CurriculumSortBy {
@@ -154,7 +154,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(format!("Esc: {}", labels.cancel))
+            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", "help")]))
                 .style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
@@ -201,9 +201,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let mut header_lines = vec![
         Line::from(Span::styled(
             labels.curriculum,
-            Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
     ];
@@ -265,19 +263,23 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         CurriculumSortBy::Score => labels.sort_score,
     };
     let help = if state.curriculum.topics.is_empty() {
-        format!("g: {} | Esc: {}", labels.generate_label, labels.back)
+        build_footer(&[
+            ("g", labels.generate_label),
+            ("Esc", labels.back),
+            ("?", "help"),
+        ])
     } else {
-        format!(
-            "↑↓/wheel: {} | Enter: {} | s: {} ({}) | a: {} | x: {} | r: {} | Esc: {}",
-            labels.navigate,
-            labels.docs,
-            labels.sort,
-            sort_label,
-            labels.add_topics_label,
-            labels.delete_label,
-            labels.reset_label,
-            labels.back,
-        )
+        let sort_entry = format!("{} ({})", labels.sort, sort_label);
+        build_footer(&[
+            ("↑↓/wheel", labels.navigate),
+            ("Enter", labels.docs),
+            ("s", sort_entry.as_str()),
+            ("a", labels.add_topics_label),
+            ("x", labels.delete_label),
+            ("r", labels.reset_label),
+            ("Esc", labels.back),
+            ("?", "help"),
+        ])
     };
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
@@ -334,6 +336,9 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             );
         }
         KeyCode::Char('g') => {
+            generate_curriculum(state).await?;
+        }
+        KeyCode::Enter if state.curriculum.topics.is_empty() && !state.curriculum.loading => {
             generate_curriculum(state).await?;
         }
         KeyCode::Char('r') if !state.curriculum.topics.is_empty() => {
@@ -509,7 +514,9 @@ pub async fn extend_curriculum(state: &mut AppState, count: usize) -> Result<()>
     tokio::spawn(async move {
         let result: Result<Vec<Topic>> = async {
             let model = create_llm_model(&config)?;
-            let mut extension = extract_typed::<CurriculumExtension>(model.as_ref(), &prompt, DEFAULT_MAX_TOKENS).await?;
+            let mut extension =
+                extract_typed::<CurriculumExtension>(model.as_ref(), &prompt, DEFAULT_MAX_TOKENS)
+                    .await?;
             for (index, topic) in extension.topics.iter_mut().enumerate() {
                 if topic.target_lang.is_empty() {
                     topic.target_lang = target_language.clone();

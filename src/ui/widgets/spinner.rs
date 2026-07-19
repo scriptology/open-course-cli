@@ -1,9 +1,9 @@
+use crate::ui::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::{Paragraph, Widget};
-use crate::ui::colors;
 
 const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

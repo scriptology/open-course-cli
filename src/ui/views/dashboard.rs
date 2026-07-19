@@ -665,6 +665,7 @@ fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
         ("p", labels.pairs),
         ("s", labels.settings),
         ("q", labels.quit),
+        ("?", "help"),
     ];
     if state.dashboard.weak_visible_len() > 0 {
         hints.insert(0, ("Enter", labels.start_label));
@@ -697,11 +698,11 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Down | KeyCode::Char('j') => state.dashboard.move_weak_selection(1),
         KeyCode::Up | KeyCode::Char('k') => state.dashboard.move_weak_selection(-1),
         KeyCode::Enter => {
-            if let Some(sel) = state.dashboard.weak_selected {
-                if let Some(topic) = state.dashboard.weak_topics.iter().take(5).nth(sel).cloned() {
-                    state.view = View::Session;
-                    session::start_review_topic_session(state, topic.id).await?;
-                }
+            if let Some(sel) = state.dashboard.weak_selected
+                && let Some(topic) = state.dashboard.weak_topics.iter().take(5).nth(sel).cloned()
+            {
+                state.view = View::Session;
+                session::start_review_topic_session(state, topic.id).await?;
             }
         }
         KeyCode::Esc => {

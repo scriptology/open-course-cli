@@ -17,7 +17,9 @@ use std::collections::HashMap;
 
 use crate::db::history::SessionSummary;
 
-use super::models::{AnalysisResult, GrammarError, GrammarErrorType, SemanticVerdict, SentenceAnalysis};
+use super::models::{
+    AnalysisResult, GrammarError, GrammarErrorType, SemanticVerdict, SentenceAnalysis,
+};
 use super::{MentorSession, unique_topic_ids};
 
 pub(super) fn topic_exercise_scores(

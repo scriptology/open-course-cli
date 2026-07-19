@@ -13,6 +13,7 @@ use crate::llm::diagnostics::{
 use crate::llm::factory::create_llm_model;
 use crate::ui::colors;
 use crate::ui::labels::{get_report_labels, native_language_code};
+use crate::ui::widgets::build_footer;
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelCheckState {
@@ -106,7 +107,7 @@ pub fn start(state: &mut AppState, config: OpenCourseConfig, return_to: View) {
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let footer = if state.model_check.running {
-        "Running checks...".to_string()
+        format!("Running checks... | {}", build_footer(&[("?", "help")]))
     } else {
         let (has_failed, has_warning) = model_check_verdict(&state.model_check.checks);
         let verdict = if has_failed {
@@ -117,8 +118,15 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             "Model is ready."
         };
         format!(
-            "{} | Enter/c: continue | Esc/b: back to model list | r: retry | s: skip",
-            verdict
+            "{} | {}",
+            verdict,
+            build_footer(&[
+                ("Enter/c", "continue"),
+                ("Esc/b", "back to model list"),
+                ("r", "retry"),
+                ("s", "skip"),
+                ("?", "help"),
+            ])
         )
     };
     let footer_height = footer.lines().count() as u16;
@@ -165,7 +173,10 @@ fn render_check_line<'a>(check: &'a CheckResult, spinner_symbol: &'a str) -> Lin
         Span::raw(check.label.clone()),
     ];
     if !matches!(check.status, CheckStatus::Pending | CheckStatus::InProgress) {
-        spans.push(Span::raw(format!(" ({:.1}s)", check.duration_ms as f64 / 1000.0)));
+        spans.push(Span::raw(format!(
+            " ({:.1}s)",
+            check.duration_ms as f64 / 1000.0
+        )));
     }
     if let Some(ratio) = check.reasoning_ratio {
         spans.push(Span::raw(format!(", {:.0}% reasoning", ratio * 100.0)));

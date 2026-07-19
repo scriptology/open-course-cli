@@ -21,10 +21,10 @@ use crate::error::{AppError, Result};
 use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_topic_review;
 use crate::llm::prompts::build_topic_review_prompt;
+use crate::ui::colors;
 use crate::ui::labels::{get_docs_labels, native_language_code};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::OpenCourseStyleSheet;
-use crate::ui::colors;
+use crate::ui::widgets::{OpenCourseStyleSheet, build_footer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortBy {
@@ -170,7 +170,12 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             )),
             Line::from(""),
             Line::from(Span::styled(
-                format!("{} ({}: {})", topic.name, labels.sort, state.docs.sort_by.label()),
+                format!(
+                    "{} ({}: {})",
+                    topic.name,
+                    labels.sort,
+                    state.docs.sort_by.label()
+                ),
                 Style::default().fg(Color::DarkGray),
             )),
         ]);
@@ -195,21 +200,26 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
         frame.render_widget(body, chunks[1]);
 
-        let mouse_hint = if state.mouse_capture {
-            "wheel: scroll | m: select text"
+        let mouse_entries: [(&str, &str); 2] = if state.mouse_capture {
+            [("wheel", "scroll"), ("m", "select text")]
         } else {
-            "mouse: select text | m: wheel scroll"
+            [("mouse", "select text"), ("m", "wheel scroll")]
         };
         let help = if state.docs.content.is_empty() {
-            format!(
-                "Esc: back to list | e: {} | p: {}",
-                labels.regenerate, labels.practice
-            )
+            build_footer(&[
+                ("Esc", "back to list"),
+                ("e", labels.regenerate),
+                ("p", labels.practice),
+                ("?", "help"),
+            ])
         } else {
-            format!(
-                "↑/↓: scroll | {} | Esc: back to list | e: {} | p: {}",
-                mouse_hint, labels.regenerate, labels.practice
-            )
+            let mut entries = vec![("↑/↓", "scroll")];
+            entries.extend(mouse_entries);
+            entries.push(("Esc", "back to list"));
+            entries.push(("e", labels.regenerate));
+            entries.push(("p", labels.practice));
+            entries.push(("?", "help"));
+            build_footer(&entries)
         };
         frame.render_widget(
             Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
@@ -263,10 +273,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         }
 
         frame.render_widget(
-            Paragraph::new(format!(
-                "↑/↓/wheel: navigate | s: sort | Enter: view | p: {} | Esc: back",
-                labels.practice
-            ))
+            Paragraph::new(build_footer(&[
+                ("↑/↓/wheel", "navigate"),
+                ("s", "sort"),
+                ("Enter", "view"),
+                ("p", labels.practice),
+                ("Esc", "back"),
+                ("?", "help"),
+            ]))
             .style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
@@ -450,15 +464,16 @@ async fn generate_inner(
     Ok(text)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn scroll_by_clamps_to_bounds() {
-        let mut state = DocsState::default();
-        state.max_scroll_offset = 10;
+        let mut state = DocsState {
+            max_scroll_offset: 10,
+            ..Default::default()
+        };
 
         state.scroll_by(3);
         assert_eq!(state.scroll_offset, 3);

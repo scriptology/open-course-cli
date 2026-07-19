@@ -53,7 +53,10 @@ fn legacy_profile_migration() {
     assert_eq!(config.active_profile().native_language, "ru");
     assert_eq!(config.active_profile().target_language, "en");
     assert_eq!(config.active_profile().age, Some(25));
-    assert_eq!(config.active_profile().self_assessed_cefr, Some("A2".to_string()));
+    assert_eq!(
+        config.active_profile().self_assessed_cefr,
+        Some("A2".to_string())
+    );
     assert_eq!(config.active_pair, "ru-en");
     assert_eq!(config.pairs.len(), 1);
     assert_eq!(config.active_provider, ProviderId::Custom);
@@ -98,7 +101,10 @@ fn v1_config_to_pairs_migration_moves_db() {
 
     let new_db = pair_db_path(dir.path(), "ru-es");
     assert!(new_db.join("marker.txt").exists());
-    assert_eq!(fs::read_to_string(new_db.join("marker.txt")).unwrap(), "data");
+    assert_eq!(
+        fs::read_to_string(new_db.join("marker.txt")).unwrap(),
+        "data"
+    );
 }
 
 #[test]

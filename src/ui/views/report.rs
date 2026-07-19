@@ -9,9 +9,10 @@ use crate::app::{AppState, View};
 use crate::core::session::{AnalysisResult, MentorSession, SemanticVerdict};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
+use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
-use crate::ui::colors;
+use crate::ui::widgets::build_footer;
 
 #[derive(Debug, Clone)]
 pub struct ReportState {
@@ -81,11 +82,8 @@ impl ReportState {
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
 
-    let chunks: [Rect; 2] = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let chunks: [Rect; 2] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
 
     let (paragraph, max_offset) = {
         let lines = build_report_lines(&state.report, labels);
@@ -100,18 +98,22 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     frame.render_widget(paragraph.scroll((state.report.scroll_offset, 0)), chunks[0]);
 
-    let mouse_hint = if state.mouse_capture {
-        "wheel: scroll | m: native select"
+    let mouse_entries: [(&str, &str); 2] = if state.mouse_capture {
+        [("wheel", "scroll"), ("m", "native select")]
     } else {
-        "mouse: select text | m: wheel scroll"
+        [("mouse", "select text"), ("m", "wheel scroll")]
     };
+    let mut entries = vec![("↑/↓", "scroll")];
+    entries.extend(mouse_entries);
+    entries.push(("n", "new topic"));
+    entries.push(("r", "repeat"));
+    entries.push(("d", "docs"));
+    entries.push(("Esc", "dashboard"));
+    entries.push(("?", "help"));
 
     frame.render_widget(
-        Paragraph::new(Line::from(format!(
-            "↑/↓: scroll | {} | n: new topic | r: repeat | d: docs | Esc: dashboard",
-            mouse_hint
-        )))
-        .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(Line::from(build_footer(&entries)))
+            .style(Style::default().fg(Color::DarkGray)),
         chunks[1],
     );
 }
@@ -276,10 +278,8 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
         })
         .collect();
 
-    let changed_topic_ids: std::collections::HashSet<_> = changed_topics
-        .iter()
-        .map(|t| t.topic_id.as_str())
-        .collect();
+    let changed_topic_ids: std::collections::HashSet<_> =
+        changed_topics.iter().map(|t| t.topic_id.as_str()).collect();
 
     let extra_new_topics: Vec<_> = report
         .analysis
@@ -437,15 +437,16 @@ fn correct_answer_spans(text: &str, student: &str) -> Vec<Span<'static>> {
     spans
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn scroll_by_clamps_to_bounds() {
-        let mut state = ReportState::default();
-        state.max_scroll_offset = 10;
+        let mut state = ReportState {
+            max_scroll_offset: 10,
+            ..Default::default()
+        };
 
         state.scroll_by(3);
         assert_eq!(state.scroll_offset, 3);
@@ -459,8 +460,10 @@ mod tests {
 
     #[test]
     fn report_header_shows_topic_name() {
-        let mut report = ReportState::default();
-        report.target_topic_name = Some("Preterito".to_string());
+        let report = ReportState {
+            target_topic_name: Some("Preterito".to_string()),
+            ..Default::default()
+        };
         let lines = build_report_lines(&report, get_report_labels("ru"));
         let header: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(header, "Тема: Preterito");

@@ -14,11 +14,26 @@ First launch shows a step-by-step onboarding wizard:
 4. **CEFR level** — required selector: `A1`, `A2`, `B1`, `B2`, `C1`, `C2`.
 5. **Batch size** — required selector: `2`, `3`, `4`, `5` exercises per session.
 6. **Provider** — select LLM provider (OpenAI, Anthropic, Google, DeepSeek, Mistral, OpenRouter, Ollama, Custom).
-7. **API key** — enter API key (optional where provider allows).
-8. **Base URL** — required for Custom/Ollama; skipped for others.
+7. **API key** — enter API key, or leave blank to fall back to the provider's well-known environment
+   variable if set (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`,
+   `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`; not applicable to Ollama/Custom).
+8. **Base URL** — only shown for Custom/Ollama; skipped entirely for other providers.
 9. **Model** — pick from discovered models or type model ID manually.
 
 After saving the config, the app runs **Model diagnostics** (connectivity, streaming, exercise generation, analysis, topic review). Once diagnostics finish, the app opens the **Curriculum** view, where you press `g` to generate the initial curriculum.
+
+---
+
+## Updating
+
+On every startup, before the dashboard loads, the app checks the latest GitHub release version against its own build version. If a newer version is available, it shows an **Update available** prompt with the current and latest version instead of loading the dashboard:
+
+| Key | Action |
+|-----|--------|
+| `y` | Install — re-runs the installer script (same command as [Install](../README.md#install)), then quits so the new version can be launched. |
+| `n` / `Esc` / `Enter` | Skip — dismiss the prompt and continue to the dashboard. |
+
+If there's no network access or the GitHub API call fails, the check is skipped silently and the app proceeds as normal — there is no manual "check for updates" command elsewhere in the app.
 
 ---
 
@@ -157,7 +172,8 @@ Available keys:
 
 Sections:
 
-- **Provider**: provider, API key, base URL, endpoint, model.
+- **Provider**: provider, API key (falls back to the provider's environment variable when left
+  blank — see Onboarding), base URL, endpoint, model.
 - **Profile**: age and CEFR for the active pair. To change languages, add a new pair from the Pairs screen.
 - **Session**: batch size (2–5), hint mode (auto/on-demand).
 - **Data**: reset progress, history, curriculum, reviews, or all data.
@@ -175,3 +191,11 @@ The curriculum is not static. When the user keeps requesting new topics (`n`), t
 3. The extension request includes existing topics, their difficulty, and the user's progress/scores, so the LLM can reinforce weak areas or introduce prerequisites for difficult topics.
 
 You can also manually extend the curriculum from the Curriculum view with `a` (add 5 topics) or regenerate it from scratch with `r`.
+
+---
+
+## Background errors
+
+When a background LLM request fails (exercise/analysis generation, curriculum generation or extension, topic review), the app shows a red toast in the bottom-right corner for a few seconds instead of blocking the screen. The current view returns to its normal interactive state, so you can retry with that view's own key (e.g. `g` in Curriculum, `n`/`Enter` to restart a session, `e` to regenerate docs) without dismissing anything first.
+
+This is separate from the full-screen error prompt (`r`: retry / `m`: change model / `q`: quit), which is reserved for unrecoverable startup/config failures.

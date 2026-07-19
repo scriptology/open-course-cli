@@ -155,7 +155,7 @@ pub fn dedupe(topics: Vec<Topic>) -> (Vec<Topic>, Vec<Topic>) {
 /// and moves micro-topics (concrete learning items such as "X vs Y" or "Rule: example")
 /// into the `learning_items` table while preserving their scores.
 pub async fn cleanup_topics(db: &crate::db::Database) -> Result<(usize, usize)> {
-    use crate::db::learning_items::{is_learning_item_name, LearningItem};
+    use crate::db::learning_items::{LearningItem, is_learning_item_name};
 
     let curriculum = db.curriculum().read_all().await?;
     let progress_data = db.progress().read_all().await?;
@@ -172,9 +172,7 @@ pub async fn cleanup_topics(db: &crate::db::Database) -> Result<(usize, usize)> 
     for topic in &curriculum.topics {
         let name = topic.name.trim();
         let is_micro = is_learning_item_name(name)
-            && (name.contains(':')
-                || name.to_lowercase().contains(" vs ")
-                || name.contains('/'));
+            && (name.contains(':') || name.to_lowercase().contains(" vs ") || name.contains('/'));
         let is_bad = should_remove_topic(name);
 
         if is_micro {
@@ -534,7 +532,6 @@ fn topics_from_record_batch(batch: &RecordBatch) -> Result<Curriculum> {
         native_language: native_col.value(0).to_string(),
     })
 }
-
 
 #[cfg(test)]
 mod tests {

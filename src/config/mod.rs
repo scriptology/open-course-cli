@@ -145,10 +145,7 @@ pub fn open_course_dir(cwd: &std::path::Path) -> std::path::PathBuf {
 }
 
 pub fn pair_db_path(cwd: &std::path::Path, pair_id: &str) -> std::path::PathBuf {
-    open_course_dir(cwd)
-        .join("pairs")
-        .join(pair_id)
-        .join("db")
+    open_course_dir(cwd).join("pairs").join(pair_id).join("db")
 }
 
 pub fn ensure_open_course_gitignore(cwd: &std::path::Path) -> Result<()> {

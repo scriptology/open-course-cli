@@ -17,6 +17,7 @@ use crate::llm::provider::ProviderMeta;
 use crate::ui::colors;
 use crate::ui::views::model_check;
 use crate::ui::widgets::Logo;
+use crate::ui::widgets::build_footer;
 use crate::ui::widgets::model_picker;
 
 pub use handlers::handle_key;
@@ -34,23 +35,51 @@ fn display_input(input: &str, step: Step) -> String {
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let step = state.onboarding.current_step();
     let footer_text = match step {
-        Step::Provider => "↑/↓: select provider | Enter: next | Esc: quit",
-        Step::Cefr => "↑/↓: select level | Enter: next | Esc: quit",
-        Step::BatchSize => "↑/↓: select batch size | Enter: next | Esc: quit",
-        Step::Model if state.onboarding.model_picker.loading => "Loading models... | Esc: quit",
-        Step::Model if state.onboarding.model_picker.error.is_some() => {
-            "r: retry | m: manual | Esc: quit"
-        }
+        Step::Provider => build_footer(&[
+            ("↑/↓", "select provider"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
+        Step::Cefr => build_footer(&[
+            ("↑/↓", "select level"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
+        Step::BatchSize => build_footer(&[
+            ("↑/↓", "select batch size"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
+        Step::Model if state.onboarding.model_picker.loading => format!(
+            "Loading models... | {}",
+            build_footer(&[("Esc", "quit"), ("?", "help")])
+        ),
+        Step::Model if state.onboarding.model_picker.error.is_some() => build_footer(&[
+            ("r", "retry"),
+            ("m", "manual"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
         Step::Model if state.onboarding.model_picker.manual => {
-            "Type model ID | Enter: next | Esc: quit"
+            build_footer(&[("Type", "model ID"), ("Enter", "next"), ("Esc", "quit")])
         }
-        Step::Model if !state.onboarding.model_picker.models.is_empty() => {
-            "↑/↓: select model | Enter: next | Esc: quit"
-        }
+        Step::Model if !state.onboarding.model_picker.models.is_empty() => build_footer(&[
+            ("↑/↓", "select model"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
         Step::BaseUrl if !steps::shows_base_url_step(state.onboarding.provider) => {
-            "Enter: next | Esc: quit"
+            build_footer(&[("Enter", "next"), ("Esc", "quit")])
         }
-        _ => "Tab/Enter: next | Shift+Tab: prev | Esc: quit",
+        _ => build_footer(&[
+            ("Tab/Enter", "next"),
+            ("Shift+Tab", "prev"),
+            ("Esc", "quit"),
+        ]),
     };
     let mut footer_lines = vec![Line::from(footer_text)];
     if !state.onboarding.error.is_empty() {
@@ -77,7 +106,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .constraints([Constraint::Length(4), Constraint::Length(2)])
         .split(chunks[0]);
 
-    frame.render_widget(Logo::new(ratatui::layout::Alignment::Left), header_chunks[0]);
+    frame.render_widget(
+        Logo::new(ratatui::layout::Alignment::Left),
+        header_chunks[0],
+    );
 
     let subtitle = Text::from(vec![
         Line::from(Span::styled(
@@ -87,27 +119,38 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "Tab/Enter: continue | Shift+Tab: prev | Esc: quit | ↑/↓: select lists",
+            build_footer(&[
+                ("Tab/Enter", "continue"),
+                ("Shift+Tab", "prev"),
+                ("Esc", "quit"),
+                ("↑/↓", "select lists"),
+            ]),
             Style::default().fg(Color::DarkGray),
         )),
     ]);
     frame.render_widget(Paragraph::new(subtitle), header_chunks[1]);
 
     // Step card with border.
-    let progress = format!(
-        "Step {} of {}",
-        state.onboarding.active + 1,
-        state.onboarding.steps.len()
-    );
+    let visible_steps: Vec<Step> = state
+        .onboarding
+        .steps
+        .iter()
+        .filter(|s| state.onboarding.is_step_visible(**s))
+        .copied()
+        .collect();
+    let current_position = visible_steps
+        .iter()
+        .position(|s| *s == step)
+        .map(|i| i + 1)
+        .unwrap_or(1);
+    let progress = format!("Step {} of {}", current_position, visible_steps.len());
     let title = format!("{} — {}", step.label(), progress);
     let card_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(accent))
         .title(Span::styled(
             title,
-            Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ));
     let card_inner = card_block.inner(chunks[1]);
     frame.render_widget(card_block, chunks[1]);
@@ -152,13 +195,15 @@ fn render_input_paragraph(input: &str, step: Step, accent: Color) -> Paragraph<'
         Span::raw(display),
         Span::styled(
             "█",
-            Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ),
     ]));
     Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(accent)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(accent)),
+        )
         .style(Style::default().fg(Color::White))
 }
 
@@ -231,8 +276,7 @@ async fn advance_onboarding(state: &mut AppState) -> Result<()> {
     if state.onboarding.active == state.onboarding.steps.len() - 1 {
         finish_onboarding(state).await?;
     } else {
-        state.onboarding.active += 1;
-        state.onboarding.load_input();
+        state.onboarding.go_forward();
         if state.onboarding.current_step() == Step::Model {
             spawn_model_fetch(state);
         }
@@ -256,9 +300,10 @@ pub(crate) async fn finish_onboarding(state: &mut AppState) -> Result<()> {
         }
         OnboardingMode::AddPair => {
             let profile = build_profile_from_onboarding(&state.onboarding);
-            let config = state.config.as_mut().ok_or_else(|| {
-                AppError::Config("No config available".to_string())
-            })?;
+            let config = state
+                .config
+                .as_mut()
+                .ok_or_else(|| AppError::Config("No config available".to_string()))?;
             let new_id = config.add_pair(profile)?.to_string();
             write_config(config, &state.data_dir)?;
             crate::app::switch_pair(state, &new_id).await?;
@@ -290,10 +335,12 @@ fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfi
             Some(onboarding.api_key.clone())
         },
         model: onboarding.model.clone(),
-        base_url: if onboarding.base_url.is_empty() {
-            None
-        } else {
+        base_url: if steps::shows_base_url_step(onboarding.provider)
+            && !onboarding.base_url.is_empty()
+        {
             Some(onboarding.base_url.clone())
+        } else {
+            None
         },
         endpoint: None,
         reasoning_effort: None,
@@ -306,22 +353,22 @@ fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfi
 
 fn spawn_model_fetch(state: &mut AppState) {
     let provider_id = state.onboarding.provider;
+    let meta = ProviderMeta::for_provider(provider_id);
     let api_key = state.onboarding.api_key.clone();
-    let base_url = if state.onboarding.base_url.is_empty() {
-        ProviderMeta::for_provider(provider_id)
-            .default_base_url
-            .map(|s| s.to_string())
-    } else {
-        Some(state.onboarding.base_url.clone())
-    };
+    let base_url =
+        if steps::shows_base_url_step(provider_id) && !state.onboarding.base_url.is_empty() {
+            Some(state.onboarding.base_url.clone())
+        } else {
+            meta.default_base_url.map(|s| s.to_string())
+        };
 
     state.onboarding.model_picker.reset();
 
-    let api_key = if api_key.is_empty() {
+    let api_key = meta.resolve_api_key(if api_key.is_empty() {
         None
     } else {
-        Some(api_key)
-    };
+        Some(api_key.as_str())
+    });
     model_picker::spawn_load(
         &mut state.onboarding.model_picker,
         state.llm_tx.clone(),
