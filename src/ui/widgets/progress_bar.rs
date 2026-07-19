@@ -1,8 +1,8 @@
+use crate::ui::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Gauge, Widget};
-use crate::ui::colors;
 
 pub struct ProgressBar {
     percent: u16,

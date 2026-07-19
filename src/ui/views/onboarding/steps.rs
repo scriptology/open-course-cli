@@ -63,11 +63,7 @@ pub(super) fn shows_base_url_step(provider: ProviderId) -> bool {
 pub(super) fn is_text_step(step: Step) -> bool {
     matches!(
         step,
-        Step::NativeLanguage
-            | Step::TargetLanguage
-            | Step::Age
-            | Step::ApiKey
-            | Step::BaseUrl
+        Step::NativeLanguage | Step::TargetLanguage | Step::Age | Step::ApiKey | Step::BaseUrl
     )
 }
 

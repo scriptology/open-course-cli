@@ -25,15 +25,27 @@ fn make_topic(id: &str, name: &str, difficulty: Difficulty, level: &str) -> Topi
 #[ignore = "makes a real LLM request"]
 async fn debug_generate_exercises() {
     let data_dir = PathBuf::from(".");
-    let config = read_config(&data_dir).expect("failed to read config").expect("no config");
+    let config = read_config(&data_dir)
+        .expect("failed to read config")
+        .expect("no config");
     let model = create_llm_model(&config).expect("failed to create model");
 
-    let target_topic = make_topic("present-simple", "Present Simple", Difficulty::Beginner, "A2");
+    let target_topic = make_topic(
+        "present-simple",
+        "Present Simple",
+        Difficulty::Beginner,
+        "A2",
+    );
     let side_topic = make_topic("word-order", "Word Order", Difficulty::Beginner, "A2");
     let candidate_topics = vec![
         target_topic.clone(),
         side_topic.clone(),
-        make_topic("articles-basic", "Basic Articles", Difficulty::Beginner, "A2"),
+        make_topic(
+            "articles-basic",
+            "Basic Articles",
+            Difficulty::Beginner,
+            "A2",
+        ),
     ];
 
     let prompt = build_exercise_prompt(

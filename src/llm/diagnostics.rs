@@ -11,7 +11,7 @@ use crate::config::profile::UserProfile;
 use crate::core::session::{AnalysisResult, Exercise, GrammarErrorType};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
-use crate::llm::client::{LlmClient, DEFAULT_MAX_TOKENS};
+use crate::llm::client::{DEFAULT_MAX_TOKENS, LlmClient};
 use crate::llm::pipeline::{
     generate_analysis, generate_exercises, generate_topic_review, is_valid_topic_review,
 };
@@ -75,12 +75,7 @@ impl DiagnosticLlmClient {
 
 #[async_trait]
 impl LlmClient for DiagnosticLlmClient {
-    async fn prompt(
-        &self,
-        prompt: &str,
-        system: Option<&str>,
-        max_tokens: u32,
-    ) -> Result<String> {
+    async fn prompt(&self, prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String> {
         let text = self.inner.prompt(prompt, system, max_tokens).await?;
         self.metrics.add_content(text.chars().count());
         Ok(text)
@@ -166,7 +161,7 @@ pub fn model_check_verdict(results: &[CheckResult]) -> (bool, bool) {
     (has_failed, has_warning)
 }
 
-const DIAGNOSTIC_CHECKS: &[(&'static str, &'static str)] = &[
+const DIAGNOSTIC_CHECKS: &[(&str, &str)] = &[
     ("connectivity", "Connectivity"),
     ("streaming", "Streaming"),
     ("exercises", "Exercise generation"),
@@ -307,7 +302,7 @@ async fn run_exercises_check(client: Arc<dyn LlmClient>, profile: &UserProfile) 
     .await
     {
         Ok(Ok(exercises)) => {
-            if exercises.len() >= 1 {
+            if !exercises.is_empty() {
                 CheckStatus::Passed
             } else {
                 CheckStatus::Failed(format!("expected 1 exercise, got {}", exercises.len()))
@@ -335,12 +330,7 @@ async fn run_analysis_check(client: Arc<dyn LlmClient>, profile: &UserProfile) -
     let prompt = build_batch_analysis_prompt(profile, &[(exercise, answer)], &topics);
     let status = match timeout(
         ANALYSIS_TIMEOUT,
-        generate_analysis(&wrapper,
-            &prompt,
-            1,
-            None,
-            None::<&Path>,
-        ),
+        generate_analysis(&wrapper, &prompt, 1, None, None::<&Path>),
     )
     .await
     {
@@ -454,9 +444,7 @@ fn synthetic_exercise(_profile: &UserProfile) -> Exercise {
         id: "diag-ex1".to_string(),
         target_sentence: "My friend works in a cafe".to_string(),
         expected_translation: "Mi amigo trabaja en un café".to_string(),
-        acceptable_translations: vec![
-            "Mi amigo labora en una cafetería".to_string(),
-        ],
+        acceptable_translations: vec!["Mi amigo labora en una cafetería".to_string()],
         target_topic_ids: vec!["diag-coffee".to_string()],
         side_topic_ids: vec!["diag-present".to_string()],
         expected_patterns: vec!["present tense".to_string()],

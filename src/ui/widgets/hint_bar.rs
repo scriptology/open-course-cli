@@ -1,9 +1,9 @@
+use crate::ui::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
-use crate::ui::colors;
 
 pub struct HintBar {
     hints: Vec<(String, String)>,

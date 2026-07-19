@@ -77,7 +77,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .constraints([Constraint::Length(4), Constraint::Length(2)])
         .split(chunks[0]);
 
-    frame.render_widget(Logo::new(ratatui::layout::Alignment::Left), header_chunks[0]);
+    frame.render_widget(
+        Logo::new(ratatui::layout::Alignment::Left),
+        header_chunks[0],
+    );
 
     let subtitle = Text::from(vec![
         Line::from(Span::styled(
@@ -113,9 +116,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .border_style(Style::default().fg(accent))
         .title(Span::styled(
             title,
-            Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ));
     let card_inner = card_block.inner(chunks[1]);
     frame.render_widget(card_block, chunks[1]);
@@ -160,13 +161,15 @@ fn render_input_paragraph(input: &str, step: Step, accent: Color) -> Paragraph<'
         Span::raw(display),
         Span::styled(
             "█",
-            Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ),
     ]));
     Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(accent)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(accent)),
+        )
         .style(Style::default().fg(Color::White))
 }
 
@@ -263,9 +266,10 @@ pub(crate) async fn finish_onboarding(state: &mut AppState) -> Result<()> {
         }
         OnboardingMode::AddPair => {
             let profile = build_profile_from_onboarding(&state.onboarding);
-            let config = state.config.as_mut().ok_or_else(|| {
-                AppError::Config("No config available".to_string())
-            })?;
+            let config = state
+                .config
+                .as_mut()
+                .ok_or_else(|| AppError::Config("No config available".to_string()))?;
             let new_id = config.add_pair(profile)?.to_string();
             write_config(config, &state.data_dir)?;
             crate::app::switch_pair(state, &new_id).await?;
@@ -297,7 +301,9 @@ fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfi
             Some(onboarding.api_key.clone())
         },
         model: onboarding.model.clone(),
-        base_url: if steps::shows_base_url_step(onboarding.provider) && !onboarding.base_url.is_empty() {
+        base_url: if steps::shows_base_url_step(onboarding.provider)
+            && !onboarding.base_url.is_empty()
+        {
             Some(onboarding.base_url.clone())
         } else {
             None
@@ -315,12 +321,12 @@ fn spawn_model_fetch(state: &mut AppState) {
     let provider_id = state.onboarding.provider;
     let meta = ProviderMeta::for_provider(provider_id);
     let api_key = state.onboarding.api_key.clone();
-    let base_url = if steps::shows_base_url_step(provider_id) && !state.onboarding.base_url.is_empty()
-    {
-        Some(state.onboarding.base_url.clone())
-    } else {
-        meta.default_base_url.map(|s| s.to_string())
-    };
+    let base_url =
+        if steps::shows_base_url_step(provider_id) && !state.onboarding.base_url.is_empty() {
+            Some(state.onboarding.base_url.clone())
+        } else {
+            meta.default_base_url.map(|s| s.to_string())
+        };
 
     state.onboarding.model_picker.reset();
 

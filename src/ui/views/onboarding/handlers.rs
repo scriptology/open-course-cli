@@ -199,11 +199,7 @@ fn cycle_choice(state: &mut AppState, field: &ChoiceField, backwards: bool) {
     state.onboarding.error.clear();
 }
 
-async fn handle_choice_key(
-    state: &mut AppState,
-    code: KeyCode,
-    field: &ChoiceField,
-) -> Result<()> {
+async fn handle_choice_key(state: &mut AppState, code: KeyCode, field: &ChoiceField) -> Result<()> {
     match code {
         KeyCode::Esc => handle_esc(state),
         KeyCode::Enter | KeyCode::Char('\t') | KeyCode::Tab => {

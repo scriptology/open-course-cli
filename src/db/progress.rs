@@ -66,11 +66,7 @@ fn schema() -> Arc<Schema> {
 }
 
 async fn open_or_migrate_progress_table(connection: &Connection) -> Result<lancedb::Table> {
-    let names = connection
-        .table_names()
-        .execute()
-        .await
-        .unwrap_or_default();
+    let names = connection.table_names().execute().await.unwrap_or_default();
     if !names.contains(&TABLE_NAME.to_string()) {
         return connection
             .create_empty_table(TABLE_NAME, schema())
@@ -103,19 +99,17 @@ async fn migrate_progress_table(
     connection: &Connection,
     old_table: lancedb::Table,
 ) -> Result<lancedb::Table> {
-    let records: Vec<RecordBatch> = old_table
-        .query()
-        .execute()
-        .await?
-        .try_collect()
-        .await?;
+    let records: Vec<RecordBatch> = old_table.query().execute().await?.try_collect().await?;
     let mut topics = Vec::new();
     for batch in &records {
         topics.extend(progress_from_record_batch(batch)?.topics);
     }
 
     connection.drop_table(TABLE_NAME, &[]).await?;
-    let new_table = connection.create_empty_table(TABLE_NAME, schema()).execute().await?;
+    let new_table = connection
+        .create_empty_table(TABLE_NAME, schema())
+        .execute()
+        .await?;
     if !topics.is_empty() {
         let batches = topics
             .iter()

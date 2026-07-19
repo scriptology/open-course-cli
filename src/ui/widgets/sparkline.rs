@@ -1,8 +1,8 @@
+use crate::ui::colors;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Sparkline, Widget};
-use crate::ui::colors;
 
 pub struct SparklineChart {
     data: Vec<u64>,

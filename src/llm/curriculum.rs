@@ -36,26 +36,14 @@ pub async fn generate_curriculum(
             async move {
                 let previous = previous_cefr_level(&level_owned);
                 let count = target_level_topic_count(&level_owned);
-                let prompt =
-                    build_curriculum_level_prompt(profile, &level_owned, previous, count);
-                let mut topics = generate_curriculum_batch(
-                    client,
-                    &prompt,
-                    &level_owned,
-                    stream_tx,
-                    data_dir,
-                )
-                .await?;
+                let prompt = build_curriculum_level_prompt(profile, &level_owned, previous, count);
+                let mut topics =
+                    generate_curriculum_batch(client, &prompt, &level_owned, stream_tx, data_dir)
+                        .await?;
                 normalize_level_topics(&mut topics, profile, &level_owned);
-                topics = fill_level_gaps(
-                    client,
-                    profile,
-                    &level_owned,
-                    topics,
-                    stream_tx,
-                    data_dir,
-                )
-                .await?;
+                topics =
+                    fill_level_gaps(client, profile, &level_owned, topics, stream_tx, data_dir)
+                        .await?;
                 normalize_level_topics(&mut topics, profile, &level_owned);
                 if let Some(tx) = stream_tx {
                     let _ = tx

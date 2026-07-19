@@ -7,7 +7,7 @@ Terminal AI tutor for language learning. Exercises, lessons, and answer analysis
 The fastest way to get the latest release:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/scriptology/open-course-cli/releases/latest/download/open-course-cli-installer.sh | sh
+curl -sSL https://github.com/scriptology/open-course-cli/releases/latest/download/open-course-cli-installer.sh | sh
 ```
 
 The installer detects macOS (Apple Silicon / Intel) and Linux x86_64, then downloads the matching binary into `~/.local/bin` (or `/usr/local/bin` if writable). It also creates a symlink `opencourse`, so both commands work:
@@ -98,6 +98,10 @@ flowchart TD
 Supported out of the box: OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral, OpenRouter, and Ollama. Any other OpenAI-compatible endpoint can be used via the **Custom** provider.
 
 Onboarding fetches the list of available models automatically. For local Ollama no API key is needed; for custom endpoints set the base URL and pick `chat/completions` or `messages` depending on the API. For the other providers, leaving the API key blank falls back to the matching environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`) if it's set.
+
+## Updating
+
+On startup the app checks the latest GitHub release and, if a newer version is available, shows a prompt with the current and latest version (`y` installs by re-running the installer script, `n` skips and continues to the dashboard). The check fails silently and skips the prompt if there's no network access. To update manually at any time, re-run the install command from [Install](#install), or `cargo install open-course-cli` if you installed it that way.
 
 ## Architecture
 

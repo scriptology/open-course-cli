@@ -60,7 +60,7 @@ fn days_in_month(date: NaiveDate) -> u16 {
 pub fn block_height(date: NaiveDate) -> u16 {
     let first = date.with_day(1).expect("day 1 exists");
     let offset = first.weekday().num_days_from_sunday() as u16;
-    2 + 1 + 1 + (offset + days_in_month(date) + 6) / 7
+    2 + 1 + 1 + (offset + days_in_month(date)).div_ceil(7)
 }
 
 fn level_style(level: usize) -> Style {
@@ -121,7 +121,12 @@ pub fn build_event_store(activity: &[DailyActivity], today: NaiveDate) -> Calend
 mod tests {
     use super::*;
 
-    fn day(date: &str, sessions: usize, new_topics: usize, completed_topics: usize) -> DailyActivity {
+    fn day(
+        date: &str,
+        sessions: usize,
+        new_topics: usize,
+        completed_topics: usize,
+    ) -> DailyActivity {
         DailyActivity {
             date: date.to_string(),
             sessions,
@@ -168,7 +173,9 @@ mod tests {
 
         let active = store
             .0
-            .get(&chrono_to_time(NaiveDate::from_ymd_opt(2024, 5, 9).unwrap()))
+            .get(&chrono_to_time(
+                NaiveDate::from_ymd_opt(2024, 5, 9).unwrap(),
+            ))
             .copied()
             .unwrap();
         assert_eq!(active.bg, Some(ACTIVITY_BG[3]));

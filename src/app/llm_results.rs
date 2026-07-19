@@ -77,10 +77,7 @@ fn debug_describe(result: &LlmResult) -> Option<(&'static str, String)> {
         ),
         LlmResult::CurriculumExtension(res) => (
             "curriculum",
-            format!(
-                "apply_llm_result CurriculumExtension: {}",
-                result_str(res)
-            ),
+            format!("apply_llm_result CurriculumExtension: {}", result_str(res)),
         ),
         LlmResult::TopicReview(res) => (
             "docs",
@@ -158,20 +155,17 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
         Ok(analysis) => {
             if let Some(session) = state.session.mentor_session.take() {
                 if let Some(config) = state.config.as_ref() {
-                    if let Err(e) = ensure_new_topics(&state.db, &analysis.new_topics).await
-                    {
+                    if let Err(e) = ensure_new_topics(&state.db, &analysis.new_topics).await {
                         state.error = Some(e.to_string());
                         return;
                     }
                     if let Err(e) =
-                        ensure_topics_exist(&state.db, config, &session, &state.data_dir)
-                            .await
+                        ensure_topics_exist(&state.db, config, &session, &state.data_dir).await
                     {
                         state.error = Some(e.to_string());
                         return;
                     }
-                    if let Err(e) = ensure_progress_for_curriculum(&state.db, config).await
-                    {
+                    if let Err(e) = ensure_progress_for_curriculum(&state.db, config).await {
                         state.error = Some(e.to_string());
                         return;
                     }
@@ -197,12 +191,8 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
 
                 let forced_learning_item_ids = state.session.learning_item_ids.clone();
                 let scores_result =
-                    apply_analysis_to_db(
-                        &analysis,
-                        &session,
-                        &forced_learning_item_ids,
-                        &state.db,
-                    ).await;
+                    apply_analysis_to_db(&analysis, &session, &forced_learning_item_ids, &state.db)
+                        .await;
                 let scores: HashMap<String, f64> = match scores_result {
                     Ok(scores) => scores,
                     Err(e) => {
@@ -249,9 +239,7 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
                     .session
                     .topics
                     .iter()
-                    .find(|t| {
-                        Some(&t.id) == state.session.target_topic_id.as_ref()
-                    })
+                    .find(|t| Some(&t.id) == state.session.target_topic_id.as_ref())
                     .map(|t| t.name.clone());
 
                 state.report = ReportState::from_analysis(
@@ -336,9 +324,7 @@ async fn persist_topics_and_reload(state: &mut AppState, topics: &[Topic], repla
             if in_session && let Err(e) = state.session.load(&state.db).await {
                 state.error = Some(e.to_string());
             }
-            if in_session
-                && let Err(e) = session::maybe_start_pending_new_topic(state).await
-            {
+            if in_session && let Err(e) = session::maybe_start_pending_new_topic(state).await {
                 state.error = Some(e.to_string());
             }
         }
@@ -390,8 +376,7 @@ async fn ensure_topics_exist(
     data_dir: &Path,
 ) -> Result<()> {
     let curriculum = db.curriculum().read_all().await?;
-    let existing_ids: HashSet<String> =
-        curriculum.topics.iter().map(|t| t.id.clone()).collect();
+    let existing_ids: HashSet<String> = curriculum.topics.iter().map(|t| t.id.clone()).collect();
 
     let mut missing_ids = HashSet::new();
     for exercise in &session.exercises {
@@ -418,8 +403,14 @@ async fn ensure_topics_exist(
     let user_cefr = user_cefr_numeric(config);
 
     for topic_id in missing_ids {
-        let mut topic =
-            generate_topic_metadata(client.as_ref(), config.active_profile(), &topic_id, None, Some(data_dir)).await?;
+        let mut topic = generate_topic_metadata(
+            client.as_ref(),
+            config.active_profile(),
+            &topic_id,
+            None,
+            Some(data_dir),
+        )
+        .await?;
 
         let topic_cefr = topic.cefr_numeric();
         let initial_score = initial_topic_score(topic_cefr, user_cefr);

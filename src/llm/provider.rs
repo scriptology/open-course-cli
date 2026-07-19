@@ -188,7 +188,9 @@ mod tests {
     #[test]
     fn google_requires_generation_config_workaround() {
         let meta = ProviderMeta::for_provider(ProviderId::Google);
-        let params = meta.rig_additional_params().expect("google needs additional_params");
+        let params = meta
+            .rig_additional_params()
+            .expect("google needs additional_params");
         assert!(params.get("generationConfig").is_some());
     }
 

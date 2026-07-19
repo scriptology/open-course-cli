@@ -24,6 +24,19 @@ After saving the config, the app runs **Model diagnostics** (connectivity, strea
 
 ---
 
+## Updating
+
+On every startup, before the dashboard loads, the app checks the latest GitHub release version against its own build version. If a newer version is available, it shows an **Update available** prompt with the current and latest version instead of loading the dashboard:
+
+| Key | Action |
+|-----|--------|
+| `y` | Install — re-runs the installer script (same command as [Install](../README.md#install)), then quits so the new version can be launched. |
+| `n` / `Esc` / `Enter` | Skip — dismiss the prompt and continue to the dashboard. |
+
+If there's no network access or the GitHub API call fails, the check is skipped silently and the app proceeds as normal — there is no manual "check for updates" command elsewhere in the app.
+
+---
+
 ## Dashboard
 
 Main hub after onboarding. Available keys:
