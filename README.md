@@ -58,7 +58,7 @@ On the first launch a wizard asks for:
 - Native and target languages (ISO 639-1 codes, e.g. `ru` → `en`).
 - Age and self-assessed CEFR level (`A1`–`C2`).
 - Exercises batch size (`2`–`5`).
-- LLM provider, API key, base URL, and model.
+- LLM provider, API key (or leave blank to use the provider's `*_API_KEY` environment variable), base URL (only asked for Custom/Ollama), and model.
 
 After onboarding the app runs model diagnostics and opens the curriculum so you can generate the first course.
 
@@ -97,7 +97,7 @@ flowchart TD
 
 Supported out of the box: OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral, OpenRouter, and Ollama. Any other OpenAI-compatible endpoint can be used via the **Custom** provider.
 
-Onboarding fetches the list of available models automatically. For local Ollama no API key is needed; for custom endpoints set the base URL and pick `chat/completions` or `messages` depending on the API.
+Onboarding fetches the list of available models automatically. For local Ollama no API key is needed; for custom endpoints set the base URL and pick `chat/completions` or `messages` depending on the API. For the other providers, leaving the API key blank falls back to the matching environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `OPENROUTER_API_KEY`) if it's set.
 
 ## Architecture
 
