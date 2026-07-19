@@ -13,3 +13,8 @@ pub mod retry;
 pub mod streaming;
 pub mod topic_review;
 pub mod transport;
+
+#[cfg(test)]
+pub(crate) mod env_test_lock {
+    pub(crate) static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}

@@ -380,6 +380,9 @@ mod tests {
     use super::*;
 
     fn with_env_var<F: FnOnce()>(name: &str, value: Option<&str>, f: F) {
+        let _guard = crate::llm::env_test_lock::LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let original = std::env::var(name).ok();
         unsafe {
             match value {
