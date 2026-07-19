@@ -210,6 +210,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 ("Esc", "back to list"),
                 ("e", labels.regenerate),
                 ("p", labels.practice),
+                ("?", "help"),
             ])
         } else {
             let mut entries = vec![("↑/↓", "scroll")];
@@ -217,6 +218,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             entries.push(("Esc", "back to list"));
             entries.push(("e", labels.regenerate));
             entries.push(("p", labels.practice));
+            entries.push(("?", "help"));
             build_footer(&entries)
         };
         frame.render_widget(
@@ -277,6 +279,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 ("Enter", "view"),
                 ("p", labels.practice),
                 ("Esc", "back"),
+                ("?", "help"),
             ]))
             .style(Style::default().fg(Color::DarkGray)),
             chunks[2],

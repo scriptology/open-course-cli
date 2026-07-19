@@ -107,7 +107,7 @@ pub fn start(state: &mut AppState, config: OpenCourseConfig, return_to: View) {
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let footer = if state.model_check.running {
-        "Running checks...".to_string()
+        format!("Running checks... | {}", build_footer(&[("?", "help")]))
     } else {
         let (has_failed, has_warning) = model_check_verdict(&state.model_check.checks);
         let verdict = if has_failed {
@@ -125,6 +125,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 ("Esc/b", "back to model list"),
                 ("r", "retry"),
                 ("s", "skip"),
+                ("?", "help"),
             ])
         )
     };

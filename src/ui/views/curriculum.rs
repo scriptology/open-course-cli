@@ -154,7 +154,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(build_footer(&[("Esc", labels.cancel)]))
+            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", "help")]))
                 .style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
@@ -263,7 +263,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         CurriculumSortBy::Score => labels.sort_score,
     };
     let help = if state.curriculum.topics.is_empty() {
-        build_footer(&[("g", labels.generate_label), ("Esc", labels.back)])
+        build_footer(&[
+            ("g", labels.generate_label),
+            ("Esc", labels.back),
+            ("?", "help"),
+        ])
     } else {
         let sort_entry = format!("{} ({})", labels.sort, sort_label);
         build_footer(&[
@@ -274,6 +278,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             ("x", labels.delete_label),
             ("r", labels.reset_label),
             ("Esc", labels.back),
+            ("?", "help"),
         ])
     };
     frame.render_widget(

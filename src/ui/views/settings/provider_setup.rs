@@ -130,28 +130,41 @@ pub(super) fn build_provider_setup_body(state: &AppState, config: &OpenCourseCon
 
 pub(super) fn build_provider_setup_footer(state: &AppState) -> String {
     match state.settings.provider_setup_step {
-        ProviderSetupStep::SelectProvider => {
-            build_footer(&[("↑/↓", "navigate"), ("Enter", "select"), ("Esc", "back")])
-        }
+        ProviderSetupStep::SelectProvider => build_footer(&[
+            ("↑/↓", "navigate"),
+            ("Enter", "select"),
+            ("Esc", "back"),
+            ("?", "help"),
+        ]),
         ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
             if state.settings.provider_setup_provider == ProviderId::Custom {
                 build_footer(&[("Enter", "save"), ("Esc", "back")])
             } else {
-                build_footer(&[("Enter", "next"), ("Esc", "back")])
+                build_footer(&[("Enter", "next"), ("Esc", "back"), ("?", "help")])
             }
         }
         ProviderSetupStep::ApiKey => build_footer(&[("Enter", "save"), ("Esc", "back")]),
         ProviderSetupStep::Model => {
             if state.settings.model_picker.loading {
-                build_footer(&[("Esc", "back")])
+                build_footer(&[("Esc", "back"), ("?", "help")])
             } else if state.settings.model_picker.error.is_some() {
-                build_footer(&[("Enter", "manual"), ("r", "retry"), ("Esc", "back")])
+                build_footer(&[
+                    ("Enter", "manual"),
+                    ("r", "retry"),
+                    ("Esc", "back"),
+                    ("?", "help"),
+                ])
             } else if state.settings.model_picker.manual {
                 build_footer(&[("Enter", "save"), ("Esc", "back")])
             } else if state.settings.model_picker.models.is_empty() {
-                build_footer(&[("Enter", "enter manually"), ("Esc", "back")])
+                build_footer(&[("Enter", "enter manually"), ("Esc", "back"), ("?", "help")])
             } else {
-                build_footer(&[("↑/↓", "navigate"), ("Enter", "select"), ("Esc", "back")])
+                build_footer(&[
+                    ("↑/↓", "navigate"),
+                    ("Enter", "select"),
+                    ("Esc", "back"),
+                    ("?", "help"),
+                ])
             }
         }
     }

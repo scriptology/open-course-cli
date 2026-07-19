@@ -93,6 +93,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         ("Enter", labels.switch),
         ("a", labels.add_pair),
         ("Esc", labels.back),
+        ("?", "help"),
     ]);
     frame.render_widget(
         Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),

@@ -55,7 +55,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         chunks[0],
     );
 
-    let footer_text = build_footer(&[("y", "install"), ("n", "skip")]);
+    let footer_text = build_footer(&[("y", "install"), ("n", "skip"), ("?", "help")]);
     frame.render_widget(
         Paragraph::new(footer_text).alignment(Alignment::Center),
         chunks[1],

@@ -109,6 +109,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     entries.push(("r", "repeat"));
     entries.push(("d", "docs"));
     entries.push(("Esc", "dashboard"));
+    entries.push(("?", "help"));
 
     frame.render_widget(
         Paragraph::new(Line::from(build_footer(&entries)))

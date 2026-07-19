@@ -91,7 +91,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(build_footer(&[("Esc", labels.cancel)]))
+            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", "help")]))
                 .style(Style::default().fg(Color::DarkGray)),
             loading_chunks[1],
         );
@@ -135,6 +135,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     ("↑↓", labels.navigate),
                     ("Enter", labels.start_session),
                     ("Esc", labels.back),
+                    ("?", "help"),
                 ]))
                 .style(Style::default().fg(Color::DarkGray)),
                 chunks[2],

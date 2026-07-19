@@ -229,8 +229,13 @@ fn footer_text(state: &AppState) -> String {
     }
 
     match state.settings.section {
-        Section::Data => build_footer(&[("↑/↓", "action"), ("Enter", "reset"), ("Esc", "back")]),
-        Section::Session => build_footer(&[("↑/↓", "select"), ("Esc", "back")]),
+        Section::Data => build_footer(&[
+            ("↑/↓", "action"),
+            ("Enter", "reset"),
+            ("Esc", "back"),
+            ("?", "help"),
+        ]),
+        Section::Session => build_footer(&[("↑/↓", "select"), ("Esc", "back"), ("?", "help")]),
         Section::Profile => build_footer(&[
             ("←/→", "move caret"),
             ("Type", "edit"),
@@ -314,6 +319,7 @@ fn draw_section_picker(
             ("↑/↓", "navigate"),
             ("Enter", "open"),
             ("Esc", "back"),
+            ("?", "help"),
         ]))
         .style(Style::default().fg(Color::DarkGray)),
         chunks[2],

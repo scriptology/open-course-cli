@@ -39,25 +39,39 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             ("↑/↓", "select provider"),
             ("Enter", "next"),
             ("Esc", "quit"),
+            ("?", "help"),
         ]),
-        Step::Cefr => build_footer(&[("↑/↓", "select level"), ("Enter", "next"), ("Esc", "quit")]),
+        Step::Cefr => build_footer(&[
+            ("↑/↓", "select level"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
         Step::BatchSize => build_footer(&[
             ("↑/↓", "select batch size"),
             ("Enter", "next"),
             ("Esc", "quit"),
+            ("?", "help"),
         ]),
-        Step::Model if state.onboarding.model_picker.loading => {
-            format!("Loading models... | {}", build_footer(&[("Esc", "quit")]))
-        }
-        Step::Model if state.onboarding.model_picker.error.is_some() => {
-            build_footer(&[("r", "retry"), ("m", "manual"), ("Esc", "quit")])
-        }
+        Step::Model if state.onboarding.model_picker.loading => format!(
+            "Loading models... | {}",
+            build_footer(&[("Esc", "quit"), ("?", "help")])
+        ),
+        Step::Model if state.onboarding.model_picker.error.is_some() => build_footer(&[
+            ("r", "retry"),
+            ("m", "manual"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
         Step::Model if state.onboarding.model_picker.manual => {
             build_footer(&[("Type", "model ID"), ("Enter", "next"), ("Esc", "quit")])
         }
-        Step::Model if !state.onboarding.model_picker.models.is_empty() => {
-            build_footer(&[("↑/↓", "select model"), ("Enter", "next"), ("Esc", "quit")])
-        }
+        Step::Model if !state.onboarding.model_picker.models.is_empty() => build_footer(&[
+            ("↑/↓", "select model"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+            ("?", "help"),
+        ]),
         Step::BaseUrl if !steps::shows_base_url_step(state.onboarding.provider) => {
             build_footer(&[("Enter", "next"), ("Esc", "quit")])
         }
