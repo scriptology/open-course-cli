@@ -118,6 +118,9 @@ cargo test
 
 # Debug LLM exercise generation
 python3 scripts/debug_exercises.py
+
+# One-time setup: catch formatting issues before pushing (mirrors CI's Format job)
+git config core.hooksPath .githooks
 ```
 
 ## Releasing a new version

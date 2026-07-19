@@ -58,7 +58,9 @@ impl Widget for HelpOverlay<'_> {
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("  {:<14}", entry.key),
-                        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Blue)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(entry.action.clone()),
                 ]));

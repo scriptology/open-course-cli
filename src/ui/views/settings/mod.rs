@@ -237,9 +237,11 @@ fn footer_text(state: &AppState) -> String {
             ("Enter", "save"),
             ("Esc", "back"),
         ]),
-        Section::Provider => {
-            build_footer(&[("Tab/Shift+Tab", "field"), ("Enter", "save"), ("Esc", "back")])
-        }
+        Section::Provider => build_footer(&[
+            ("Tab/Shift+Tab", "field"),
+            ("Enter", "save"),
+            ("Esc", "back"),
+        ]),
     }
 }
 

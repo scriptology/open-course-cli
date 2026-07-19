@@ -34,7 +34,10 @@ fn mouse_entries(state: &AppState) -> Vec<HelpEntry> {
             entry("m", "switch to text selection"),
         ]
     } else {
-        vec![entry("mouse", "select text"), entry("m", "switch to wheel scroll")]
+        vec![
+            entry("mouse", "select text"),
+            entry("m", "switch to wheel scroll"),
+        ]
     }
 }
 
@@ -154,7 +157,10 @@ fn session_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
         SessionMode::Practicing => vec![
             group(
                 "Actions",
-                vec![entry("(type)", "write your answer"), entry("Enter", labels.submit)],
+                vec![
+                    entry("(type)", "write your answer"),
+                    entry("Enter", labels.submit),
+                ],
             ),
             group("Exit", vec![entry("Esc", labels.back)]),
         ],
@@ -196,7 +202,11 @@ fn model_check_groups(state: &AppState) -> Vec<HelpGroup> {
     vec![
         group(
             "Actions",
-            vec![entry("Enter / c", "continue"), entry("r", "retry"), entry("s", "skip")],
+            vec![
+                entry("Enter / c", "continue"),
+                entry("r", "retry"),
+                entry("s", "skip"),
+            ],
         ),
         group("Exit", vec![entry("Esc / b", "back to model list")]),
     ]
@@ -206,7 +216,10 @@ fn settings_groups(state: &AppState) -> Vec<HelpGroup> {
     if state.settings.pending_reset.is_some() {
         return vec![group(
             "Actions",
-            vec![entry("y", "confirm reset"), entry("any other key", "cancel")],
+            vec![
+                entry("y", "confirm reset"),
+                entry("any other key", "cancel"),
+            ],
         )];
     }
     if !state.settings.in_section {

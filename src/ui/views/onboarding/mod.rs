@@ -35,13 +35,17 @@ fn display_input(input: &str, step: Step) -> String {
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let step = state.onboarding.current_step();
     let footer_text = match step {
-        Step::Provider => {
-            build_footer(&[("↑/↓", "select provider"), ("Enter", "next"), ("Esc", "quit")])
-        }
+        Step::Provider => build_footer(&[
+            ("↑/↓", "select provider"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+        ]),
         Step::Cefr => build_footer(&[("↑/↓", "select level"), ("Enter", "next"), ("Esc", "quit")]),
-        Step::BatchSize => {
-            build_footer(&[("↑/↓", "select batch size"), ("Enter", "next"), ("Esc", "quit")])
-        }
+        Step::BatchSize => build_footer(&[
+            ("↑/↓", "select batch size"),
+            ("Enter", "next"),
+            ("Esc", "quit"),
+        ]),
         Step::Model if state.onboarding.model_picker.loading => {
             format!("Loading models... | {}", build_footer(&[("Esc", "quit")]))
         }
@@ -57,7 +61,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         Step::BaseUrl if !steps::shows_base_url_step(state.onboarding.provider) => {
             build_footer(&[("Enter", "next"), ("Esc", "quit")])
         }
-        _ => build_footer(&[("Tab/Enter", "next"), ("Shift+Tab", "prev"), ("Esc", "quit")]),
+        _ => build_footer(&[
+            ("Tab/Enter", "next"),
+            ("Shift+Tab", "prev"),
+            ("Esc", "quit"),
+        ]),
     };
     let mut footer_lines = vec![Line::from(footer_text)];
     if !state.onboarding.error.is_empty() {

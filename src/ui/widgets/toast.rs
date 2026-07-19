@@ -67,7 +67,9 @@ impl Widget for ToastWidget<'_> {
             .max(20);
         let text_width = width.saturating_sub(2);
         let wrapped_lines = (self.toast.message.chars().count() as u16 / text_width.max(1)) + 1;
-        let height = (wrapped_lines + 2).min(area.height.saturating_sub(2)).max(3);
+        let height = (wrapped_lines + 2)
+            .min(area.height.saturating_sub(2))
+            .max(3);
 
         let x = area.x + area.width.saturating_sub(width + 2);
         let y = area.y + area.height.saturating_sub(height + 1);
