@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use open_course_cli::app::{AppState, View};
-use open_course_cli::config::profile::{HintMode, UserPreferences, UserProfile};
+use open_course_cli::config::profile::{UserPreferences, UserProfile};
 use open_course_cli::config::{OpenCourseConfig, ProviderConfig, ProviderId};
 use open_course_cli::db::Database;
 use open_course_cli::ui::views::dashboard;
-use open_course_cli::ui::views::settings::{self, ProviderSetupStep, Section};
+use open_course_cli::ui::views::settings::{self, Section};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
@@ -264,8 +264,7 @@ async fn update_available_prompt_renders() {
 
 #[tokio::test]
 async fn settings_profile_inline_validation_error() {
-    use open_course_cli::config::profile::HintMode;
-    use open_course_cli::ui::views::settings::{Section, SettingsState};
+    use open_course_cli::ui::views::settings::Section;
 
     let mut state = setup_state().await;
     state.view = View::Settings;
@@ -293,8 +292,7 @@ async fn settings_profile_inline_validation_error() {
 
 #[tokio::test]
 async fn settings_session_highlights_current_green() {
-    use open_course_cli::config::profile::HintMode;
-    use open_course_cli::ui::views::settings::{Section, SettingsState};
+    use open_course_cli::ui::views::settings::Section;
 
     let mut state = setup_state().await;
     state.view = View::Settings;
@@ -320,7 +318,7 @@ async fn settings_session_highlights_current_green() {
 
 #[tokio::test]
 async fn settings_breadcrumbs_in_header() {
-    use open_course_cli::ui::views::settings::{Section, SettingsState};
+    use open_course_cli::ui::views::settings::Section;
 
     let mut state = setup_state().await;
     state.view = View::Settings;
@@ -346,8 +344,6 @@ async fn settings_provider_skips_readonly_steps() {
     use open_course_cli::config::ProviderId;
     use open_course_cli::db::Database;
     use open_course_cli::ui::views::settings::{ProviderSetupStep, Section};
-    use open_course_cli::ui::views::utils::select_next_wrapping;
-    use ratatui::widgets::ListState;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
