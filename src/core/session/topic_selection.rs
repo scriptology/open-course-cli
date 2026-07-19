@@ -87,9 +87,7 @@ pub fn get_due_review_topics(
     let progress_map: HashMap<_, _> = progress
         .topics
         .iter()
-        .map(|t| (&t.topic_id,
-            effective_mastery(t, now)
-        ))
+        .map(|t| (&t.topic_id, effective_mastery(t, now)))
         .collect();
 
     let mut filtered: Vec<_> = topics
@@ -135,7 +133,11 @@ pub fn get_due_review_topics(
     filtered
 }
 
-pub fn get_weak_review_topics(topics: &[Topic], progress: &ProgressData, now: chrono::DateTime<Utc>) -> Vec<Topic> {
+pub fn get_weak_review_topics(
+    topics: &[Topic],
+    progress: &ProgressData,
+    now: chrono::DateTime<Utc>,
+) -> Vec<Topic> {
     let progress_map: HashMap<_, _> = progress.topics.iter().map(|t| (&t.topic_id, t)).collect();
 
     let mut filtered: Vec<_> = topics
@@ -219,9 +221,7 @@ pub fn pick_next_session_topic(
             (mastery < MASTERY_THRESHOLD).then(|| (t.clone(), mastery))
         })
         .collect();
-    due.sort_by(|a, b| {
-        a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    due.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
     match (due.first(), new_topic) {
         (None, Some(new)) => NextSessionTopic::New(new),

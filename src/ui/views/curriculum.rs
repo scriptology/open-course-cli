@@ -12,11 +12,11 @@ use crate::llm::client::{DEFAULT_MAX_TOKENS, extract_typed};
 use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_curriculum as generate_curriculum_llm;
 use crate::llm::prompts::build_curriculum_extension_prompt;
+use crate::ui::colors;
 use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::docs;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::draw_confirmation;
-use crate::ui::colors;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CurriculumSortBy {
@@ -201,9 +201,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let mut header_lines = vec![
         Line::from(Span::styled(
             labels.curriculum,
-            Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
     ];
@@ -509,7 +507,9 @@ pub async fn extend_curriculum(state: &mut AppState, count: usize) -> Result<()>
     tokio::spawn(async move {
         let result: Result<Vec<Topic>> = async {
             let model = create_llm_model(&config)?;
-            let mut extension = extract_typed::<CurriculumExtension>(model.as_ref(), &prompt, DEFAULT_MAX_TOKENS).await?;
+            let mut extension =
+                extract_typed::<CurriculumExtension>(model.as_ref(), &prompt, DEFAULT_MAX_TOKENS)
+                    .await?;
             for (index, topic) in extension.topics.iter_mut().enumerate() {
                 if topic.target_lang.is_empty() {
                     topic.target_lang = target_language.clone();

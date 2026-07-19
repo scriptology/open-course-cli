@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use arrow_array::{
-    Array, Float64Array, Int32Array, RecordBatch, StringArray,
-};
+use arrow_array::{Array, Float64Array, Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use futures_util::stream::TryStreamExt;
 use lancedb::Connection;
@@ -99,8 +97,10 @@ pub fn is_learning_item_name(name: &str) -> bool {
     let words: Vec<&str> = lower.split_whitespace().collect();
 
     // Explicit contrast markers strongly indicate a learning item.
-    let has_contrast_marker =
-        lower.contains('/') || lower.contains(" vs ") || lower.contains(" and ") || lower.contains(" or ");
+    let has_contrast_marker = lower.contains('/')
+        || lower.contains(" vs ")
+        || lower.contains(" and ")
+        || lower.contains(" or ");
 
     // A colon often introduces a specific example/contrast, e.g. "Adjective agreement: X/Y".
     let has_colon_example = lower.contains(':') && words.len() <= 7;
@@ -133,9 +133,35 @@ fn has_target_language_word(name: &str) -> bool {
 /// meaning when matching item names against session text or against each
 /// other for deduplication.
 const STOP_WORDS: &[&str] = &[
-    "adverb", "verb", "verbs", "noun", "adjective", "article", "preposition", "vs", "and", "or",
-    "the", "a", "an", "with", "for", "in", "on", "at", "of", "to", "с", "для", "и", "или", "по",
-    "на", "в", "от", "из",
+    "adverb",
+    "verb",
+    "verbs",
+    "noun",
+    "adjective",
+    "article",
+    "preposition",
+    "vs",
+    "and",
+    "or",
+    "the",
+    "a",
+    "an",
+    "with",
+    "for",
+    "in",
+    "on",
+    "at",
+    "of",
+    "to",
+    "с",
+    "для",
+    "и",
+    "или",
+    "по",
+    "на",
+    "в",
+    "от",
+    "из",
 ];
 
 /// Content words of `text`: split on non-letter (Unicode) characters,
@@ -306,7 +332,7 @@ impl LearningItemsTable {
             if score_cmp != std::cmp::Ordering::Equal {
                 return score_cmp;
             }
-            match (&a.last_practiced,&b.last_practiced) {
+            match (&a.last_practiced, &b.last_practiced) {
                 (None, Some(_)) => std::cmp::Ordering::Less,
                 (Some(_), None) => std::cmp::Ordering::Greater,
                 (Some(aa), Some(bb)) => aa.cmp(bb),
@@ -426,13 +452,18 @@ mod tests {
     #[test]
     fn slugify_basic() {
         assert_eq!(slugify("pequeño/pequeña"), "pequeno-pequena");
-        assert_eq!(slugify("Adverb: muy with adjectives"), "adverb-muy-with-adjectives");
+        assert_eq!(
+            slugify("Adverb: muy with adjectives"),
+            "adverb-muy-with-adjectives"
+        );
     }
 
     #[test]
     fn detects_learning_item_names() {
         assert!(is_learning_item_name("pequeño/pequeña"));
-        assert!(is_learning_item_name("Adjective agreement: pequeño/pequeña"));
+        assert!(is_learning_item_name(
+            "Adjective agreement: pequeño/pequeña"
+        ));
         assert!(is_learning_item_name("Color adjectives: Rojo and Roja"));
         assert!(is_learning_item_name("Adverb muy with adjectives"));
         assert!(is_learning_item_name("Adjective: Caro vs Rico"));
@@ -472,10 +503,16 @@ mod tests {
             significant_words("Adverb: вслух → out loud/aloud"),
             vec!["вслух", "out", "loud", "aloud"]
         );
-        assert_eq!(significant_words("Verb: remind vs notice"), vec!["remind", "notice"]);
+        assert_eq!(
+            significant_words("Verb: remind vs notice"),
+            vec!["remind", "notice"]
+        );
         assert!(significant_words("Verb vs Noun").is_empty());
         // Accents are normalized away.
-        assert_eq!(significant_words("pequeño/pequeña"), vec!["pequeno", "pequena"]);
+        assert_eq!(
+            significant_words("pequeño/pequeña"),
+            vec!["pequeno", "pequena"]
+        );
     }
 
     #[test]
@@ -503,10 +540,22 @@ mod tests {
     #[test]
     fn weakest_orders_by_score_then_recency() {
         let items = vec![
-            make_item("recent", "recent-item", 40.0, Some("2024-01-10T00:00:00Z"), 1),
+            make_item(
+                "recent",
+                "recent-item",
+                40.0,
+                Some("2024-01-10T00:00:00Z"),
+                1,
+            ),
             make_item("never", "never-item", 40.0, None, 0),
             make_item("older", "older-item", 40.0, Some("2024-01-01T00:00:00Z"), 1),
-            make_item("weakest", "weakest-item", 10.0, Some("2024-02-01T00:00:00Z"), 5),
+            make_item(
+                "weakest",
+                "weakest-item",
+                10.0,
+                Some("2024-02-01T00:00:00Z"),
+                5,
+            ),
         ];
         let weak = LearningItemsTable::weakest(&items, 4);
         let ids: Vec<&str> = weak.iter().map(|i| i.id.as_str()).collect();

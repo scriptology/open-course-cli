@@ -66,23 +66,28 @@ async fn debug_generate_analysis() {
     ];
 
     let candidate_topics = vec![
-        make_topic("relative-pronouns", "Relative Pronouns", Difficulty::Beginner, "A2"),
-        make_topic("prepositions-save", "Prepositions with Save", Difficulty::Beginner, "A2"),
+        make_topic(
+            "relative-pronouns",
+            "Relative Pronouns",
+            Difficulty::Beginner,
+            "A2",
+        ),
+        make_topic(
+            "prepositions-save",
+            "Prepositions with Save",
+            Difficulty::Beginner,
+            "A2",
+        ),
         make_topic("spelling", "Spelling", Difficulty::Beginner, "A2"),
     ];
 
-    let prompt = build_batch_analysis_prompt(
-        config.active_profile(),
-        &exercises,
-        &candidate_topics,
-    );
+    let prompt =
+        build_batch_analysis_prompt(config.active_profile(), &exercises, &candidate_topics);
 
     println!("\n========== PROMPT ==========\n{prompt}\n===========================\n");
 
     let (tx, mut rx) = mpsc::channel::<LlmResult>(16);
-    let stream_handle = tokio::spawn(async move {
-        while rx.recv().await.is_some() {}
-    });
+    let stream_handle = tokio::spawn(async move { while rx.recv().await.is_some() {} });
 
     match generate_analysis(model.as_ref(), &prompt, 1, Some(&tx), Some(&data_dir)).await {
         Ok(analysis) => {

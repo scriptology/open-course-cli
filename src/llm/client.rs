@@ -54,12 +54,7 @@ fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
 
 #[async_trait]
 pub trait LlmClient: Send + Sync + Any {
-    async fn prompt(
-        &self,
-        prompt: &str,
-        system: Option<&str>,
-        max_tokens: u32,
-    ) -> Result<String>;
+    async fn prompt(&self, prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String>;
     async fn stream_prompt(
         &self,
         prompt: &str,
@@ -89,7 +84,10 @@ fn as_rig_client(client: &dyn LlmClient) -> Option<&RigClient> {
     if let Some(rig) = client.as_any().downcast_ref::<RigClient>() {
         return Some(rig);
     }
-    if let Some(diag) = client.as_any().downcast_ref::<crate::llm::diagnostics::DiagnosticLlmClient>() {
+    if let Some(diag) = client
+        .as_any()
+        .downcast_ref::<crate::llm::diagnostics::DiagnosticLlmClient>()
+    {
         return as_rig_client(diag.inner());
     }
     None
@@ -208,9 +206,12 @@ impl RigClient {
                         .await
                 }
                 RigClientInner::Gemini(client) => {
-                    let mut extractor =
-                        client.extractor::<T>(&self.model).max_tokens(max_tokens as u64);
-                    if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params() {
+                    let mut extractor = client
+                        .extractor::<T>(&self.model)
+                        .max_tokens(max_tokens as u64);
+                    if let Some(params) =
+                        ProviderMeta::for_provider(ProviderId::Google).rig_additional_params()
+                    {
                         extractor = extractor.additional_params(params);
                     }
                     extractor.build().extract(prompt).await
@@ -275,7 +276,8 @@ impl RigClient {
         max_tokens: u32,
     ) -> Agent<gemini::completion::CompletionModel> {
         let mut builder = client.agent(model).max_tokens(max_tokens as u64);
-        if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params() {
+        if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params()
+        {
             builder = builder.additional_params(params);
         }
         if let Some(system) = system {
@@ -287,12 +289,7 @@ impl RigClient {
 
 #[async_trait]
 impl LlmClient for RigClient {
-    async fn prompt(
-        &self,
-        prompt: &str,
-        system: Option<&str>,
-        max_tokens: u32,
-    ) -> Result<String> {
+    async fn prompt(&self, prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String> {
         let mut last_err = None;
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
@@ -399,7 +396,11 @@ mod tests {
         }
     }
 
-    fn config(api_key: Option<&str>, base_url: Option<&str>, endpoint: Option<&str>) -> ProviderConfig {
+    fn config(
+        api_key: Option<&str>,
+        base_url: Option<&str>,
+        endpoint: Option<&str>,
+    ) -> ProviderConfig {
         ProviderConfig::ApiKey {
             api_key: api_key.map(str::to_string),
             model: "test-model".to_string(),
@@ -431,7 +432,11 @@ mod tests {
     #[test]
     fn configured_key_takes_priority_over_env_var() {
         with_env_var("OPENAI_API_KEY", Some("env-openai-key"), || {
-            let cfg = config(Some("configured-key"), Some("https://api.openai.com/v1"), None);
+            let cfg = config(
+                Some("configured-key"),
+                Some("https://api.openai.com/v1"),
+                None,
+            );
             let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
             assert_eq!(client.api_key, "configured-key");
         });

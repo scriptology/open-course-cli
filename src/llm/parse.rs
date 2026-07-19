@@ -31,7 +31,9 @@ pub(crate) fn parse_exercises(
 
     if let Ok(wrapper) = from_str::<Exercises>(cleaned) {
         if wrapper.exercises.is_empty() {
-            return Err(AppError::Llm("parsed JSON contains no exercises".to_string()));
+            return Err(AppError::Llm(
+                "parsed JSON contains no exercises".to_string(),
+            ));
         }
         return Ok(wrapper.exercises);
     }
@@ -42,7 +44,9 @@ pub(crate) fn parse_exercises(
         return Ok(vec);
     }
 
-    Err(AppError::Llm("JSON does not match expected exercise schema".to_string()))
+    Err(AppError::Llm(
+        "JSON does not match expected exercise schema".to_string(),
+    ))
 }
 
 pub(crate) fn exercise_parse_errors(cleaned: &str) -> String {
@@ -97,7 +101,12 @@ pub(crate) fn parse_analysis(
         ));
     };
 
-    validate_analysis_sentences(analysis, expected_sentence_count, content_chars, reasoning_chars)
+    validate_analysis_sentences(
+        analysis,
+        expected_sentence_count,
+        content_chars,
+        reasoning_chars,
+    )
 }
 
 pub(crate) fn validate_analysis_sentences(
@@ -135,9 +144,7 @@ pub(crate) fn analysis_parse_errors(cleaned: &str, expected_sentence_count: usiz
         .err()
         .map(|e| format!("as array: {e}"))
         .unwrap_or_default();
-    format!(
-        "expected {expected_sentence_count} sentences; top-level: {top_err}; array: {arr_err}"
-    )
+    format!("expected {expected_sentence_count} sentences; top-level: {top_err}; array: {arr_err}")
 }
 
 pub(crate) fn parse_curriculum_level(
@@ -197,7 +204,11 @@ pub(crate) fn build_parse_error(
         response.raw.clone()
     };
     let cleaned_preview = if cleaned.len() > 500 {
-        format!("{}...[truncated, total {} chars]", &cleaned[..500], cleaned.len())
+        format!(
+            "{}...[truncated, total {} chars]",
+            &cleaned[..500],
+            cleaned.len()
+        )
     } else {
         cleaned.to_string()
     };
@@ -309,19 +320,28 @@ mod tests {
     #[test]
     fn clean_json_handles_nested_braces_and_trailing_garbage() {
         let raw = "{\"a\": {\"b\": [1, {\"c\": 2}]}} trailing text";
-        assert_eq!(clean_json_response(raw), "{\"a\": {\"b\": [1, {\"c\": 2}]}}");
+        assert_eq!(
+            clean_json_response(raw),
+            "{\"a\": {\"b\": [1, {\"c\": 2}]}}"
+        );
     }
 
     #[test]
     fn clean_json_ignores_braces_inside_strings() {
         let raw = "{\"text\": \"use {curly} braces\"} extra";
-        assert_eq!(clean_json_response(raw), "{\"text\": \"use {curly} braces\"}");
+        assert_eq!(
+            clean_json_response(raw),
+            "{\"text\": \"use {curly} braces\"}"
+        );
     }
 
     #[test]
     fn clean_json_handles_escaped_quotes_in_strings() {
         let raw = "{\"text\": \"he said \\\"hi\\\"\"} extra";
-        assert_eq!(clean_json_response(raw), "{\"text\": \"he said \\\"hi\\\"\"}");
+        assert_eq!(
+            clean_json_response(raw),
+            "{\"text\": \"he said \\\"hi\\\"\"}"
+        );
     }
 
     #[test]
@@ -356,7 +376,10 @@ mod tests {
     #[test]
     fn sanitize_ids_keeps_valid_ids_untouched() {
         let raw = r#"{"id": "already-valid-123"}"#;
-        assert_eq!(sanitize_curriculum_ids(raw), r#"{"id": "already-valid-123"}"#);
+        assert_eq!(
+            sanitize_curriculum_ids(raw),
+            r#"{"id": "already-valid-123"}"#
+        );
     }
 
     #[test]
@@ -368,7 +391,10 @@ mod tests {
     #[test]
     fn sanitize_ids_fixes_every_id_in_document() {
         let raw = r#"[{"id": "A B"}, {"id": "C D"}]"#;
-        assert_eq!(sanitize_curriculum_ids(raw), r#"[{"id": "a-b"}, {"id": "c-d"}]"#);
+        assert_eq!(
+            sanitize_curriculum_ids(raw),
+            r#"[{"id": "a-b"}, {"id": "c-d"}]"#
+        );
     }
 
     // --- parse_exercises ---
@@ -416,7 +442,10 @@ mod tests {
     #[test]
     fn parse_exercises_rejects_empty_wrapper() {
         let err = parse_exercises(r#"{"exercises": []}"#, 0, 0).unwrap_err();
-        assert_eq!(err.to_string(), "LLM error: parsed JSON contains no exercises");
+        assert_eq!(
+            err.to_string(),
+            "LLM error: parsed JSON contains no exercises"
+        );
     }
 
     #[test]
@@ -428,9 +457,7 @@ mod tests {
     // --- parse_analysis ---
 
     fn sentence_json(number: i32) -> String {
-        format!(
-            r#"{{"sentenceNumber": {number}, "errors": [], "perSentenceFeedback": []}}"#
-        )
+        format!(r#"{{"sentenceNumber": {number}, "errors": [], "perSentenceFeedback": []}}"#)
     }
 
     #[test]

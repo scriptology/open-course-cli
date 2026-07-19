@@ -17,13 +17,13 @@ use crate::llm::pipeline::{
     finalize_analysis_with_new_topics, generate_analysis, generate_exercises, log_debug_event,
 };
 use crate::llm::prompts::{build_batch_analysis_prompt, build_exercise_prompt};
+use crate::ui::colors;
 use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::curriculum;
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
 };
 use crate::ui::widgets::Card;
-use crate::ui::colors;
 
 #[derive(Debug, Clone, Default)]
 pub enum Mode {
@@ -73,10 +73,13 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             .split(area);
 
         let spinner_symbol = state.spinner.symbol();
-        let loading_message = state
-            .stream_status
-            .as_deref()
-            .unwrap_or(state.session.loading_title.as_deref().unwrap_or(labels.loading));
+        let loading_message = state.stream_status.as_deref().unwrap_or(
+            state
+                .session
+                .loading_title
+                .as_deref()
+                .unwrap_or(labels.loading),
+        );
         let loading_text = Line::from(vec![
             Span::styled(spinner_symbol, Style::default().fg(colors::YELLOW)),
             Span::raw(" "),
@@ -418,18 +421,14 @@ pub(crate) async fn start_exercises_for_topic(
         .into_iter()
         .filter(|li| li.target_lang == profile.target_language)
         .collect();
-    let forced_learning_items = LearningItemsTable::weakest(&learning_items,
-        3,
-    );
+    let forced_learning_items = LearningItemsTable::weakest(&learning_items, 3);
     state.session.learning_item_ids = forced_learning_items
         .iter()
         .map(|li| li.id.clone())
         .collect();
 
     let history = state.db.history().read_all().await.unwrap_or_default();
-    let success_rate = crate::core::session::recent_success_rate(&history,
-        5,
-    );
+    let success_rate = crate::core::session::recent_success_rate(&history, 5);
 
     let prompt = build_exercise_prompt(
         &profile,
@@ -571,9 +570,14 @@ async fn finish_session(state: &mut AppState) -> Result<()> {
     tokio::spawn(async move {
         let result: Result<AnalysisResult> = async {
             let model = create_llm_model(&config)?;
-            let mut analysis =
-                generate_analysis(model.as_ref(), &prompt, pairs.len(), Some(&tx), Some(data_dir.as_path()))
-                    .await?;
+            let mut analysis = generate_analysis(
+                model.as_ref(),
+                &prompt,
+                pairs.len(),
+                Some(&tx),
+                Some(data_dir.as_path()),
+            )
+            .await?;
             merge_analysis_with_pairs(&mut analysis, &pairs);
             analysis = finalize_analysis_with_new_topics(
                 model.as_ref(),

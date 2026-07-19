@@ -231,7 +231,11 @@ mod tests {
     }
 
     fn base_url_step_index(state: &OnboardingState) -> usize {
-        state.steps.iter().position(|s| *s == Step::BaseUrl).unwrap()
+        state
+            .steps
+            .iter()
+            .position(|s| *s == Step::BaseUrl)
+            .unwrap()
     }
 
     fn model_step_index(state: &OnboardingState) -> usize {

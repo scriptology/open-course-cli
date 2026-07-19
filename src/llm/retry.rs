@@ -243,7 +243,8 @@ pub async fn generate_analysis(
             )
         },
         || async move {
-            let analysis = extract_typed::<AnalysisResult>(client, prompt, MAX_TOKENS_ANALYSIS).await?;
+            let analysis =
+                extract_typed::<AnalysisResult>(client, prompt, MAX_TOKENS_ANALYSIS).await?;
             Ok(validate_analysis_sentences(analysis, expected_sentence_count, 0, 0).ok())
         },
         |cleaned| analysis_parse_errors(cleaned, expected_sentence_count),

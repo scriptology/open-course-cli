@@ -17,7 +17,11 @@ use open_course_cli::db::curriculum::cleanup_topics;
 use open_course_cli::llm::pipeline::log_debug_event;
 
 #[derive(Parser)]
-#[command(name = "open-course-cli", version, about = "AI language learning terminal")]
+#[command(
+    name = "open-course-cli",
+    version,
+    about = "AI language learning terminal"
+)]
 struct Cli {
     #[arg(long, default_value = ".")]
     cwd: PathBuf,
@@ -40,9 +44,7 @@ async fn main() -> anyhow::Result<()> {
             config::migration::mark_curriculum_table_recreated(&data_dir)?;
         }
         let db = Database::connect(&db_path).await?;
-        if let Some(curriculum) = config::migration::try_migrate_from_curriculum_md(
-            &data_dir,
-        )? {
+        if let Some(curriculum) = config::migration::try_migrate_from_curriculum_md(&data_dir)? {
             let table = db.curriculum();
             for topic in &curriculum.topics {
                 table.upsert(topic).await?;
@@ -82,7 +84,10 @@ async fn main() -> anyhow::Result<()> {
     if std::env::var_os("OPEN_COURSE_CLI_DEBUG").is_some() {
         log_debug_event(
             "startup",
-            &format!("OPEN_COURSE_CLI_DEBUG enabled. data_dir: {}", data_dir.display()),
+            &format!(
+                "OPEN_COURSE_CLI_DEBUG enabled. data_dir: {}",
+                data_dir.display()
+            ),
             Some(&data_dir),
         );
     }

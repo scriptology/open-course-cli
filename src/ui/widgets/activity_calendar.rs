@@ -121,7 +121,12 @@ pub fn build_event_store(activity: &[DailyActivity], today: NaiveDate) -> Calend
 mod tests {
     use super::*;
 
-    fn day(date: &str, sessions: usize, new_topics: usize, completed_topics: usize) -> DailyActivity {
+    fn day(
+        date: &str,
+        sessions: usize,
+        new_topics: usize,
+        completed_topics: usize,
+    ) -> DailyActivity {
         DailyActivity {
             date: date.to_string(),
             sessions,
@@ -168,7 +173,9 @@ mod tests {
 
         let active = store
             .0
-            .get(&chrono_to_time(NaiveDate::from_ymd_opt(2024, 5, 9).unwrap()))
+            .get(&chrono_to_time(
+                NaiveDate::from_ymd_opt(2024, 5, 9).unwrap(),
+            ))
             .copied()
             .unwrap();
         assert_eq!(active.bg, Some(ACTIVITY_BG[3]));

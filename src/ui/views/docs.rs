@@ -21,10 +21,10 @@ use crate::error::{AppError, Result};
 use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_topic_review;
 use crate::llm::prompts::build_topic_review_prompt;
+use crate::ui::colors;
 use crate::ui::labels::{get_docs_labels, native_language_code};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::OpenCourseStyleSheet;
-use crate::ui::colors;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortBy {
@@ -170,7 +170,12 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             )),
             Line::from(""),
             Line::from(Span::styled(
-                format!("{} ({}: {})", topic.name, labels.sort, state.docs.sort_by.label()),
+                format!(
+                    "{} ({}: {})",
+                    topic.name,
+                    labels.sort,
+                    state.docs.sort_by.label()
+                ),
                 Style::default().fg(Color::DarkGray),
             )),
         ]);
@@ -449,7 +454,6 @@ async fn generate_inner(
     db.reviews().upsert(&review).await?;
     Ok(text)
 }
-
 
 #[cfg(test)]
 mod tests {

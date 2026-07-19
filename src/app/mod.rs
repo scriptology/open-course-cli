@@ -388,7 +388,7 @@ async fn handle_update_key(state: &mut AppState, code: KeyCode) -> Result<()> {
 async fn run_installer_and_exit(state: &mut AppState) -> Result<()> {
     use ratatui::crossterm::execute;
     use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
-    use std::io::{stdout, Write};
+    use std::io::{Write, stdout};
 
     let latest = state
         .update

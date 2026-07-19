@@ -86,7 +86,9 @@ pub struct SentenceAnalysis {
     pub per_sentence_feedback: Vec<FeedbackComment>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq, Default)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq, Default,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum SemanticVerdict {
     #[default]

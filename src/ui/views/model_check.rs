@@ -165,7 +165,10 @@ fn render_check_line<'a>(check: &'a CheckResult, spinner_symbol: &'a str) -> Lin
         Span::raw(check.label.clone()),
     ];
     if !matches!(check.status, CheckStatus::Pending | CheckStatus::InProgress) {
-        spans.push(Span::raw(format!(" ({:.1}s)", check.duration_ms as f64 / 1000.0)));
+        spans.push(Span::raw(format!(
+            " ({:.1}s)",
+            check.duration_ms as f64 / 1000.0
+        )));
     }
     if let Some(ratio) = check.reasoning_ratio {
         spans.push(Span::raw(format!(", {:.0}% reasoning", ratio * 100.0)));
