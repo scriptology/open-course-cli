@@ -42,11 +42,7 @@ fn exercise_prompt_includes_profile() {
     assert!(prompt.contains("Target topics: Topic t1"));
     assert!(prompt.contains("B1"));
     assert!(prompt.contains("Student age: 30"));
-    assert!(
-        prompt.contains(
-            "contexts and examples that fit the life experience of a typical 30-year-old"
-        )
-    );
+    assert!(prompt.contains("Avoid school, kindergarten, or other child-specific scenarios"));
     assert!(prompt.contains("topicId: \"t1\""));
     assert!(prompt.contains("JSON object"));
     assert!(prompt.contains("exercises"));
