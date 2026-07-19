@@ -94,11 +94,19 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     frame.render_widget(Paragraph::new(subtitle), header_chunks[1]);
 
     // Step card with border.
-    let progress = format!(
-        "Step {} of {}",
-        state.onboarding.active + 1,
-        state.onboarding.steps.len()
-    );
+    let visible_steps: Vec<Step> = state
+        .onboarding
+        .steps
+        .iter()
+        .filter(|s| state.onboarding.is_step_visible(**s))
+        .copied()
+        .collect();
+    let current_position = visible_steps
+        .iter()
+        .position(|s| *s == step)
+        .map(|i| i + 1)
+        .unwrap_or(1);
+    let progress = format!("Step {} of {}", current_position, visible_steps.len());
     let title = format!("{} — {}", step.label(), progress);
     let card_block = Block::default()
         .borders(Borders::ALL)
@@ -231,8 +239,7 @@ async fn advance_onboarding(state: &mut AppState) -> Result<()> {
     if state.onboarding.active == state.onboarding.steps.len() - 1 {
         finish_onboarding(state).await?;
     } else {
-        state.onboarding.active += 1;
-        state.onboarding.load_input();
+        state.onboarding.go_forward();
         if state.onboarding.current_step() == Step::Model {
             spawn_model_fetch(state);
         }

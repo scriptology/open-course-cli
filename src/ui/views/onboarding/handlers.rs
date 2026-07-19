@@ -38,8 +38,7 @@ async fn handle_provider_key(state: &mut AppState, code: KeyCode) -> Result<()> 
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
         KeyCode::Up | KeyCode::Char('k') => {
             let idx = state.onboarding.provider_index;
@@ -98,8 +97,7 @@ async fn handle_base_url_key(state: &mut AppState, code: KeyCode) -> Result<()> 
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab | KeyCode::Up if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
         KeyCode::Char(c) if editable => {
             state.onboarding.input.push(c);
@@ -212,8 +210,7 @@ async fn handle_choice_key(
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
         KeyCode::Up | KeyCode::Char('k') => cycle_choice(state, field, true),
         KeyCode::Down | KeyCode::Char('j') => cycle_choice(state, field, false),
@@ -253,8 +250,7 @@ async fn handle_text_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             advance_onboarding(state).await?;
         }
         KeyCode::BackTab | KeyCode::Up if state.onboarding.active > 0 => {
-            state.onboarding.active -= 1;
-            state.onboarding.load_input();
+            state.onboarding.go_back();
         }
         KeyCode::Char(c) => {
             state.onboarding.input.push(c);
