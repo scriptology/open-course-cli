@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/scriptology/open-course-cli/compare/v0.5.0...v0.5.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **ci:** chain release build to release-please via workflow_call ([#11](https://github.com/scriptology/open-course-cli/issues/11)) ([17657e3](https://github.com/scriptology/open-course-cli/commit/17657e3ea264e547cc88898a54df81df739ce6fd))
+
 ## [0.5.0](https://github.com/scriptology/open-course-cli/compare/v0.4.0...v0.5.0) (2026-07-19)
 
 
