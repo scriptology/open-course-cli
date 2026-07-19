@@ -83,14 +83,14 @@ impl OnboardingState {
     }
 
     pub(super) fn set_provider(&mut self, provider: ProviderId) {
+        if self.base_url.is_empty() || self.base_url == base_url_default(self.provider) {
+            self.base_url = base_url_default(provider).to_string();
+        }
         self.provider = provider;
         self.provider_index = ProviderId::all()
             .iter()
             .position(|p| *p == provider)
             .unwrap_or(ProviderId::all().len().saturating_sub(1));
-        if self.base_url.is_empty() || self.base_url == base_url_default(self.provider) {
-            self.base_url = base_url_default(provider).to_string();
-        }
     }
 
     pub(super) fn load_input(&mut self) {

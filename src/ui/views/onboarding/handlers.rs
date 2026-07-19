@@ -90,6 +90,8 @@ async fn handle_provider_key(state: &mut AppState, code: KeyCode) -> Result<()> 
 }
 
 async fn handle_base_url_key(state: &mut AppState, code: KeyCode) -> Result<()> {
+    use super::steps::shows_base_url_step;
+    let editable = shows_base_url_step(state.onboarding.provider);
     match code {
         KeyCode::Esc => handle_esc(state),
         KeyCode::Char('\t') | KeyCode::Tab | KeyCode::Enter => {
@@ -99,11 +101,11 @@ async fn handle_base_url_key(state: &mut AppState, code: KeyCode) -> Result<()> 
             state.onboarding.active -= 1;
             state.onboarding.load_input();
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(c) if editable => {
             state.onboarding.input.push(c);
             state.onboarding.error.clear();
         }
-        KeyCode::Backspace => {
+        KeyCode::Backspace if editable => {
             state.onboarding.input.pop();
         }
         _ => {}

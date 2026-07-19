@@ -104,15 +104,24 @@ fn provider_help(state: &AppState) -> String {
 
 fn api_key_help(state: &AppState) -> String {
     let meta = ProviderMeta::for_provider(state.onboarding.provider);
+    let env_note = match meta.env_key {
+        Some(name) if std::env::var(name).is_ok() => {
+            format!("\n{name} is set in your environment and will be used if you leave this blank.")
+        }
+        Some(name) => format!("\nYou can also set the {name} environment variable instead."),
+        None => String::new(),
+    };
     if meta.requires_api_key && !meta.api_key_optional {
         format!(
-            "Enter API key for {}\n(required)",
-            state.onboarding.provider.label()
+            "Enter API key for {}\n(required){}",
+            state.onboarding.provider.label(),
+            env_note
         )
     } else {
         format!(
-            "Enter API key for {}\n(optional — press Enter to skip)",
-            state.onboarding.provider.label()
+            "Enter API key for {}\n(optional — press Enter to skip){}",
+            state.onboarding.provider.label(),
+            env_note
         )
     }
 }
