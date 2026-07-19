@@ -665,6 +665,7 @@ fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
         ("p", labels.pairs),
         ("s", labels.settings),
         ("q", labels.quit),
+        ("?", "help"),
     ];
     if state.dashboard.weak_visible_len() > 0 {
         hints.insert(0, ("Enter", labels.start_label));

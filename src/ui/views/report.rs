@@ -12,6 +12,7 @@ use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
+use crate::ui::widgets::build_footer;
 
 #[derive(Debug, Clone)]
 pub struct ReportState {
@@ -97,18 +98,22 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     frame.render_widget(paragraph.scroll((state.report.scroll_offset, 0)), chunks[0]);
 
-    let mouse_hint = if state.mouse_capture {
-        "wheel: scroll | m: native select"
+    let mouse_entries: [(&str, &str); 2] = if state.mouse_capture {
+        [("wheel", "scroll"), ("m", "native select")]
     } else {
-        "mouse: select text | m: wheel scroll"
+        [("mouse", "select text"), ("m", "wheel scroll")]
     };
+    let mut entries = vec![("↑/↓", "scroll")];
+    entries.extend(mouse_entries);
+    entries.push(("n", "new topic"));
+    entries.push(("r", "repeat"));
+    entries.push(("d", "docs"));
+    entries.push(("Esc", "dashboard"));
+    entries.push(("?", "help"));
 
     frame.render_widget(
-        Paragraph::new(Line::from(format!(
-            "↑/↓: scroll | {} | n: new topic | r: repeat | d: docs | Esc: dashboard",
-            mouse_hint
-        )))
-        .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(Line::from(build_footer(&entries)))
+            .style(Style::default().fg(Color::DarkGray)),
         chunks[1],
     );
 }

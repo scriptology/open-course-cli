@@ -21,6 +21,7 @@ use crate::llm::factory::create_llm_model;
 use crate::llm::model_listing::ModelInfo;
 use crate::llm::pipeline::{generate_topic_metadata, log_debug_event};
 use crate::ui::views::{ReportState, session};
+use crate::ui::widgets::Toast;
 
 pub async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
     if let Some((tag, message)) = debug_describe(&result) {
@@ -143,7 +144,7 @@ fn handle_exercises(state: &mut AppState, res: Result<Vec<Exercise>>) {
             state.session.cursor = 0;
         }
         Err(e) => {
-            state.error = Some(e.to_string());
+            state.toast = Some(Toast::error(e.to_string()));
         }
     }
 }
@@ -156,22 +157,22 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
             if let Some(session) = state.session.mentor_session.take() {
                 if let Some(config) = state.config.as_ref() {
                     if let Err(e) = ensure_new_topics(&state.db, &analysis.new_topics).await {
-                        state.error = Some(e.to_string());
+                        state.toast = Some(Toast::error(e.to_string()));
                         return;
                     }
                     if let Err(e) =
                         ensure_topics_exist(&state.db, config, &session, &state.data_dir).await
                     {
-                        state.error = Some(e.to_string());
+                        state.toast = Some(Toast::error(e.to_string()));
                         return;
                     }
                     if let Err(e) = ensure_progress_for_curriculum(&state.db, config).await {
-                        state.error = Some(e.to_string());
+                        state.toast = Some(Toast::error(e.to_string()));
                         return;
                     }
 
                     if let Err(e) = state.session.load(&state.db).await {
-                        state.error = Some(e.to_string());
+                        state.toast = Some(Toast::error(e.to_string()));
                         return;
                     }
                 }
@@ -196,7 +197,7 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
                 let scores: HashMap<String, f64> = match scores_result {
                     Ok(scores) => scores,
                     Err(e) => {
-                        state.error = Some(e.to_string());
+                        state.toast = Some(Toast::error(e.to_string()));
                         return;
                     }
                 };
@@ -255,7 +256,7 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
             }
         }
         Err(e) => {
-            state.error = Some(e.to_string());
+            state.toast = Some(Toast::error(e.to_string()));
         }
     }
 }
@@ -275,7 +276,7 @@ async fn handle_curriculum(state: &mut AppState, res: Result<Curriculum>) {
             if in_session {
                 state.session.pending_new_topic = false;
             }
-            state.error = Some(e.to_string());
+            state.toast = Some(Toast::error(e.to_string()));
         }
     }
 }
@@ -295,7 +296,7 @@ async fn handle_curriculum_extension(state: &mut AppState, res: Result<Vec<Topic
             if in_session {
                 state.session.pending_new_topic = false;
             }
-            state.error = Some(e.to_string());
+            state.toast = Some(Toast::error(e.to_string()));
         }
     }
 }
@@ -319,17 +320,17 @@ async fn persist_topics_and_reload(state: &mut AppState, topics: &[Topic], repla
     match upsert_result {
         Ok(()) => {
             if let Err(e) = state.curriculum.load(&state.db).await {
-                state.error = Some(e.to_string());
+                state.toast = Some(Toast::error(e.to_string()));
             }
             if in_session && let Err(e) = state.session.load(&state.db).await {
-                state.error = Some(e.to_string());
+                state.toast = Some(Toast::error(e.to_string()));
             }
             if in_session && let Err(e) = session::maybe_start_pending_new_topic(state).await {
-                state.error = Some(e.to_string());
+                state.toast = Some(Toast::error(e.to_string()));
             }
         }
         Err(e) => {
-            state.error = Some(e.to_string());
+            state.toast = Some(Toast::error(e.to_string()));
         }
     }
 }
@@ -343,7 +344,7 @@ fn handle_topic_review(state: &mut AppState, res: Result<String>) {
             state.docs.saved = true;
         }
         Err(e) => {
-            state.error = Some(e.to_string());
+            state.toast = Some(Toast::error(e.to_string()));
         }
     }
 }

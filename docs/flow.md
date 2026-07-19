@@ -191,3 +191,11 @@ The curriculum is not static. When the user keeps requesting new topics (`n`), t
 3. The extension request includes existing topics, their difficulty, and the user's progress/scores, so the LLM can reinforce weak areas or introduce prerequisites for difficult topics.
 
 You can also manually extend the curriculum from the Curriculum view with `a` (add 5 topics) or regenerate it from scratch with `r`.
+
+---
+
+## Background errors
+
+When a background LLM request fails (exercise/analysis generation, curriculum generation or extension, topic review), the app shows a red toast in the bottom-right corner for a few seconds instead of blocking the screen. The current view returns to its normal interactive state, so you can retry with that view's own key (e.g. `g` in Curriculum, `n`/`Enter` to restart a session, `e` to regenerate docs) without dismissing anything first.
+
+This is separate from the full-screen error prompt (`r`: retry / `m`: change model / `q`: quit), which is reserved for unrecoverable startup/config failures.

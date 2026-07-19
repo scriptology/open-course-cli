@@ -9,6 +9,7 @@ use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::onboarding;
+use crate::ui::widgets::build_footer;
 
 #[derive(Debug, Clone, Default)]
 pub struct PairsState {
@@ -87,10 +88,13 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     list_state.select(Some(state.pairs.selected));
     frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
-    let hint = format!(
-        "↑/↓: {} | Enter: {} | a: {} | Esc: {}",
-        labels.navigate, labels.switch, labels.add_pair, labels.back
-    );
+    let hint = build_footer(&[
+        ("↑/↓", labels.navigate),
+        ("Enter", labels.switch),
+        ("a", labels.add_pair),
+        ("Esc", labels.back),
+        ("?", "help"),
+    ]);
     frame.render_widget(
         Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
         chunks[2],
