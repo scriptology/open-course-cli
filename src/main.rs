@@ -111,7 +111,6 @@ async fn main() -> anyhow::Result<()> {
     terminal.clear()?;
     let result = run_app(&mut terminal, data_dir, db, config, quit).await;
     let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
-    let _ = terminal.clear();
     ratatui::restore();
     println!();
     result?;
