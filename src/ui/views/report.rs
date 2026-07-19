@@ -438,8 +438,10 @@ mod tests {
 
     #[test]
     fn scroll_by_clamps_to_bounds() {
-        let mut state = ReportState::default();
-        state.max_scroll_offset = 10;
+        let mut state = ReportState {
+            max_scroll_offset: 10,
+            ..Default::default()
+        };
 
         state.scroll_by(3);
         assert_eq!(state.scroll_offset, 3);
@@ -453,8 +455,10 @@ mod tests {
 
     #[test]
     fn report_header_shows_topic_name() {
-        let mut report = ReportState::default();
-        report.target_topic_name = Some("Preterito".to_string());
+        let report = ReportState {
+            target_topic_name: Some("Preterito".to_string()),
+            ..Default::default()
+        };
         let lines = build_report_lines(&report, get_report_labels("ru"));
         let header: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(header, "Тема: Preterito");

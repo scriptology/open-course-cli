@@ -161,7 +161,7 @@ pub fn model_check_verdict(results: &[CheckResult]) -> (bool, bool) {
     (has_failed, has_warning)
 }
 
-const DIAGNOSTIC_CHECKS: &[(&'static str, &'static str)] = &[
+const DIAGNOSTIC_CHECKS: &[(&str, &str)] = &[
     ("connectivity", "Connectivity"),
     ("streaming", "Streaming"),
     ("exercises", "Exercise generation"),
@@ -302,7 +302,7 @@ async fn run_exercises_check(client: Arc<dyn LlmClient>, profile: &UserProfile) 
     .await
     {
         Ok(Ok(exercises)) => {
-            if exercises.len() >= 1 {
+            if !exercises.is_empty() {
                 CheckStatus::Passed
             } else {
                 CheckStatus::Failed(format!("expected 1 exercise, got {}", exercises.len()))

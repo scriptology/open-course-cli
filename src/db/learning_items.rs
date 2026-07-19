@@ -121,7 +121,7 @@ fn has_target_language_word(name: &str) -> bool {
             return false;
         }
         // Non-ASCII letters strongly suggest a target-language word/form.
-        if stripped.chars().any(|c| !c.is_ascii()) {
+        if !stripped.is_ascii() {
             return true;
         }
         // Short ASCII tokens like "muy", "vs", "to" are usually part of the contrast.

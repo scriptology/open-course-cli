@@ -263,7 +263,7 @@ const RU_DOCS: DocsLabels = DocsLabels {
     sort: "Сортировка",
 };
 
-const SUPPORTED_REPORT: [(&str, ReportLabels); 17] = [
+static SUPPORTED_REPORT: [(&str, ReportLabels); 17] = [
     ("en", EN_REPORT),
     ("ru", RU_REPORT),
     ("es", EN_REPORT),

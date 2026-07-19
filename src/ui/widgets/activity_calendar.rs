@@ -60,7 +60,7 @@ fn days_in_month(date: NaiveDate) -> u16 {
 pub fn block_height(date: NaiveDate) -> u16 {
     let first = date.with_day(1).expect("day 1 exists");
     let offset = first.weekday().num_days_from_sunday() as u16;
-    2 + 1 + 1 + (offset + days_in_month(date) + 6) / 7
+    2 + 1 + 1 + (offset + days_in_month(date)).div_ceil(7)
 }
 
 fn level_style(level: usize) -> Style {

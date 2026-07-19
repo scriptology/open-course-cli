@@ -56,8 +56,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let list_width = chunks[1].width as usize;
     let items: Vec<ListItem> = pairs
         .iter()
-        .enumerate()
-        .map(|(_i, pair)| {
+        .map(|pair| {
             let is_active = pair.id == active_id;
             let label = format!(
                 "{} → {}",

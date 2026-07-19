@@ -310,8 +310,6 @@ fn go_back_provider_setup_step(state: &mut AppState) {
         ProviderSetupStep::ApiKey => {
             if provider == ProviderId::Custom {
                 ProviderSetupStep::Endpoint
-            } else if meta.requires_api_key {
-                ProviderSetupStep::SelectProvider
             } else {
                 ProviderSetupStep::SelectProvider
             }

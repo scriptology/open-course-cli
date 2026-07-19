@@ -135,11 +135,11 @@ pub async fn run_app(
     let (llm_tx, mut llm_rx) = mpsc::channel::<LlmResult>(16);
     let mut state = AppState::new(data_dir, db, config, quit_requested.clone(), llm_tx)?;
 
-    if let Some(latest) = crate::update::latest_release_version().await? {
-        if crate::update::is_newer(crate::update::CURRENT_VERSION, &latest) {
-            state.view = View::UpdateAvailable;
-            state.update.latest_version = Some(latest);
-        }
+    if let Some(latest) = crate::update::latest_release_version().await?
+        && crate::update::is_newer(crate::update::CURRENT_VERSION, &latest)
+    {
+        state.view = View::UpdateAvailable;
+        state.update.latest_version = Some(latest);
     }
 
     if state.view != View::UpdateAvailable {

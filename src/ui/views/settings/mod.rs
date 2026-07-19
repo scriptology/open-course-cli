@@ -211,18 +211,15 @@ fn build_footer(state: &AppState) -> String {
         return provider_setup::build_provider_setup_footer(state);
     }
 
-    let mut lines = vec![String::new()];
     if state.settings.section == Section::Data {
-        lines[0] = "↑/↓: action | Enter: reset | Esc: back".to_string();
+        "↑/↓: action | Enter: reset | Esc: back".to_string()
     } else if state.settings.section == Section::Session {
-        lines[0] = "↑/↓: select | Esc: back".to_string();
+        "↑/↓: select | Esc: back".to_string()
     } else if state.settings.section == Section::Profile {
-        lines[0] = "←/→: move caret | Type: edit | Enter: save | Esc: back".to_string();
+        "←/→: move caret | Type: edit | Enter: save | Esc: back".to_string()
     } else {
-        lines[0] = "Tab/Shift+Tab: field | Enter: save | Esc: back".to_string();
+        "Tab/Shift+Tab: field | Enter: save | Esc: back".to_string()
     }
-
-    lines.join("\n")
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {

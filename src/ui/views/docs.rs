@@ -461,8 +461,10 @@ mod tests {
 
     #[test]
     fn scroll_by_clamps_to_bounds() {
-        let mut state = DocsState::default();
-        state.max_scroll_offset = 10;
+        let mut state = DocsState {
+            max_scroll_offset: 10,
+            ..Default::default()
+        };
 
         state.scroll_by(3);
         assert_eq!(state.scroll_offset, 3);

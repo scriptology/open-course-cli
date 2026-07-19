@@ -220,11 +220,11 @@ pub fn get_daily_activity(
     }
 
     for summary in history {
-        if let Some(date) = rfc3339_to_date(&summary.date) {
-            if let Some(activity) = map.get_mut(&date) {
-                activity.sessions += 1;
-                activity.new_topics += summary.new_topic_ids.len();
-            }
+        if let Some(date) = rfc3339_to_date(&summary.date)
+            && let Some(activity) = map.get_mut(&date)
+        {
+            activity.sessions += 1;
+            activity.new_topics += summary.new_topic_ids.len();
         }
     }
 
@@ -232,12 +232,11 @@ pub fn get_daily_activity(
         if pt.score < COMPLETED_THRESHOLD {
             continue;
         }
-        if let Some(rfc) = pt.last_practiced.as_deref() {
-            if let Some(date) = rfc3339_to_date(rfc) {
-                if let Some(activity) = map.get_mut(&date) {
-                    activity.completed_topics += 1;
-                }
-            }
+        if let Some(rfc) = pt.last_practiced.as_deref()
+            && let Some(date) = rfc3339_to_date(rfc)
+            && let Some(activity) = map.get_mut(&date)
+        {
+            activity.completed_topics += 1;
         }
     }
 

@@ -170,10 +170,12 @@ fn daily_activity() {
 fn weak_selection_activates_and_wraps() {
     use open_course_cli::ui::views::DashboardState;
 
-    let mut state = DashboardState::default();
-    state.weak_topics = (1..=3)
-        .map(|i| make_topic(&format!("t{i}"), Difficulty::Beginner))
-        .collect();
+    let mut state = DashboardState {
+        weak_topics: (1..=3)
+            .map(|i| make_topic(&format!("t{i}"), Difficulty::Beginner))
+            .collect(),
+        ..Default::default()
+    };
 
     // Inactive: down selects the first row.
     state.move_weak_selection(1);
