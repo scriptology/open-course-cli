@@ -112,7 +112,7 @@ pub struct RigClient {
 impl RigClient {
     pub fn from_config(config: &ProviderConfig, provider_id: ProviderId) -> Result<Self> {
         let meta = ProviderMeta::for_provider(provider_id);
-        let api_key = config.api_key();
+        let api_key = meta.resolve_api_key(config.api_key());
         let model = config.model().to_string();
         let base_url = config.base_url().or(meta.default_base_url);
 
@@ -122,7 +122,7 @@ impl RigClient {
             )));
         }
 
-        let api_key = api_key.unwrap_or_default().to_string();
+        let api_key = api_key.unwrap_or_default();
         let reasoning_effort = config.reasoning_effort().map(|s| s.to_string());
 
         let (inner, base_url) = match provider_id {
@@ -130,12 +130,16 @@ impl RigClient {
                 let base_url = base_url.unwrap_or("https://api.anthropic.com");
                 let client = anthropic::ClientBuilder::new(&api_key)
                     .base_url(base_url)
-                    .build();
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (RigClientInner::Anthropic(client), base_url.to_string())
             }
             ProviderId::Google => {
                 let base_url = base_url.unwrap_or("https://generativelanguage.googleapis.com");
-                let client = gemini::Client::from_url(&api_key, base_url);
+                let client = gemini::client::ClientBuilder::new(&api_key)
+                    .base_url(base_url)
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (RigClientInner::Gemini(client), base_url.to_string())
             }
             ProviderId::Custom if config.endpoint() == "messages" => {
@@ -147,7 +151,8 @@ impl RigClient {
                 let anthropic_base = base_url.trim_end_matches("/v1").trim_end_matches('/');
                 let client = anthropic::ClientBuilder::new(&api_key)
                     .base_url(anthropic_base)
-                    .build();
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (
                     RigClientInner::Anthropic(client),
                     anthropic_base.to_string(),
@@ -159,7 +164,10 @@ impl RigClient {
                         "Provider {provider_id:?} requires a base URL"
                     ))
                 })?;
-                let client = openai::Client::from_url(&api_key, base_url);
+                let client = openai::ClientBuilder::new(&api_key)
+                    .base_url(base_url)
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
                 (RigClientInner::OpenAi(client), base_url.to_string())
             }
         };
@@ -184,7 +192,7 @@ impl RigClient {
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
                 RigClientInner::OpenAi(client) => {
-                    let extractor = ExtractorBuilder::<T, _>::new(
+                    let extractor = ExtractorBuilder::<_, T>::new(
                         openai::completion::CompletionModel::new(client.clone(), &self.model),
                     )
                     .max_tokens(max_tokens as u64)
