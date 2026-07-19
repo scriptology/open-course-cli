@@ -208,11 +208,12 @@ impl RigClient {
                         .await
                 }
                 RigClientInner::Gemini(client) => {
-                    client
-                        .extractor::<T>(&self.model)
-                        .build()
-                        .extract(prompt)
-                        .await
+                    let mut extractor =
+                        client.extractor::<T>(&self.model).max_tokens(max_tokens as u64);
+                    if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params() {
+                        extractor = extractor.additional_params(params);
+                    }
+                    extractor.build().extract(prompt).await
                 }
             };
 
@@ -271,9 +272,12 @@ impl RigClient {
         client: &gemini::Client,
         model: &str,
         system: Option<&str>,
-        _max_tokens: u32,
+        max_tokens: u32,
     ) -> Agent<gemini::completion::CompletionModel> {
-        let mut builder = client.agent(model);
+        let mut builder = client.agent(model).max_tokens(max_tokens as u64);
+        if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params() {
+            builder = builder.additional_params(params);
+        }
         if let Some(system) = system {
             builder = builder.preamble(system);
         }
@@ -368,5 +372,82 @@ impl LlmClient for RigClient {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_env_var<F: FnOnce()>(name: &str, value: Option<&str>, f: F) {
+        let original = std::env::var(name).ok();
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+        f();
+        unsafe {
+            match original {
+                Some(v) => std::env::set_var(name, v),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+
+    fn config(api_key: Option<&str>, base_url: Option<&str>, endpoint: Option<&str>) -> ProviderConfig {
+        ProviderConfig::ApiKey {
+            api_key: api_key.map(str::to_string),
+            model: "test-model".to_string(),
+            base_url: base_url.map(str::to_string),
+            endpoint: endpoint.map(str::to_string),
+            reasoning_effort: None,
+        }
+    }
+
+    #[test]
+    fn missing_api_key_without_env_var_errors() {
+        with_env_var("ANTHROPIC_API_KEY", None, || {
+            let cfg = config(None, None, None);
+            let result = RigClient::from_config(&cfg, ProviderId::Anthropic);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn env_var_fallback_allows_construction_without_configured_key() {
+        with_env_var("ANTHROPIC_API_KEY", Some("env-anthropic-key"), || {
+            let cfg = config(None, None, None);
+            let client = RigClient::from_config(&cfg, ProviderId::Anthropic)
+                .expect("should fall back to env var");
+            assert_eq!(client.api_key, "env-anthropic-key");
+        });
+    }
+
+    #[test]
+    fn configured_key_takes_priority_over_env_var() {
+        with_env_var("OPENAI_API_KEY", Some("env-openai-key"), || {
+            let cfg = config(Some("configured-key"), Some("https://api.openai.com/v1"), None);
+            let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
+            assert_eq!(client.api_key, "configured-key");
+        });
+    }
+
+    #[test]
+    fn custom_provider_without_base_url_errors() {
+        with_env_var("OPENAI_API_KEY", None, || {
+            let cfg = config(Some("key"), None, None);
+            let result = RigClient::from_config(&cfg, ProviderId::Custom);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn google_builds_with_default_base_url() {
+        let cfg = config(Some("gemini-key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+        assert_eq!(client.base_url, "https://generativelanguage.googleapis.com");
+        assert!(matches!(client.inner, RigClientInner::Gemini(_)));
     }
 }

@@ -79,6 +79,13 @@ impl ProviderMeta {
         }
     }
 
+    pub fn rig_additional_params(&self) -> Option<serde_json::Value> {
+        match self.id {
+            ProviderId::Google => Some(serde_json::json!({ "generationConfig": {} })),
+            _ => None,
+        }
+    }
+
     pub fn resolve_api_key(&self, configured: Option<&str>) -> Option<String> {
         if let Some(key) = configured
             && !key.is_empty()
@@ -173,5 +180,22 @@ mod tests {
         assert_eq!(meta.resolve_api_key(None), None);
         let meta = ProviderMeta::for_provider(ProviderId::Custom);
         assert_eq!(meta.resolve_api_key(None), None);
+    }
+
+    #[test]
+    fn google_requires_generation_config_workaround() {
+        let meta = ProviderMeta::for_provider(ProviderId::Google);
+        let params = meta.rig_additional_params().expect("google needs additional_params");
+        assert!(params.get("generationConfig").is_some());
+    }
+
+    #[test]
+    fn non_google_providers_have_no_additional_params() {
+        for provider in all_providers() {
+            if *provider != ProviderId::Google {
+                let meta = ProviderMeta::for_provider(*provider);
+                assert_eq!(meta.rig_additional_params(), None);
+            }
+        }
     }
 }
