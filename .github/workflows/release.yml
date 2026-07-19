@@ -10,12 +10,18 @@ on:
         description: "Version tag to release, e.g. v0.2.0. Leave empty to build artifacts only without creating a release."
         required: false
         default: ""
+  workflow_call:
+    inputs:
+      version:
+        description: "Version tag to release, e.g. v0.2.0."
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 env:
-  RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+  RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   build:
