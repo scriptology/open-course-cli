@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/scriptology/open-course-cli/compare/v0.4.0...v0.5.0) (2026-07-19)
+
+
+### Features
+
+* **ui:** add global help overlay, error toasts, and consistent footers ([#7](https://github.com/scriptology/open-course-cli/issues/7)) ([e94777e](https://github.com/scriptology/open-course-cli/commit/e94777ef45a708cdc3f93a18cd071900a63cfdeb))
+
 ## [0.4.0](https://github.com/scriptology/open-course-cli/compare/v0.3.0...v0.4.0) (2026-07-19)
 
 
