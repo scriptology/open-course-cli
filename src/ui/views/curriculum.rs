@@ -334,6 +334,9 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Char('g') => {
             generate_curriculum(state).await?;
         }
+        KeyCode::Enter if state.curriculum.topics.is_empty() && !state.curriculum.loading => {
+            generate_curriculum(state).await?;
+        }
         KeyCode::Char('r') if !state.curriculum.topics.is_empty() => {
             state.curriculum.pending_reset = true;
         }
