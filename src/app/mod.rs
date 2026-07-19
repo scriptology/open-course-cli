@@ -20,13 +20,14 @@ use crate::db::curriculum::{Curriculum, Topic};
 use crate::error::{AppError, Result};
 use crate::llm::diagnostics::CheckResult;
 use crate::llm::model_listing::ModelInfo;
+use crate::ui::help;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::views::{
     CurriculumState, DashboardState, DocsState, ModelCheckState, OnboardingState, PairsState,
     ReportState, SessionState, SettingsState, UpdateState, curriculum, dashboard, docs,
     model_check, onboarding, pairs, report, session, settings, update,
 };
-use crate::ui::widgets::{ErrorBox, Spinner};
+use crate::ui::widgets::{ErrorBox, HelpOverlay, Spinner, Toast, ToastWidget};
 
 use llm_results::apply_llm_result;
 
@@ -84,6 +85,8 @@ pub struct AppState {
     pub stream_status: Option<String>,
     pub curriculum_progress: std::collections::HashMap<String, String>,
     pub mouse_capture: bool,
+    pub help_open: bool,
+    pub toast: Option<Toast>,
 }
 
 impl AppState {
@@ -121,6 +124,8 @@ impl AppState {
             stream_status: None,
             curriculum_progress: std::collections::HashMap::new(),
             mouse_capture: true,
+            help_open: false,
+            toast: None,
         })
     }
 }
@@ -198,6 +203,9 @@ pub async fn run_app(
             }
             _ = tick.tick(), if redraw_on_tick(&state) => {
                 state.spinner.next();
+                if state.toast.as_ref().is_some_and(Toast::expired) {
+                    state.toast = None;
+                }
             }
         }
 
@@ -235,6 +243,18 @@ async fn handle_event(state: &mut AppState, event: Event) -> Result<()> {
                     }
                     _ => state.error = None,
                 }
+                return Ok(());
+            }
+
+            if state.help_open {
+                if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
+                    state.help_open = false;
+                }
+                return Ok(());
+            }
+
+            if key.code == KeyCode::Char('?') && !is_text_input_active(state) {
+                state.help_open = true;
                 return Ok(());
             }
 
@@ -306,6 +326,15 @@ async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
     Ok(())
 }
 
+fn is_text_input_active(state: &AppState) -> bool {
+    match state.view {
+        View::Session => matches!(state.session.mode, session::Mode::Practicing),
+        View::Onboarding => state.onboarding.is_text_step_active(),
+        View::Settings => state.settings.is_text_input_active(),
+        _ => false,
+    }
+}
+
 /// Views where the mouse wheel is useful and there is no text input, so mouse
 /// capture can be enabled without breaking typing.
 fn view_supports_mouse(view: View) -> bool {
@@ -323,6 +352,7 @@ fn redraw_on_tick(state: &AppState) -> bool {
         || state.docs.loading
         || state.curriculum.loading
         || state.model_check.running
+        || state.toast.is_some()
 }
 
 /// Applies the desired capture mode to the terminal. Unlike
@@ -497,5 +527,13 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         View::Pairs => pairs::draw(frame, area, state),
         View::UpdateAvailable => update::draw(frame, area, state),
         View::Quitting => {}
+    }
+
+    if state.help_open {
+        frame.render_widget(HelpOverlay::new(&help::groups_for(state)), area);
+    }
+
+    if let Some(toast) = &state.toast {
+        frame.render_widget(ToastWidget::new(toast), area);
     }
 }

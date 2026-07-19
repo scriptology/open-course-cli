@@ -83,6 +83,13 @@ impl OnboardingState {
         self.steps[self.active]
     }
 
+    pub fn is_text_step_active(&self) -> bool {
+        match self.current_step() {
+            Step::Model => self.model_picker.manual,
+            step => super::steps::is_text_step(step),
+        }
+    }
+
     pub(super) fn is_step_visible(&self, step: Step) -> bool {
         match step {
             Step::BaseUrl => shows_base_url_step(self.provider),

@@ -7,6 +7,7 @@ use crate::config::write_config;
 use crate::error::{AppError, Result};
 use crate::llm::provider::ProviderMeta;
 use crate::ui::views::model_check;
+use crate::ui::widgets::build_footer;
 use crate::ui::widgets::model_picker::{self, ModelPickerAction, ModelPickerOptions};
 
 use super::{Section, SettingsState};
@@ -129,37 +130,31 @@ pub(super) fn build_provider_setup_body(state: &AppState, config: &OpenCourseCon
 
 pub(super) fn build_provider_setup_footer(state: &AppState) -> String {
     match state.settings.provider_setup_step {
-        ProviderSetupStep::SelectProvider => "↑/↓: navigate | Enter: select | Esc: back",
-        ProviderSetupStep::BaseUrl => {
+        ProviderSetupStep::SelectProvider => {
+            build_footer(&[("↑/↓", "navigate"), ("Enter", "select"), ("Esc", "back")])
+        }
+        ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
             if state.settings.provider_setup_provider == ProviderId::Custom {
-                "Enter: save | Esc: back"
+                build_footer(&[("Enter", "save"), ("Esc", "back")])
             } else {
-                "Enter: next | Esc: back"
+                build_footer(&[("Enter", "next"), ("Esc", "back")])
             }
         }
-        ProviderSetupStep::Endpoint => {
-            if state.settings.provider_setup_provider == ProviderId::Custom {
-                "Enter: save | Esc: back"
-            } else {
-                "Enter: next | Esc: back"
-            }
-        }
-        ProviderSetupStep::ApiKey => "Enter: save | Esc: back",
+        ProviderSetupStep::ApiKey => build_footer(&[("Enter", "save"), ("Esc", "back")]),
         ProviderSetupStep::Model => {
             if state.settings.model_picker.loading {
-                "Esc: back"
+                build_footer(&[("Esc", "back")])
             } else if state.settings.model_picker.error.is_some() {
-                "Enter: manual | r: retry | Esc: back"
+                build_footer(&[("Enter", "manual"), ("r", "retry"), ("Esc", "back")])
             } else if state.settings.model_picker.manual {
-                "Enter: save | Esc: back"
+                build_footer(&[("Enter", "save"), ("Esc", "back")])
             } else if state.settings.model_picker.models.is_empty() {
-                "Enter: enter manually | Esc: back"
+                build_footer(&[("Enter", "enter manually"), ("Esc", "back")])
             } else {
-                "↑/↓: navigate | Enter: select | Esc: back"
+                build_footer(&[("↑/↓", "navigate"), ("Enter", "select"), ("Esc", "back")])
             }
         }
     }
-    .to_string()
 }
 
 pub fn spawn_provider_model_load(state: &mut AppState) {

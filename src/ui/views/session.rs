@@ -23,7 +23,7 @@ use crate::ui::views::curriculum;
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
 };
-use crate::ui::widgets::Card;
+use crate::ui::widgets::{Card, build_footer};
 
 #[derive(Debug, Clone, Default)]
 pub enum Mode {
@@ -91,7 +91,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(format!("Esc: {}", labels.cancel))
+            Paragraph::new(build_footer(&[("Esc", labels.cancel)]))
                 .style(Style::default().fg(Color::DarkGray)),
             loading_chunks[1],
         );
@@ -131,10 +131,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             frame.render_stateful_widget(list, chunks[1], &mut state.session.list_state);
 
             frame.render_widget(
-                Paragraph::new(format!(
-                    "↑↓: {} | Enter: {} | Esc: {}",
-                    labels.navigate, labels.start_session, labels.back
-                ))
+                Paragraph::new(build_footer(&[
+                    ("↑↓", labels.navigate),
+                    ("Enter", labels.start_session),
+                    ("Esc", labels.back),
+                ]))
                 .style(Style::default().fg(Color::DarkGray)),
                 chunks[2],
             );
@@ -169,8 +170,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             frame.render_widget(Paragraph::new(input_text), input_inner);
 
             frame.render_widget(
-                Paragraph::new(format!("Enter: {} | Esc: {}", labels.submit, labels.back))
-                    .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new(build_footer(&[
+                    ("Enter", labels.submit),
+                    ("Esc", labels.back),
+                ]))
+                .style(Style::default().fg(Color::DarkGray)),
                 chunks[2],
             );
         }
