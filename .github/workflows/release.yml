@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,7 +45,7 @@ jobs:
         uses: swatinem/rust-cache@v2
 
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@v3.0.0
         with:
           version: "25.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: open-course-cli-${{ env.RELEASE_VERSION }}-${{ matrix.target }}
           path: dist/open-course-cli-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
@@ -99,13 +99,13 @@ jobs:
 
       - name: Checkout release files
         if: startsWith(steps.meta.outputs.version, 'v')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.meta.outputs.version }}
 
       - name: Download artifacts
         if: startsWith(steps.meta.outputs.version, 'v')
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: open-course-cli-${{ steps.meta.outputs.version }}-*
