@@ -41,12 +41,10 @@ pub fn build_exercise_prompt(
         .map(|c| format!("Proficiency level (self-assessed): {c}"))
         .unwrap_or_default();
 
-    let age_hint = profile
-        .age
-        .map(|age| format!(
-            "Student age: {age}. Use age-appropriate contexts. Avoid school, kindergarten, or other child-specific scenarios unless the age makes them clearly relevant."
-        ))
-        .unwrap_or_default();
+    let age = profile.age.unwrap_or(18);
+    let age_hint = format!(
+        "Student age: {age}. Use contexts and examples that fit the life experience of a typical {age}-year-old."
+    );
 
     let recent_rate_pct = (recent_success_rate * 100.0).round() as i32;
     let adaptive_hint = format!(
