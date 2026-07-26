@@ -5,7 +5,7 @@ mod steps;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 use std::sync::Arc;
 
 use crate::app::{AppState, LlmResult, View};
@@ -100,11 +100,16 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         ])
         .split(area);
 
-    // Header: logo + subtitle + global hint.
+    // Header: logo + subtitle + global hint. The padding keeps the logo off
+    // the terminal edge and gives it the same margins as on the dashboard.
+    let header_block = Block::default().padding(Padding::new(1, 1, 1, 0));
+    let header_inner = header_block.inner(chunks[0]);
+    frame.render_widget(header_block, chunks[0]);
+
     let header_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Length(2)])
-        .split(chunks[0]);
+        .constraints([Constraint::Length(1), Constraint::Length(2)])
+        .split(header_inner);
 
     frame.render_widget(
         Logo::new(ratatui::layout::Alignment::Left),
@@ -172,9 +177,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     } else {
         match step {
             Step::Provider | Step::Cefr | Step::BatchSize => {
-                let help_text = steps::step_help_text(step, state);
+                let text = steps::step_selector_text(step, state);
                 frame.render_widget(
-                    Paragraph::new(help_text).style(Style::default().fg(Color::White)),
+                    Paragraph::new(text).style(Style::default().fg(Color::White)),
                     card_inner,
                 );
             }

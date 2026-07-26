@@ -168,7 +168,7 @@ fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
             if is_saved {
                 lines.push(Line::from(Span::styled(
                     content,
-                    Style::default().bg(colors::BLUE).fg(Color::White),
+                    Style::default().bg(colors::GREEN).fg(Color::Black),
                 )));
             } else if is_cursor {
                 lines.push(Line::from(Span::styled(
@@ -308,7 +308,7 @@ fn draw_section_picker(
 
     let list = List::new(items).highlight_symbol("> ").highlight_style(
         Style::default()
-            .fg(colors::BLUE)
+            .fg(colors::GREEN)
             .add_modifier(Modifier::BOLD),
     );
 

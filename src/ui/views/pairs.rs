@@ -23,7 +23,7 @@ impl PairsState {
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
-    let accent = colors::BLUE;
+    let accent = colors::GREEN;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

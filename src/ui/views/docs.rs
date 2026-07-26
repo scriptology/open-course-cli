@@ -266,7 +266,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 .collect();
             let list = List::new(items).highlight_symbol("> ").highlight_style(
                 Style::default()
-                    .fg(colors::BLUE)
+                    .fg(colors::GREEN)
                     .add_modifier(Modifier::BOLD),
             );
             frame.render_stateful_widget(list, chunks[1], &mut state.docs.list_state);

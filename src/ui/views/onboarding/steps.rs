@@ -1,7 +1,11 @@
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+
 use crate::app::AppState;
 use crate::config::provider::ProviderId;
 use crate::db::curriculum::CEFR_LEVELS;
 use crate::llm::provider::ProviderMeta;
+use crate::ui::colors;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -69,7 +73,6 @@ pub(super) fn is_text_step(step: Step) -> bool {
 
 pub(super) fn step_help_text(step: Step, state: &AppState) -> String {
     match step {
-        Step::Provider => provider_help(state),
         Step::ApiKey => api_key_help(state),
         Step::BaseUrl => base_url_help(state),
         Step::NativeLanguage => {
@@ -79,23 +82,65 @@ pub(super) fn step_help_text(step: Step, state: &AppState) -> String {
             "Enter the language you want to learn (ISO 639-1, e.g. es, de)".to_string()
         }
         Step::Age => "Enter your age (optional, used to pick age-appropriate contexts)".to_string(),
-        Step::Cefr => cefr_help(state),
-        Step::BatchSize => batch_size_help(state),
-        Step::Model => String::new(),
+        _ => String::new(),
     }
 }
 
-fn provider_help(state: &AppState) -> String {
-    let mut text = String::from("Available providers:\n");
-    for p in ProviderId::all() {
-        let marker = if *p == state.onboarding.provider {
-            "> "
+/// Options list for selector steps (provider, CEFR, batch size) with the
+/// currently selected option highlighted in the design-system green.
+pub(super) fn step_selector_text(step: Step, state: &AppState) -> Text<'static> {
+    let intro = match step {
+        Step::Provider => "Available providers:",
+        Step::Cefr => "Select your CEFR level (required). Pick the level that best matches your current ability (self-assessment):",
+        Step::BatchSize => {
+            "Select batch size — number of exercises per session (required):"
+        }
+        _ => "",
+    };
+    let options: Vec<(String, bool)> = match step {
+        Step::Provider => ProviderId::all()
+            .iter()
+            .map(|p| {
+                (
+                    format!("{} - {}", p.as_str(), p.label()),
+                    *p == state.onboarding.provider,
+                )
+            })
+            .collect(),
+        Step::Cefr => CEFR_LEVELS
+            .iter()
+            .map(|level| {
+                (
+                    (*level).to_string(),
+                    *level == state.onboarding.cefr,
+                )
+            })
+            .collect(),
+        Step::BatchSize => BATCH_SIZES
+            .iter()
+            .map(|size| {
+                (
+                    (*size).to_string(),
+                    *size == state.onboarding.batch_size.to_string().as_str(),
+                )
+            })
+            .collect(),
+        _ => vec![],
+    };
+
+    let mut lines = vec![Line::from(intro.to_string())];
+    for (label, selected) in options {
+        let marker = if selected { "> " } else { "  " };
+        let style = if selected {
+            Style::default()
+                .fg(colors::GREEN)
+                .add_modifier(Modifier::BOLD)
         } else {
-            "  "
+            Style::default().fg(Color::White)
         };
-        text.push_str(&format!("{}{} - {}\n", marker, p.as_str(), p.label()));
+        lines.push(Line::from(Span::styled(format!("{marker}{label}"), style)));
     }
-    text
+    Text::from(lines)
 }
 
 fn api_key_help(state: &AppState) -> String {
@@ -135,33 +180,4 @@ fn base_url_help(state: &AppState) -> String {
             state.onboarding.provider.label()
         )
     }
-}
-
-fn cefr_help(state: &AppState) -> String {
-    let mut text = String::from(
-        "Select your CEFR level (required). Pick the level that best matches your current ability (self-assessment):\n",
-    );
-    for level in CEFR_LEVELS {
-        let marker = if *level == state.onboarding.cefr {
-            "> "
-        } else {
-            "  "
-        };
-        text.push_str(&format!("{}{}\n", marker, level));
-    }
-    text
-}
-
-fn batch_size_help(state: &AppState) -> String {
-    let mut text =
-        String::from("Select batch size — number of exercises per session (required):\n");
-    for size in BATCH_SIZES {
-        let marker = if *size == state.onboarding.batch_size.to_string().as_str() {
-            "> "
-        } else {
-            "  "
-        };
-        text.push_str(&format!("{}{}\n", marker, size));
-    }
-    text
 }
