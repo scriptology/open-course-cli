@@ -58,24 +58,28 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let items: Vec<ListItem> = pairs
         .iter()
         .map(|pair| {
-            let is_active = pair.id == active_id;
             let label = format!(
                 "{} → {}",
                 pair.profile.native_language, pair.profile.target_language
             );
-            let style = if is_active {
-                Style::default().fg(accent).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            if is_active {
-                let suffix = format!(" [{}]", labels.current);
+            if pair.id == active_id {
+                // The active pair is marked with a localized gray tag instead
+                // of a color, so it is not confused with the cursor row.
+                let suffix = format!("[{}]", labels.current);
                 let padding =
                     list_width.saturating_sub(label.chars().count() + suffix.chars().count());
-                let line = format!("{}{}{}", label, " ".repeat(padding), suffix);
-                ListItem::new(Line::from(Span::styled(line, style)))
+                ListItem::new(Line::from(vec![
+                    Span::styled(
+                        format!("{}{}", label, " ".repeat(padding)),
+                        Style::default().fg(Color::White),
+                    ),
+                    Span::styled(suffix, Style::default().fg(Color::DarkGray)),
+                ]))
             } else {
-                ListItem::new(Line::from(Span::styled(label, style)))
+                ListItem::new(Line::from(Span::styled(
+                    label,
+                    Style::default().fg(Color::White),
+                )))
             }
         })
         .collect();

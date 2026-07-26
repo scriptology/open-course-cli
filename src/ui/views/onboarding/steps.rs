@@ -91,10 +91,10 @@ pub(super) fn step_help_text(step: Step, state: &AppState) -> String {
 pub(super) fn step_selector_text(step: Step, state: &AppState) -> Text<'static> {
     let intro = match step {
         Step::Provider => "Available providers:",
-        Step::Cefr => "Select your CEFR level (required). Pick the level that best matches your current ability (self-assessment):",
-        Step::BatchSize => {
-            "Select batch size — number of exercises per session (required):"
+        Step::Cefr => {
+            "Select your CEFR level (required). Pick the level that best matches your current ability (self-assessment):"
         }
+        Step::BatchSize => "Select batch size — number of exercises per session (required):",
         _ => "",
     };
     let options: Vec<(String, bool)> = match step {
@@ -109,12 +109,7 @@ pub(super) fn step_selector_text(step: Step, state: &AppState) -> Text<'static> 
             .collect(),
         Step::Cefr => CEFR_LEVELS
             .iter()
-            .map(|level| {
-                (
-                    (*level).to_string(),
-                    *level == state.onboarding.cefr,
-                )
-            })
+            .map(|level| ((*level).to_string(), *level == state.onboarding.cefr))
             .collect(),
         Step::BatchSize => BATCH_SIZES
             .iter()
