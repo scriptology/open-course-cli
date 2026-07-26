@@ -23,7 +23,7 @@ impl PairsState {
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
-    let accent = colors::BLUE;
+    let accent = colors::GREEN;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -54,28 +54,28 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .map(|c| c.active_pair.as_str())
         .unwrap_or("");
 
-    let list_width = chunks[1].width as usize;
     let items: Vec<ListItem> = pairs
         .iter()
         .map(|pair| {
-            let is_active = pair.id == active_id;
             let label = format!(
                 "{} → {}",
                 pair.profile.native_language, pair.profile.target_language
             );
-            let style = if is_active {
-                Style::default().fg(accent).add_modifier(Modifier::BOLD)
+            if pair.id == active_id {
+                // The active pair is marked with a localized gray tag right
+                // after the label, so it is not confused with the cursor row.
+                ListItem::new(Line::from(vec![
+                    Span::styled(label, Style::default().fg(Color::White)),
+                    Span::styled(
+                        format!(" [{}]", labels.current),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
             } else {
-                Style::default().fg(Color::White)
-            };
-            if is_active {
-                let suffix = format!(" [{}]", labels.current);
-                let padding =
-                    list_width.saturating_sub(label.chars().count() + suffix.chars().count());
-                let line = format!("{}{}{}", label, " ".repeat(padding), suffix);
-                ListItem::new(Line::from(Span::styled(line, style)))
-            } else {
-                ListItem::new(Line::from(Span::styled(label, style)))
+                ListItem::new(Line::from(Span::styled(
+                    label,
+                    Style::default().fg(Color::White),
+                )))
             }
         })
         .collect();
