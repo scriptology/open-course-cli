@@ -4495,6 +4495,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossterm",
+ "dirs",
  "futures-util",
  "lancedb",
  "ratatui",

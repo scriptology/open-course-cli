@@ -140,3 +140,78 @@ fn opencode_to_custom_migration() {
     let provider = read.providers.get(&ProviderId::Custom).unwrap();
     assert_eq!(provider.model(), "claude-sonnet");
 }
+
+#[test]
+fn resolve_data_dir_prefers_global_home() {
+    let cwd = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    // Local config exists, global does not: local data is migrated to global.
+    let local_dir = cwd.path().join(".open-course-cli");
+    fs::create_dir_all(&local_dir).unwrap();
+    fs::write(local_dir.join("config.json"), "{}").unwrap();
+    fs::write(local_dir.join("marker.txt"), "data").unwrap();
+
+    let resolved = config::resolve_data_dir_with_home(cwd.path(), Some(home.path()));
+    assert_eq!(resolved, home.path());
+
+    let global_dir = home.path().join(".open-course-cli");
+    assert!(global_dir.join("config.json").exists());
+    assert!(global_dir.join("marker.txt").exists());
+    assert!(!local_dir.exists());
+}
+
+#[test]
+fn resolve_data_dir_keeps_global_when_it_already_has_config() {
+    let cwd = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let local_dir = cwd.path().join(".open-course-cli");
+    fs::create_dir_all(&local_dir).unwrap();
+    fs::write(local_dir.join("config.json"), "{\"local\":true}").unwrap();
+    let global_dir = home.path().join(".open-course-cli");
+    fs::create_dir_all(&global_dir).unwrap();
+    fs::write(global_dir.join("config.json"), "{\"global\":true}").unwrap();
+
+    let resolved = config::resolve_data_dir_with_home(cwd.path(), Some(home.path()));
+    assert_eq!(resolved, home.path());
+    // Global config is untouched, local stays in place.
+    assert_eq!(
+        fs::read_to_string(global_dir.join("config.json")).unwrap(),
+        "{\"global\":true}"
+    );
+    assert!(local_dir.join("config.json").exists());
+}
+
+#[test]
+fn resolve_data_dir_returns_home_for_fresh_install() {
+    let cwd = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    let resolved = config::resolve_data_dir_with_home(cwd.path(), Some(home.path()));
+    assert_eq!(resolved, home.path());
+}
+
+#[test]
+fn resolve_data_dir_falls_back_to_cwd_without_home() {
+    let cwd = TempDir::new().unwrap();
+    let resolved = config::resolve_data_dir_with_home(cwd.path(), None);
+    assert_eq!(resolved, cwd.path());
+}
+
+#[test]
+fn resolve_data_dir_merges_into_existing_global_without_config() {
+    let cwd = TempDir::new().unwrap();
+    let home = TempDir::new().unwrap();
+    // Global dir exists (e.g. fallback db) but has no config yet.
+    let global_dir = home.path().join(".open-course-cli");
+    fs::create_dir_all(global_dir.join("db")).unwrap();
+    // Local dir has a config plus an entry that conflicts with global.
+    let local_dir = cwd.path().join(".open-course-cli");
+    fs::create_dir_all(local_dir.join("db")).unwrap();
+    fs::write(local_dir.join("config.json"), "{}").unwrap();
+
+    let resolved = config::resolve_data_dir_with_home(cwd.path(), Some(home.path()));
+    assert_eq!(resolved, home.path());
+    assert!(global_dir.join("config.json").exists());
+    // Conflicting entry is not overwritten; local leftovers stay in place.
+    assert!(local_dir.join("db").exists());
+    assert!(!local_dir.join("config.json").exists());
+}

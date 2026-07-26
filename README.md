@@ -36,7 +36,7 @@ cargo install open-course-cli
 cargo run
 ```
 
-Data is stored in `.open-course-cli/` under the current directory. Use `--data-dir` to change the location:
+Data is stored globally in `~/.open-course-cli/`, so you can launch the app from any directory and always see the same data. On first run after upgrading, an existing local `.open-course-cli/` in the current directory is migrated to the global location automatically. Use `--data-dir` (or `--cwd`) to override the location:
 
 ```bash
 cargo run -- --data-dir /path/to/project

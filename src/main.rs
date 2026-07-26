@@ -23,8 +23,10 @@ use open_course_cli::llm::pipeline::log_debug_event;
     about = "AI language learning terminal"
 )]
 struct Cli {
-    #[arg(long, default_value = ".")]
-    cwd: PathBuf,
+    /// Use this directory's `.open-course-cli` for data instead of the global
+    /// `~/.open-course-cli`.
+    #[arg(long)]
+    cwd: Option<PathBuf>,
     #[arg(long = "data-dir")]
     data_dir: Option<PathBuf>,
 }
@@ -32,8 +34,14 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let cwd = cli.cwd.canonicalize()?;
-    let data_dir = cli.data_dir.unwrap_or_else(|| cwd.clone());
+    let data_dir = match (cli.data_dir, cli.cwd) {
+        (Some(dir), _) => dir,
+        (None, Some(cwd)) => cwd.canonicalize()?,
+        (None, None) => {
+            let cwd = std::env::current_dir()?.canonicalize()?;
+            config::resolve_data_dir(&cwd)
+        }
+    };
 
     let config = config::read_config(&data_dir)?;
 
