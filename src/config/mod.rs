@@ -144,6 +144,67 @@ pub fn open_course_dir(cwd: &std::path::Path) -> std::path::PathBuf {
     cwd.join(".open-course-cli")
 }
 
+/// Default data directory: `~/.open-course-cli`, so the same data is used no
+/// matter where the binary is launched from.
+///
+/// If the global directory has no config yet but the current directory has a
+/// local `.open-course-cli/config.json` (pre-global-layout install), the local
+/// directory is moved to the global location. Falls back to the current
+/// directory when the home directory cannot be determined.
+pub fn resolve_data_dir(cwd: &std::path::Path) -> std::path::PathBuf {
+    resolve_data_dir_with_home(cwd, dirs::home_dir().as_deref())
+}
+
+pub fn resolve_data_dir_with_home(
+    cwd: &std::path::Path,
+    home: Option<&std::path::Path>,
+) -> std::path::PathBuf {
+    let Some(home) = home else {
+        return cwd.to_path_buf();
+    };
+    if cwd == home {
+        return home.to_path_buf();
+    }
+    let global = open_course_dir(home);
+    if !has_config(home) && has_config(cwd) {
+        migrate_local_data(&open_course_dir(cwd), &global);
+    }
+    home.to_path_buf()
+}
+
+/// Move entries from a legacy local data dir into the global one. Never
+/// overwrites existing global entries; removes the local dir if it ends up
+/// empty.
+fn migrate_local_data(local: &std::path::Path, global: &std::path::Path) {
+    if std::fs::create_dir_all(global).is_err() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(local) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let target = global.join(entry.file_name());
+        if target.exists() {
+            continue;
+        }
+        let _ = std::fs::rename(entry.path(), &target);
+    }
+    if std::fs::read_dir(local).is_ok_and(|mut e| e.next().is_none()) {
+        let _ = std::fs::remove_dir(local);
+        eprintln!(
+            "Migrated data from {} to {}",
+            local.display(),
+            global.display()
+        );
+    } else {
+        eprintln!(
+            "Partially migrated data from {} to {}; some entries were left behind",
+            local.display(),
+            global.display()
+        );
+    }
+}
+
 pub fn pair_db_path(cwd: &std::path::Path, pair_id: &str) -> std::path::PathBuf {
     open_course_dir(cwd).join("pairs").join(pair_id).join("db")
 }

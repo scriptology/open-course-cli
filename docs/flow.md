@@ -63,7 +63,7 @@ The **Activity** block is a GitHub-style calendar of the current month: quiet da
 
 Switch between language pairs or add a new one.
 
-- Each pair has its own isolated database folder: `.open-course-cli/pairs/{native-target}/db`.
+- Each pair has its own isolated database folder: `~/.open-course-cli/pairs/{native-target}/db`.
 - Progress, session history, curriculum, and reviews are stored per pair.
 - Provider settings and preferences are shared across all pairs.
 
