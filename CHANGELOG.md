@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.2](https://github.com/scriptology/open-course-cli/compare/v0.5.1...v0.5.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* include age-appropriate context hint in exercise generation prompt ([95c2efc](https://github.com/scriptology/open-course-cli/commit/95c2efc783c70016c192251a49a21fab527816ae))
+
+
+### Documentation
+
+* **readme:** use secure curl flags for installer command ([fae0736](https://github.com/scriptology/open-course-cli/commit/fae0736581788f079856406ba7a5a5dd8ebec83c))
+
 ## [0.5.1](https://github.com/scriptology/open-course-cli/compare/v0.5.0...v0.5.1) (2026-07-19)
 
 
