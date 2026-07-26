@@ -54,7 +54,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .map(|c| c.active_pair.as_str())
         .unwrap_or("");
 
-    let list_width = chunks[1].width as usize;
     let items: Vec<ListItem> = pairs
         .iter()
         .map(|pair| {
@@ -63,17 +62,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 pair.profile.native_language, pair.profile.target_language
             );
             if pair.id == active_id {
-                // The active pair is marked with a localized gray tag instead
-                // of a color, so it is not confused with the cursor row.
-                let suffix = format!("[{}]", labels.current);
-                let padding =
-                    list_width.saturating_sub(label.chars().count() + suffix.chars().count());
+                // The active pair is marked with a localized gray tag right
+                // after the label, so it is not confused with the cursor row.
                 ListItem::new(Line::from(vec![
+                    Span::styled(label, Style::default().fg(Color::White)),
                     Span::styled(
-                        format!("{}{}", label, " ".repeat(padding)),
-                        Style::default().fg(Color::White),
+                        format!(" [{}]", labels.current),
+                        Style::default().fg(Color::DarkGray),
                     ),
-                    Span::styled(suffix, Style::default().fg(Color::DarkGray)),
                 ]))
             } else {
                 ListItem::new(Line::from(Span::styled(
