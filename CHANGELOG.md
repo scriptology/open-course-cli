@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2](https://github.com/scriptology/open-course-cli/compare/v0.5.1...v0.5.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* store data globally in ~/.open-course-cli ([833d0fa](https://github.com/scriptology/open-course-cli/commit/833d0faa1538e18d0da674a1be2faf6fc918724c))
+* store data globally in ~/.open-course-cli ([9904d4d](https://github.com/scriptology/open-course-cli/commit/9904d4decc1c9fd78ce70ec5c2febb154fda6266))
+
 ## [0.5.1](https://github.com/scriptology/open-course-cli/compare/v0.5.0...v0.5.1) (2026-07-19)
 
 
