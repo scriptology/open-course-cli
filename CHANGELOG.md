@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.3](https://github.com/scriptology/open-course-cli/compare/v0.5.2...v0.5.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* store data globally in ~/.open-course-cli ([833d0fa](https://github.com/scriptology/open-course-cli/commit/833d0faa1538e18d0da674a1be2faf6fc918724c))
+* store data globally in ~/.open-course-cli ([9904d4d](https://github.com/scriptology/open-course-cli/commit/9904d4decc1c9fd78ce70ec5c2febb154fda6266))
+* **ui:** green selected options in selectors, onboarding logo margins ([44f7b6a](https://github.com/scriptology/open-course-cli/commit/44f7b6abb57d6d9fa1afcda6436bdd483abff2b5))
+* **ui:** green selected options in selectors, onboarding logo margins ([2cc24c4](https://github.com/scriptology/open-course-cli/commit/2cc24c40fdf8d0cc4cdb71cad3597a9ad1351b52))
+* **ui:** mark active pair with a gray localized tag ([c9090fb](https://github.com/scriptology/open-course-cli/commit/c9090fb24ac1156133ceca50a83b6bded8cfc4dd))
+* **ui:** place active pair tag right after the label ([cddea47](https://github.com/scriptology/open-course-cli/commit/cddea47de96b4d3febfee90f387244d89b59ba1b))
+
 ## [0.5.2](https://github.com/scriptology/open-course-cli/compare/v0.5.1...v0.5.2) (2026-07-26)
 
 
