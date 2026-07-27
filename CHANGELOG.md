@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/scriptology/open-course-cli/compare/v0.5.3...v0.6.0) (2026-07-27)
+
+
+### Features
+
+* **update:** rename binary to opencourse, add update command and reliable update checks ([d6eaecb](https://github.com/scriptology/open-course-cli/commit/d6eaecb318d5761f2c913082496d164d05848aaa))
+* **update:** rename binary to opencourse, add update command and reliable update checks ([27b168d](https://github.com/scriptology/open-course-cli/commit/27b168d0398c983b306c494c334d6c1f7c7d38de))
+
+
+### Bug Fixes
+
+* **ui:** show update notice under the version instead of a u-key prompt ([14df081](https://github.com/scriptology/open-course-cli/commit/14df081c4e70f340d5a0ee8eed1c2160f67ce65a))
+
 ## [0.5.3](https://github.com/scriptology/open-course-cli/compare/v0.5.2...v0.5.3) (2026-07-26)
 
 
