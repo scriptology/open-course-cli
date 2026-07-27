@@ -73,12 +73,12 @@ jobs:
         shell: bash
         run: |
           VERSION="${{ env.RELEASE_VERSION }}"
-          BINARY="target/${{ matrix.target }}/release/open-course-cli"
+          BINARY="target/${{ matrix.target }}/release/opencourse"
           mkdir -p dist
           if [ -f "$BINARY" ]; then
             cp "$BINARY" dist/
             cd dist
-            tar -czf "open-course-cli-${VERSION}-${{ matrix.target }}.tar.gz" open-course-cli
+            tar -czf "opencourse-${VERSION}-${{ matrix.target }}.tar.gz" opencourse
           else
             echo "Binary not found at $BINARY"
             exit 1
@@ -87,8 +87,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: open-course-cli-${{ env.RELEASE_VERSION }}-${{ matrix.target }}
-          path: dist/open-course-cli-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
+          name: opencourse-${{ env.RELEASE_VERSION }}-${{ matrix.target }}
+          path: dist/opencourse-${{ env.RELEASE_VERSION }}-${{ matrix.target }}.tar.gz
 
   release:
     name: Create GitHub Release
@@ -113,12 +113,16 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: dist
-          pattern: open-course-cli-${{ steps.meta.outputs.version }}-*
+          pattern: opencourse-${{ steps.meta.outputs.version }}-*
           merge-multiple: true
 
       - name: Copy installer script
         if: startsWith(steps.meta.outputs.version, 'v')
-        run: cp installer.sh dist/open-course-cli-installer.sh
+        run: |
+          cp installer.sh dist/opencourse-installer.sh
+          # Keep the legacy asset name: opencourse <= 0.5.3 self-updates by
+          # downloading `open-course-cli-installer.sh` from the latest release.
+          cp installer.sh dist/open-course-cli-installer.sh
 
       - name: Create Release
         if: startsWith(steps.meta.outputs.version, 'v')
@@ -128,6 +132,7 @@ jobs:
           name: ${{ steps.meta.outputs.version }}
           files: |
             dist/*.tar.gz
+            dist/opencourse-installer.sh
             dist/open-course-cli-installer.sh
           generate_release_notes: true
           draft: false

@@ -259,8 +259,7 @@ fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels
             .constraints([Constraint::Min(0), Constraint::Length(10)])
             .split(rows[0]);
         Logo::new(Alignment::Center).render(logo_row[0], buf);
-        Paragraph::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-            .style(Style::default().fg(Color::DarkGray))
+        Paragraph::new(version_line(state))
             .alignment(Alignment::Right)
             .render(logo_row[1], buf);
 
@@ -289,12 +288,27 @@ fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels
             .constraints([Constraint::Length(22), Constraint::Min(0)])
             .split(chunks[0]);
         Logo::new(Alignment::Left).render(left_chunks[0], buf);
-        Paragraph::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-            .style(Style::default().fg(Color::DarkGray))
+        Paragraph::new(version_line(state))
             .alignment(Alignment::Left)
             .render(left_chunks[1], buf);
         profile_info(state, labels).render(chunks[1], buf);
     }
+}
+
+fn version_line(state: &AppState) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        format!("v{}", env!("CARGO_PKG_VERSION")),
+        Style::default().fg(Color::DarkGray),
+    )];
+    if let Some(latest) = state.update.latest_version.as_deref() {
+        spans.push(Span::styled(
+            format!("  ↑ v{latest}"),
+            Style::default()
+                .fg(colors::GREEN)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    Line::from(spans)
 }
 
 fn profile_info_lines(state: &AppState, labels: ReportLabels) -> Vec<Line<'static>> {
@@ -667,6 +681,9 @@ fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
         ("q", labels.quit),
         ("?", "help"),
     ];
+    if state.update.latest_version.is_some() {
+        hints.insert(0, ("u", labels.update_label));
+    }
     if state.dashboard.weak_visible_len() > 0 {
         hints.insert(0, ("Enter", labels.start_label));
         hints.insert(0, ("↑↓", labels.select_topic));
@@ -695,6 +712,9 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Char('c') => state.view = View::Curriculum,
         KeyCode::Char('p') => state.view = View::Pairs,
         KeyCode::Char('s') => state.view = View::Settings,
+        KeyCode::Char('u') if state.update.latest_version.is_some() => {
+            state.view = View::UpdateAvailable;
+        }
         KeyCode::Down | KeyCode::Char('j') => state.dashboard.move_weak_selection(1),
         KeyCode::Up | KeyCode::Char('k') => state.dashboard.move_weak_selection(-1),
         KeyCode::Enter => {

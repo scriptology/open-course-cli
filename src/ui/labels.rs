@@ -75,6 +75,7 @@ pub struct ReportLabels {
     pub new_topic_session_label: &'static str,
     pub topic_label: &'static str,
     pub invalid_value: &'static str,
+    pub update_label: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -163,6 +164,7 @@ const EN_REPORT: ReportLabels = ReportLabels {
     new_topic_session_label: "New topic",
     topic_label: "Topic",
     invalid_value: "invalid value",
+    update_label: "update",
 };
 
 const RU_REPORT: ReportLabels = ReportLabels {
@@ -239,6 +241,7 @@ const RU_REPORT: ReportLabels = ReportLabels {
     new_topic_session_label: "Новая тема",
     topic_label: "Тема",
     invalid_value: "недопустимое значение",
+    update_label: "обновить",
 };
 
 const EN_DOCS: DocsLabels = DocsLabels {

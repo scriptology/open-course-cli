@@ -28,6 +28,13 @@ pub async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
         log_debug_event(tag, &message, Some(state.data_dir.as_path()));
     }
 
+    // The update check is UI-independent: it must apply even when a previous
+    // background task was cancelled.
+    if let LlmResult::UpdateCheck(latest) = result {
+        handle_update_check(state, latest);
+        return;
+    }
+
     if state.cancelled {
         state.cancelled = false;
         clear_loading(state);
@@ -57,6 +64,8 @@ pub async fn apply_llm_result(state: &mut AppState, result: LlmResult) {
         }
         LlmResult::OnboardingModels(res) => handle_onboarding_models(state, res),
         LlmResult::SimpleText(_) => {}
+        // Handled above, before the cancellation check.
+        LlmResult::UpdateCheck(_) => {}
     }
 }
 
@@ -104,6 +113,10 @@ fn debug_describe(result: &LlmResult) -> Option<(&'static str, String)> {
             "diagnostics",
             "apply_llm_result DiagnosticsDone".to_string(),
         ),
+        LlmResult::UpdateCheck(latest) => (
+            "update",
+            format!("apply_llm_result UpdateCheck: {latest:?}"),
+        ),
         LlmResult::StreamChunk(_) | LlmResult::CurriculumStreamChunk { .. } => return None,
     };
     Some((tag, message))
@@ -113,6 +126,22 @@ fn result_str<T: std::fmt::Debug>(res: &Result<T>) -> String {
     match res {
         Ok(_) => "Ok".to_string(),
         Err(e) => format!("Err({e})"),
+    }
+}
+
+/// Store the latest release version and, when the user is on a top-level
+/// screen, show the update prompt. During a session or on other focused
+/// screens only the dashboard badge is armed.
+fn handle_update_check(state: &mut AppState, latest: Option<String>) {
+    let Some(latest) = latest else {
+        return;
+    };
+    if !crate::update::is_newer(crate::update::CURRENT_VERSION, &latest) {
+        return;
+    }
+    state.update.latest_version = Some(latest);
+    if matches!(state.view, View::Dashboard | View::Onboarding) {
+        state.view = View::UpdateAvailable;
     }
 }
 
