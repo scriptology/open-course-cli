@@ -60,6 +60,7 @@ pub enum LlmResult {
     CurriculumStreamChunk { level: String, status: String },
     DiagnosticUpdate(CheckResult),
     DiagnosticsDone,
+    UpdateCheck(Option<String>),
 }
 
 pub struct AppState {
@@ -140,24 +141,34 @@ pub async fn run_app(
     let (llm_tx, mut llm_rx) = mpsc::channel::<LlmResult>(16);
     let mut state = AppState::new(data_dir, db, config, quit_requested.clone(), llm_tx)?;
 
-    if let Some(latest) = crate::update::latest_release_version().await?
-        && crate::update::is_newer(crate::update::CURRENT_VERSION, &latest)
+    // Check for a newer release in the background so startup never blocks on
+    // the network; the result arrives through the regular event loop.
     {
-        state.view = View::UpdateAvailable;
-        state.update.latest_version = Some(latest);
+        let tx = state.llm_tx.clone();
+        let data_dir = state.data_dir.clone();
+        tokio::spawn(async move {
+            let latest = crate::update::latest_release_version().await.ok().flatten();
+            crate::llm::pipeline::log_debug_event(
+                "update",
+                &format!(
+                    "update check: current {}, latest {latest:?}",
+                    crate::update::CURRENT_VERSION
+                ),
+                Some(&data_dir),
+            );
+            let _ = tx.send(LlmResult::UpdateCheck(latest)).await;
+        });
     }
 
-    if state.view != View::UpdateAvailable {
-        state
-            .dashboard
-            .refresh(&state.db, state.config.as_ref())
-            .await?;
-        if let Err(e) = state.curriculum.load(&state.db).await {
-            state.error = Some(e.to_string());
-        }
-        if state.view == View::Dashboard && state.curriculum.topics.is_empty() {
-            state.view = View::Curriculum;
-        }
+    state
+        .dashboard
+        .refresh(&state.db, state.config.as_ref())
+        .await?;
+    if let Err(e) = state.curriculum.load(&state.db).await {
+        state.error = Some(e.to_string());
+    }
+    if state.view == View::Dashboard && state.curriculum.topics.is_empty() {
+        state.view = View::Curriculum;
     }
 
     let mut events = EventStream::new();
@@ -431,7 +442,7 @@ async fn run_installer_and_exit(state: &mut AppState) -> Result<()> {
     execute!(stdout(), LeaveAlternateScreen)?;
     stdout().flush()?;
 
-    println!("Installing open-course-cli {latest}...");
+    println!("Installing opencourse {latest}...");
 
     let status = std::process::Command::new("sh")
         .arg("-c")
@@ -449,7 +460,8 @@ async fn run_installer_and_exit(state: &mut AppState) -> Result<()> {
 }
 
 async fn continue_to_app(state: &mut AppState) -> Result<()> {
-    state.update.latest_version = None;
+    // Keep `latest_version` so the dashboard can keep showing the update badge
+    // after the user skips the prompt.
     if state.config.is_some() {
         state.view = View::Dashboard;
         state

@@ -3,6 +3,10 @@ name = "open-course-cli"
 version = "0.5.3"
 edition = "2024"
 
+[[bin]]
+name = "opencourse"
+path = "src/main.rs"
+
 [dependencies]
 # TUI
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }

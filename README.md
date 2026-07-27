@@ -7,14 +7,12 @@ Terminal AI tutor for language learning. Exercises, lessons, and answer analysis
 The fastest way to get the latest release:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/scriptology/open-course-cli/releases/latest/download/open-course-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/scriptology/open-course-cli/releases/latest/download/opencourse-installer.sh | sh
 ```
 
-The installer detects macOS (Apple Silicon / Intel) and Linux x86_64, then downloads the matching binary into `~/.local/bin` (or `/usr/local/bin` if writable). It also creates a symlink `opencourse`, so both commands work:
+The installer detects macOS (Apple Silicon / Intel) and Linux x86_64, then downloads the matching binary into `~/.local/bin` (or `/usr/local/bin` if writable):
 
 ```bash
-open-course-cli
-# or
 opencourse
 ```
 
@@ -24,7 +22,7 @@ Add the directory to your PATH if needed:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-You can also install with `cargo` if you already have the Rust toolchain:
+You can also install with `cargo` if you already have the Rust toolchain (the installed binary is called `opencourse`):
 
 ```bash
 cargo install open-course-cli
@@ -101,7 +99,15 @@ Onboarding fetches the list of available models automatically. For local Ollama 
 
 ## Updating
 
-On startup the app checks the latest GitHub release and, if a newer version is available, shows a prompt with the current and latest version (`y` installs by re-running the installer script, `n` skips and continues to the dashboard). The check fails silently and skips the prompt if there's no network access. To update manually at any time, re-run the install command from [Install](#install), or `cargo install open-course-cli` if you installed it that way.
+On startup the app checks the latest GitHub release and, if a newer version is available, shows a prompt with the current and latest version (`y` installs by re-running the installer script, `n` skips and continues to the dashboard). After skipping, the dashboard header keeps showing the available version under the current one. The check works offline-first: any network or API error just skips the prompt.
+
+To update manually at any time:
+
+```bash
+opencourse update
+```
+
+or re-run the install command from [Install](#install), or `cargo install open-course-cli` if you installed it that way.
 
 ## Architecture
 

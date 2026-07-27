@@ -38,7 +38,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let latest = state.update.latest_version.as_deref().unwrap_or("unknown");
 
     let message = format!(
-        "A new version of open-course-cli is available.\n\nCurrent: v{}\nLatest: v{}\n\nInstall now?",
+        "A new version of opencourse is available.\n\nCurrent: v{}\nLatest: v{}\n\nInstall now?",
         CURRENT_VERSION, latest
     );
 

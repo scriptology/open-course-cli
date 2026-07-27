@@ -237,6 +237,27 @@ async fn dashboard_header_shows_version() {
 }
 
 #[tokio::test]
+async fn dashboard_header_shows_update_hint() {
+    let mut state = setup_state().await;
+    state.view = View::Dashboard;
+    state.update.latest_version = Some("9.9.9".to_string());
+
+    for (width, height) in [(100, 24), (80, 24), (50, 30)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| dashboard::draw(f, f.area(), &mut state))
+            .unwrap();
+
+        let text = buffer_text(&terminal);
+        assert!(
+            text.contains("v9.9.9") && text.contains("opencourse update"),
+            "Dashboard header should show the update hint at {width}x{height}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn update_available_prompt_renders() {
     use open_course_cli::ui::views::update;
 

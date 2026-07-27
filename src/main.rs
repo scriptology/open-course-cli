@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use ratatui::crossterm::{
     cursor::MoveTo,
     event::DisableMouseCapture,
@@ -15,14 +15,13 @@ use open_course_cli::config;
 use open_course_cli::db::Database;
 use open_course_cli::db::curriculum::cleanup_topics;
 use open_course_cli::llm::pipeline::log_debug_event;
+use open_course_cli::update;
 
 #[derive(Parser)]
-#[command(
-    name = "open-course-cli",
-    version,
-    about = "AI language learning terminal"
-)]
+#[command(name = "opencourse", version, about = "AI language learning terminal")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
     /// Use this directory's `.open-course-cli` for data instead of the global
     /// `~/.open-course-cli`.
     #[arg(long)]
@@ -31,9 +30,20 @@ struct Cli {
     data_dir: Option<PathBuf>,
 }
 
+#[derive(Subcommand)]
+enum Command {
+    /// Check for a newer release and install it.
+    Update,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if let Some(Command::Update) = cli.command {
+        return run_update().await;
+    }
+
     let data_dir = match (cli.data_dir, cli.cwd) {
         (Some(dir), _) => dir,
         (None, Some(cwd)) => cwd.canonicalize()?,
@@ -133,6 +143,40 @@ fn setup_panic_hook() {
         println!();
         original(info);
     }));
+}
+
+/// `opencourse update`: check GitHub for a newer release and install it via
+/// the same installer script the in-app prompt uses.
+async fn run_update() -> anyhow::Result<()> {
+    let latest = update::latest_release_version().await?;
+
+    match latest {
+        Some(latest) if update::is_newer(update::CURRENT_VERSION, &latest) => {
+            println!("Updating v{} → v{latest}...", update::CURRENT_VERSION);
+            let status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(update::install_command())
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("Installer failed with status {status}");
+            }
+            println!("Updated to v{latest}. Run `opencourse` to start the new version.");
+        }
+        Some(latest) => {
+            println!(
+                "Already up to date (v{}, latest release v{latest}).",
+                update::CURRENT_VERSION
+            );
+        }
+        None => {
+            println!(
+                "Could not check for updates (network unavailable?). Current version: v{}.",
+                update::CURRENT_VERSION
+            );
+        }
+    }
+
+    Ok(())
 }
 
 /// One-off startup maintenance: removes fuzzy-duplicate learning items and

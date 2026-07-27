@@ -3,7 +3,8 @@
 set -eu
 
 REPO="scriptology/open-course-cli"
-BIN_NAME="open-course-cli"
+BIN_NAME="opencourse"
+LEGACY_BIN_NAME="open-course-cli"
 
 main() {
     detect_platform
@@ -38,11 +39,11 @@ main() {
 
     if [ -w "$INSTALL_DIR" ]; then
         mv "$TMP_DIR/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
-        ln -sf "$INSTALL_DIR/$BIN_NAME" "$INSTALL_DIR/opencourse"
+        rm -f "$INSTALL_DIR/$LEGACY_BIN_NAME"
     else
         say "Installing to $INSTALL_DIR requires sudo."
         sudo mv "$TMP_DIR/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
-        sudo ln -sf "$INSTALL_DIR/$BIN_NAME" "$INSTALL_DIR/opencourse"
+        sudo rm -f "$INSTALL_DIR/$LEGACY_BIN_NAME"
     fi
 
     rm -rf "$TMP_DIR"
@@ -50,11 +51,11 @@ main() {
     case ":$PATH:" in
         *":$INSTALL_DIR:"*)
             say "Installed $BIN_NAME $RELEASE to $INSTALL_DIR"
-            say "You can run: open-course-cli or opencourse"
+            say "You can run: opencourse"
             ;;
         *)
             say "Installed $BIN_NAME $RELEASE to $INSTALL_DIR"
-            say "You can run: open-course-cli or opencourse"
+            say "You can run: opencourse"
             say "Add it to your PATH:"
             say "  export PATH=\"$INSTALL_DIR:\$PATH\""
             ;;
