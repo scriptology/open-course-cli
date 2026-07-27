@@ -99,7 +99,7 @@ Onboarding fetches the list of available models automatically. For local Ollama 
 
 ## Updating
 
-On startup the app checks the latest GitHub release and, if a newer version is available, shows a prompt with the current and latest version (`y` installs by re-running the installer script, `n` skips and continues to the dashboard). If you skip, the dashboard header keeps showing the available version — press `u` there to reopen the prompt. The check works offline-first: any network or API error just skips the prompt.
+On startup the app checks the latest GitHub release and, if a newer version is available, shows a prompt with the current and latest version (`y` installs by re-running the installer script, `n` skips and continues to the dashboard). After skipping, the dashboard header keeps showing the available version under the current one. The check works offline-first: any network or API error just skips the prompt.
 
 To update manually at any time:
 

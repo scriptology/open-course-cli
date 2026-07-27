@@ -259,9 +259,16 @@ fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels
             .constraints([Constraint::Min(0), Constraint::Length(10)])
             .split(rows[0]);
         Logo::new(Alignment::Center).render(logo_row[0], buf);
-        Paragraph::new(version_line(state))
+        Paragraph::new(version_line())
             .alignment(Alignment::Right)
             .render(logo_row[1], buf);
+
+        // The spare row under the logo doubles as the update notice slot.
+        if let Some(hint) = update_hint_line(state, labels) {
+            Paragraph::new(hint)
+                .alignment(Alignment::Center)
+                .render(rows[1], buf);
+        }
 
         let info_lines = profile_info_lines(state, labels);
         let cols = Layout::default()
@@ -283,32 +290,42 @@ fn draw_top(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels
             .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
             .split(inner);
 
+        let left_col = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(chunks[0]);
         let left_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(22), Constraint::Min(0)])
-            .split(chunks[0]);
+            .split(left_col[0]);
         Logo::new(Alignment::Left).render(left_chunks[0], buf);
-        Paragraph::new(version_line(state))
+        Paragraph::new(version_line())
             .alignment(Alignment::Left)
             .render(left_chunks[1], buf);
+        // The notice spans the whole left column under the logo row.
+        if let Some(hint) = update_hint_line(state, labels) {
+            Paragraph::new(hint)
+                .alignment(Alignment::Left)
+                .render(left_col[1], buf);
+        }
         profile_info(state, labels).render(chunks[1], buf);
     }
 }
 
-fn version_line(state: &AppState) -> Line<'static> {
-    let mut spans = vec![Span::styled(
+fn version_line() -> Line<'static> {
+    Line::from(Span::styled(
         format!("v{}", env!("CARGO_PKG_VERSION")),
         Style::default().fg(Color::DarkGray),
-    )];
-    if let Some(latest) = state.update.latest_version.as_deref() {
-        spans.push(Span::styled(
-            format!("  ↑ v{latest}"),
-            Style::default()
-                .fg(colors::GREEN)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-    Line::from(spans)
+    ))
+}
+
+/// Localized "new version available" notice shown under the current version.
+fn update_hint_line(state: &AppState, labels: ReportLabels) -> Option<Line<'static>> {
+    let latest = state.update.latest_version.as_deref()?;
+    Some(Line::from(Span::styled(
+        labels.update_available_label.replacen("{}", latest, 1),
+        Style::default().fg(colors::YELLOW),
+    )))
 }
 
 fn profile_info_lines(state: &AppState, labels: ReportLabels) -> Vec<Line<'static>> {
@@ -681,9 +698,6 @@ fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
         ("q", labels.quit),
         ("?", "help"),
     ];
-    if state.update.latest_version.is_some() {
-        hints.insert(0, ("u", labels.update_label));
-    }
     if state.dashboard.weak_visible_len() > 0 {
         hints.insert(0, ("Enter", labels.start_label));
         hints.insert(0, ("↑↓", labels.select_topic));
@@ -712,9 +726,6 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         KeyCode::Char('c') => state.view = View::Curriculum,
         KeyCode::Char('p') => state.view = View::Pairs,
         KeyCode::Char('s') => state.view = View::Settings,
-        KeyCode::Char('u') if state.update.latest_version.is_some() => {
-            state.view = View::UpdateAvailable;
-        }
         KeyCode::Down | KeyCode::Char('j') => state.dashboard.move_weak_selection(1),
         KeyCode::Up | KeyCode::Char('k') => state.dashboard.move_weak_selection(-1),
         KeyCode::Enter => {
