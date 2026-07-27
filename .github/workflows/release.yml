@@ -118,11 +118,7 @@ jobs:
 
       - name: Copy installer script
         if: startsWith(steps.meta.outputs.version, 'v')
-        run: |
-          cp installer.sh dist/opencourse-installer.sh
-          # Keep the legacy asset name: opencourse <= 0.5.3 self-updates by
-          # downloading `open-course-cli-installer.sh` from the latest release.
-          cp installer.sh dist/open-course-cli-installer.sh
+        run: cp installer.sh dist/opencourse-installer.sh
 
       - name: Create Release
         if: startsWith(steps.meta.outputs.version, 'v')
@@ -133,7 +129,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/opencourse-installer.sh
-            dist/open-course-cli-installer.sh
           generate_release_notes: true
           draft: false
           prerelease: false
