@@ -6,7 +6,7 @@
 //!
 //! - Topic mastery (session-level): `adaptive_alpha` with alpha in 0.1..=0.45
 //!   depending on current mastery, fed by `topic_exercise_scores`.
-//! - Learning items (item-level): `ema_update` with a fixed alpha of 0.12.
+//! - Learning items (item-level): `ema_update` with a fixed alpha of 0.34.
 //!
 //! - "Acceptable" sentences: per-exercise penalties of 10/5/2/0.5 inside
 //!   `exercise_score_for_sentence`, keeping the score in the 70..=90 band.
@@ -202,11 +202,12 @@ pub(super) fn adaptive_alpha(mastery: f64) -> f64 {
     TOPIC_SCORE_ALPHA_BASE + TOPIC_SCORE_ALPHA_RANGE * normalized.clamp(0.0, 1.0)
 }
 
-/// Learning-item EMA (item-level): fixed alpha of 0.12. Parallel to the
-/// topic-mastery EMA (`adaptive_alpha`), but on an independent scale — do
-/// not unify.
+/// Learning-item EMA (item-level): fixed alpha of 0.34, so a clean session
+/// moves a weak item from 0 to 34 and a second one past the mastery
+/// threshold of 50. Parallel to the topic-mastery EMA (`adaptive_alpha`),
+/// but on an independent scale — do not unify.
 pub(super) fn ema_update(base: f64, session_score: f64) -> f64 {
-    let alpha = 0.12;
+    let alpha = 0.34;
     let raw = base * (1.0 - alpha) + session_score * alpha;
     raw.round().clamp(0.0, 100.0)
 }

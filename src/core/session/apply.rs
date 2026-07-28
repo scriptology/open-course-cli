@@ -215,13 +215,19 @@ pub async fn apply_analysis_to_db(
     let now = Utc::now().to_rfc3339();
     for id in &practiced_item_ids {
         if let Some(item) = learning_items.get_mut(id) {
-            // Items that never occurred in the session keep their score and
-            // practice stats untouched.
-            if let Some(exercise_score) = learning_item_exercise_score(item, analysis, session) {
-                item.score = ema_update(item.score, exercise_score);
-                item.last_practiced = Some(now.clone());
-                item.practice_count += 1;
-            }
+            // Every practiced item gets credit: 0 when a session error is
+            // associated with it, 100 otherwise. Practiced means the item was
+            // forced into the exercise prompt or matched by a reported error,
+            // so no occurrence detection in the session text is needed — the
+            // item name's language often differs from the exercise texts.
+            let session_score = if item_has_error(item, analysis) {
+                0.0
+            } else {
+                100.0
+            };
+            item.score = ema_update(item.score, session_score);
+            item.last_practiced = Some(now.clone());
+            item.practice_count += 1;
         }
     }
 
@@ -270,97 +276,43 @@ fn find_duplicate_topic(known_topics: &[(String, String)], topic: &Topic) -> Opt
     is_duplicate_name(&names, &topic.name).map(|pos| known_topics[pos].0.clone())
 }
 
-/// Scores how the session practiced a learning item: 0 when an error
-/// mentions it, 100 when it occurred without errors, and None when the item
-/// did not occur in the session at all (the caller then leaves its score and
-/// practice stats untouched).
-///
-/// Occurrence is matched on whole normalized significant words of the item
-/// name (falling back to the description, then to the legacy full-name
-/// substring match when neither yields any words) against the exercise
-/// target sentence and the expected/student translations.
-fn learning_item_exercise_score(
-    item: &LearningItem,
-    analysis: &AnalysisResult,
-    session: &MentorSession,
-) -> Option<f64> {
+/// Whether any session error is associated with the learning item: an
+/// error's new topic is a fuzzy name duplicate of the item, or the error's
+/// pattern/explanation mentions a significant word of the item name
+/// (falling back to the description, then to the legacy full-name substring
+/// match when neither yields any words).
+fn item_has_error(item: &LearningItem, analysis: &AnalysisResult) -> bool {
     let mut key_words = significant_words(&item.name);
     if key_words.is_empty() {
         key_words = significant_words(&item.description);
     }
-    if key_words.is_empty() {
-        // No usable words at all: keep the legacy full-name matching.
-        return Some(legacy_item_exercise_score(item, analysis, session));
-    }
 
-    let mut encountered = false;
-    let mut mentioned_in_error = false;
-    for (i, exercise) in session.exercises.iter().enumerate() {
-        let sentence_number = (i + 1) as i32;
-        let sentence = analysis
-            .sentences
-            .iter()
-            .find(|s| s.sentence_number == sentence_number);
-
-        if text_contains_any_word(&exercise.target_sentence, &key_words) {
-            encountered = true;
-        }
-        if let Some(s) = sentence {
-            if text_contains_any_word(&s.expected_translation, &key_words)
-                || text_contains_any_word(&s.student_translation, &key_words)
+    for sentence in &analysis.sentences {
+        for error in &sentence.errors {
+            if key_words.is_empty() {
+                // No usable words at all: legacy full-name matching.
+                let name = item.name.to_lowercase();
+                if error.pattern.to_lowercase().contains(&name)
+                    || error.explanation.to_lowercase().contains(&name)
+                    || error
+                        .new_topics
+                        .iter()
+                        .any(|nt| nt.name.to_lowercase().contains(&name))
+                {
+                    return true;
+                }
+                continue;
+            }
+            if text_contains_any_word(&error.pattern, &key_words)
+                || text_contains_any_word(&error.explanation, &key_words)
+                || error.new_topics.iter().any(|nt| {
+                    text_contains_any_word(&nt.name, &key_words)
+                        || is_duplicate_name(std::slice::from_ref(&item.name), &nt.name).is_some()
+                })
             {
-                encountered = true;
-            }
-            for error in &s.errors {
-                if text_contains_any_word(&error.pattern, &key_words)
-                    || text_contains_any_word(&error.explanation, &key_words)
-                    || error
-                        .new_topics
-                        .iter()
-                        .any(|nt| text_contains_any_word(&nt.name, &key_words))
-                {
-                    mentioned_in_error = true;
-                }
+                return true;
             }
         }
     }
-
-    if !encountered {
-        return None;
-    }
-    Some(if mentioned_in_error { 0.0 } else { 100.0 })
-}
-
-/// Pre-word-matching behaviour: the full lowercased item name must appear
-/// in the error text. Used only when neither the item's name nor its
-/// description yields any significant words.
-fn legacy_item_exercise_score(
-    item: &LearningItem,
-    analysis: &AnalysisResult,
-    session: &MentorSession,
-) -> f64 {
-    let item_name_lower = item.name.to_lowercase();
-    for (i, _exercise) in session.exercises.iter().enumerate() {
-        let sentence_number = (i + 1) as i32;
-        let sentence = analysis
-            .sentences
-            .iter()
-            .find(|s| s.sentence_number == sentence_number);
-        if let Some(s) = sentence {
-            for error in &s.errors {
-                let pattern_lower = error.pattern.to_lowercase();
-                let explanation_lower = error.explanation.to_lowercase();
-                if pattern_lower.contains(&item_name_lower)
-                    || explanation_lower.contains(&item_name_lower)
-                    || error
-                        .new_topics
-                        .iter()
-                        .any(|nt| nt.name.to_lowercase().contains(&item_name_lower))
-                {
-                    return 0.0;
-                }
-            }
-        }
-    }
-    100.0
+    false
 }

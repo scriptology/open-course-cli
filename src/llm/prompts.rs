@@ -79,7 +79,7 @@ pub fn build_exercise_prompt(
             .collect::<Vec<_>>()
             .join("\n");
         format!(
-            "\nThe following learning items need extra practice. Try to naturally include ONE of them in each exercise, without distorting the target topics:\n{items}\n"
+            "\nThe following learning items need extra practice. Naturally include EACH of them in at least one exercise, distributing them across different exercises, without distorting the target topics:\n{items}\n"
         )
     };
 
