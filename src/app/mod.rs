@@ -224,7 +224,9 @@ pub async fn run_app(
             break;
         }
 
-        let desired_capture = state.mouse_capture && view_supports_mouse(state.view);
+        let desired_capture = state.mouse_capture
+            && view_supports_mouse(state.view)
+            && view_content_overflows(&state);
         if desired_capture != mouse_captured {
             apply_mouse_capture(desired_capture)?;
             mouse_captured = desired_capture;
@@ -353,6 +355,22 @@ fn view_supports_mouse(view: View) -> bool {
         view,
         View::Dashboard | View::Report | View::Docs | View::Curriculum
     )
+}
+
+/// Whether the current view's content is taller than its viewport. Mouse
+/// capture is enabled only then: while the terminal owns the mouse, native
+/// drag-selection is impossible, so capturing on content that fits the screen
+/// would block text selection for no benefit. The overflow flags are computed
+/// during `draw`, which runs before this check in the event loop.
+fn view_content_overflows(state: &AppState) -> bool {
+    match state.view {
+        View::Dashboard => state.dashboard.max_scroll > 0,
+        View::Report => state.report.max_scroll_offset > 0,
+        View::Docs if state.docs.viewing_topic.is_some() => state.docs.max_scroll_offset > 0,
+        View::Docs => state.docs.list_overflows,
+        View::Curriculum => state.curriculum.list_overflows,
+        _ => false,
+    }
 }
 
 /// Whether the 100ms tick needs to trigger a redraw: only while a view is
@@ -547,5 +565,52 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
 
     if let Some(toast) = &state.toast {
         frame.render_widget(ToastWidget::new(toast), area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_state() -> AppState {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = Database::connect(&dir.path().join("db")).await.unwrap();
+        let (tx, _rx) = mpsc::channel(1);
+        AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(db),
+            None,
+            Arc::new(AtomicBool::new(false)),
+            tx,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn capture_only_when_content_overflows() {
+        let mut state = test_state().await;
+
+        state.view = View::Dashboard;
+        assert!(!view_content_overflows(&state));
+        state.dashboard.max_scroll = 3;
+        assert!(view_content_overflows(&state));
+
+        state.view = View::Report;
+        assert!(!view_content_overflows(&state));
+        state.report.max_scroll_offset = 5;
+        assert!(view_content_overflows(&state));
+
+        state.view = View::Docs;
+        assert!(!view_content_overflows(&state));
+        state.docs.list_overflows = true;
+        assert!(view_content_overflows(&state));
+
+        state.view = View::Curriculum;
+        assert!(!view_content_overflows(&state));
+        state.curriculum.list_overflows = true;
+        assert!(view_content_overflows(&state));
+
+        state.view = View::Session;
+        assert!(!view_content_overflows(&state));
     }
 }

@@ -22,9 +22,9 @@ use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_topic_review;
 use crate::llm::prompts::build_topic_review_prompt;
 use crate::ui::colors;
-use crate::ui::labels::{get_docs_labels, native_language_code};
+use crate::ui::labels::{get_docs_labels, get_report_labels, native_language_code};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{OpenCourseStyleSheet, build_footer};
+use crate::ui::widgets::{OpenCourseStyleSheet, build_footer, mouse_footer_entries};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortBy {
@@ -60,6 +60,9 @@ pub struct DocsState {
     pub saved: bool,
     pub scroll_offset: u16,
     pub max_scroll_offset: u16,
+    /// Whether the topic list is taller than its viewport (set during draw);
+    /// drives adaptive mouse capture.
+    pub list_overflows: bool,
     /// Where to go on Esc from the topic view when docs was opened directly
     /// (e.g. from the curriculum list). `None` means the usual docs list flow.
     pub return_to: Option<crate::app::View>,
@@ -84,6 +87,7 @@ impl DocsState {
         self.saved = false;
         self.scroll_offset = 0;
         self.max_scroll_offset = 0;
+        self.list_overflows = false;
         self.return_to = None;
     }
 }
@@ -200,11 +204,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
         frame.render_widget(body, chunks[1]);
 
-        let mouse_entries: [(&str, &str); 2] = if state.mouse_capture {
-            [("wheel", "scroll"), ("m", "select text")]
-        } else {
-            [("mouse", "select text"), ("m", "wheel scroll")]
-        };
+        let report_labels = get_report_labels(native_language_code(state.config.as_ref()));
         let help = if state.docs.content.is_empty() {
             build_footer(&[
                 ("Esc", "back to list"),
@@ -213,8 +213,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 ("?", "help"),
             ])
         } else {
-            let mut entries = vec![("↑/↓", "scroll")];
-            entries.extend(mouse_entries);
+            let mut entries = vec![("↑/↓", report_labels.wheel_scroll)];
+            if state.docs.max_scroll_offset > 0 {
+                entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
+            }
             entries.push(("Esc", "back to list"));
             entries.push(("e", labels.regenerate));
             entries.push(("p", labels.practice));
@@ -269,19 +271,24 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     .fg(colors::GREEN)
                     .add_modifier(Modifier::BOLD),
             );
+            state.docs.list_overflows = state.docs.topics.len() > chunks[1].height as usize;
             frame.render_stateful_widget(list, chunks[1], &mut state.docs.list_state);
+        } else {
+            state.docs.list_overflows = false;
         }
 
+        let report_labels = get_report_labels(native_language_code(state.config.as_ref()));
+        let mut entries: Vec<(&str, &str)> = vec![("↑/↓", "navigate")];
+        if state.docs.list_overflows {
+            entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
+        }
+        entries.push(("s", "sort"));
+        entries.push(("Enter", "view"));
+        entries.push(("p", labels.practice));
+        entries.push(("Esc", "back"));
+        entries.push(("?", "help"));
         frame.render_widget(
-            Paragraph::new(build_footer(&[
-                ("↑/↓/wheel", "navigate"),
-                ("s", "sort"),
-                ("Enter", "view"),
-                ("p", labels.practice),
-                ("Esc", "back"),
-                ("?", "help"),
-            ]))
-            .style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(build_footer(&entries)).style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
     }

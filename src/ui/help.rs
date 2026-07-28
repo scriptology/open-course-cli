@@ -27,16 +27,17 @@ fn group(title: &'static str, entries: Vec<HelpEntry>) -> HelpGroup {
     HelpGroup { title, entries }
 }
 
-fn mouse_entries(state: &AppState) -> Vec<HelpEntry> {
+fn mouse_entries(state: &AppState, labels: ReportLabels) -> Vec<HelpEntry> {
     if state.mouse_capture {
         vec![
-            entry("wheel", "scroll"),
-            entry("m", "switch to text selection"),
+            entry("wheel", labels.wheel_scroll),
+            entry("m", labels.select_text),
+            entry("Shift+drag", labels.select_text),
         ]
     } else {
         vec![
-            entry("mouse", "select text"),
-            entry("m", "switch to wheel scroll"),
+            entry("mouse", labels.select_text),
+            entry("m", labels.wheel_mode),
         ]
     }
 }
@@ -46,10 +47,10 @@ pub fn groups_for(state: &AppState) -> Vec<HelpGroup> {
     match state.view {
         View::Dashboard => dashboard_groups(state, labels),
         View::Curriculum => curriculum_groups(state, labels),
-        View::Docs => docs_groups(state),
+        View::Docs => docs_groups(state, labels),
         View::Session => session_groups(state, labels),
         View::Pairs => pairs_groups(labels),
-        View::Report => report_groups(state),
+        View::Report => report_groups(state, labels),
         View::ModelCheck => model_check_groups(state),
         View::Settings => settings_groups(state),
         View::Onboarding => onboarding_groups(state),
@@ -64,6 +65,9 @@ fn dashboard_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
     if state.dashboard.weak_visible_len() > 0 {
         nav.push(entry("↑↓", labels.select_topic));
         actions.push(entry("Enter", labels.start_label));
+    }
+    if state.dashboard.max_scroll > 0 {
+        nav.extend(mouse_entries(state, labels));
     }
     nav.push(entry("Esc", "clear topic selection"));
     actions.push(entry("n", labels.start_next_label));
@@ -101,8 +105,12 @@ fn curriculum_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
         CurriculumSortBy::Progression => labels.sort_progression,
         CurriculumSortBy::Score => labels.sort_score,
     };
+    let mut nav = vec![entry("↑↓", labels.navigate)];
+    if state.curriculum.list_overflows {
+        nav.extend(mouse_entries(state, labels));
+    }
     vec![
-        group("Navigation", vec![entry("↑↓ / wheel", labels.navigate)]),
+        group("Navigation", nav),
         group(
             "Actions",
             vec![
@@ -117,11 +125,13 @@ fn curriculum_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
     ]
 }
 
-fn docs_groups(state: &AppState) -> Vec<HelpGroup> {
+fn docs_groups(state: &AppState, report_labels: ReportLabels) -> Vec<HelpGroup> {
     let labels = get_docs_labels(native_language_code(state.config.as_ref()));
     if state.docs.viewing_topic.is_some() {
-        let mut nav = vec![entry("↑/↓", "scroll")];
-        nav.extend(mouse_entries(state));
+        let mut nav = vec![entry("↑/↓", report_labels.wheel_scroll)];
+        if state.docs.max_scroll_offset > 0 {
+            nav.extend(mouse_entries(state, report_labels));
+        }
         return vec![
             group("Navigation", nav),
             group(
@@ -131,11 +141,15 @@ fn docs_groups(state: &AppState) -> Vec<HelpGroup> {
             group("Exit", vec![entry("Esc", "back to list")]),
         ];
     }
+    let mut nav = vec![
+        entry("↑/↓", report_labels.navigate),
+        entry("s", labels.sort),
+    ];
+    if state.docs.list_overflows {
+        nav.extend(mouse_entries(state, report_labels));
+    }
     vec![
-        group(
-            "Navigation",
-            vec![entry("↑/↓ / wheel", "navigate"), entry("s", labels.sort)],
-        ),
+        group("Navigation", nav),
         group(
             "Actions",
             vec![entry("Enter", "view"), entry("p", labels.practice)],
@@ -178,9 +192,11 @@ fn pairs_groups(labels: ReportLabels) -> Vec<HelpGroup> {
     ]
 }
 
-fn report_groups(state: &AppState) -> Vec<HelpGroup> {
-    let mut nav = vec![entry("↑/↓", "scroll")];
-    nav.extend(mouse_entries(state));
+fn report_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
+    let mut nav = vec![entry("↑/↓", labels.wheel_scroll)];
+    if state.report.max_scroll_offset > 0 {
+        nav.extend(mouse_entries(state, labels));
+    }
     vec![
         group("Navigation", nav),
         group(

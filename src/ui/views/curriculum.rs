@@ -16,7 +16,7 @@ use crate::ui::colors;
 use crate::ui::labels::{get_report_labels, native_language_code};
 use crate::ui::views::docs;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{build_footer, draw_confirmation};
+use crate::ui::widgets::{build_footer, draw_confirmation, mouse_footer_entries};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CurriculumSortBy {
@@ -43,6 +43,9 @@ pub struct CurriculumState {
     pub pending_reset: bool,
     pub pending_delete: Option<Topic>,
     pub sort_by: CurriculumSortBy,
+    /// Whether the topic list is taller than its viewport (set during draw);
+    /// drives adaptive mouse capture.
+    pub list_overflows: bool,
 }
 
 impl CurriculumState {
@@ -255,6 +258,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             .add_modifier(Modifier::BOLD),
     );
 
+    state.curriculum.list_overflows = !state.curriculum.topics.is_empty()
+        && state.curriculum.topics.len() > chunks[1].height as usize;
+
     frame.render_stateful_widget(list, chunks[1], &mut state.curriculum.list_state);
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
@@ -270,16 +276,18 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         ])
     } else {
         let sort_entry = format!("{} ({})", labels.sort, sort_label);
-        build_footer(&[
-            ("↑↓/wheel", labels.navigate),
-            ("Enter", labels.docs),
-            ("s", sort_entry.as_str()),
-            ("a", labels.add_topics_label),
-            ("x", labels.delete_label),
-            ("r", labels.reset_label),
-            ("Esc", labels.back),
-            ("?", "help"),
-        ])
+        let mut entries: Vec<(&str, &str)> = vec![("↑↓", labels.navigate)];
+        if state.curriculum.list_overflows {
+            entries.extend(mouse_footer_entries(state.mouse_capture, &labels));
+        }
+        entries.push(("Enter", labels.docs));
+        entries.push(("s", sort_entry.as_str()));
+        entries.push(("a", labels.add_topics_label));
+        entries.push(("x", labels.delete_label));
+        entries.push(("r", labels.reset_label));
+        entries.push(("Esc", labels.back));
+        entries.push(("?", "help"));
+        build_footer(&entries)
     };
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
