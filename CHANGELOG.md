@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1](https://github.com/scriptology/open-course-cli/compare/v0.6.0...v0.6.1) (2026-07-28)
+
+
+### Bug Fixes
+
+* graduate learning items by error association instead of text occurrence ([438234a](https://github.com/scriptology/open-course-cli/commit/438234ab1780845f20aea4d5a3001a9a8d5285c3))
+* graduate learning items by error association instead of text occurrence ([50202ed](https://github.com/scriptology/open-course-cli/commit/50202edd9fb2b52db30d440848f88ebf35cefb6f))
+* **ui:** capture the mouse only when content overflows so text stays selectable ([bbe5997](https://github.com/scriptology/open-course-cli/commit/bbe59971fb16087dbf51730fff61d948d1d7baa5))
+* **ui:** capture the mouse only when content overflows so text stays selectable ([ac59f28](https://github.com/scriptology/open-course-cli/commit/ac59f28f5ec417a6a93386cf0234c15e5731d3c5))
+
 ## [0.6.0](https://github.com/scriptology/open-course-cli/compare/v0.5.3...v0.6.0) (2026-07-27)
 
 
