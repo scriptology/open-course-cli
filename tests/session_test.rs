@@ -9,7 +9,7 @@ use open_course_cli::core::session::{
 };
 use open_course_cli::db::Database;
 use open_course_cli::db::curriculum::{Curriculum, Difficulty, Topic};
-use open_course_cli::db::learning_items::LearningItem;
+use open_course_cli::db::learning_items::{LearningItem, LearningItemsTable};
 use open_course_cli::db::progress::{ProgressData, ProgressTopic};
 
 fn make_topic(id: &str, difficulty: Difficulty) -> Topic {
@@ -654,27 +654,23 @@ fn exercise_analysis(
 }
 
 #[tokio::test]
-async fn learning_item_not_in_session_keeps_stats_untouched() {
+async fn learning_item_not_practiced_keeps_stats_untouched() {
     let dir = TempDir::new().unwrap();
     let db = Database::connect(&dir.path().join("db")).await.unwrap();
 
     let item = make_learning_item("es-pequeno-pequena", "pequeño/pequeña");
     db.learning_items().upsert(&item).await.unwrap();
 
-    // The exercise never mentions the item's words.
+    // The item exists but is not forced this session and no new learning
+    // item dedupes into it.
     let (session, analysis) = exercise_analysis("Hello", "Привет", "Привет", vec![]);
-    apply_analysis_to_db(
-        &analysis,
-        &session,
-        &["es-pequeno-pequena".to_string()],
-        &db,
-    )
-    .await
-    .unwrap();
+    apply_analysis_to_db(&analysis, &session, &[], &db)
+        .await
+        .unwrap();
 
     let updated = db.learning_items().read_all().await.unwrap();
     assert_eq!(updated.len(), 1);
-    // No occurrence -> no practice credit at all.
+    // Not practiced -> no practice credit at all.
     assert_eq!(updated[0].score, 0.0);
     assert_eq!(updated[0].practice_count, 0);
     assert!(updated[0].last_practiced.is_none());
@@ -701,8 +697,8 @@ async fn learning_item_in_session_without_errors_scores_100() {
 
     let updated = db.learning_items().read_all().await.unwrap();
     assert_eq!(updated.len(), 1);
-    // EMA from 0 towards 100 with alpha 0.12 -> 12.
-    assert_eq!(updated[0].score, 12.0);
+    // EMA from 0 towards 100 with alpha 0.34 -> 34.
+    assert_eq!(updated[0].score, 34.0);
     assert_eq!(updated[0].practice_count, 1);
     assert!(updated[0].last_practiced.is_some());
 }
@@ -769,6 +765,67 @@ async fn learning_item_matches_by_significant_words_not_full_name() {
     assert_eq!(updated.len(), 1);
     assert_eq!(updated[0].score, 0.0);
     assert_eq!(updated[0].practice_count, 1);
+}
+
+#[tokio::test]
+async fn forced_item_with_foreign_name_still_gets_credit() {
+    // Regression test: an item whose name never literally appears in the
+    // exercise texts (e.g. an English word in a ru->es pair) used to be
+    // undetectable, so its score never grew and it was forced into every
+    // session forever. A forced item without associated errors must score
+    // 100 regardless of text occurrence.
+    let dir = TempDir::new().unwrap();
+    let db = Database::connect(&dir.path().join("db")).await.unwrap();
+
+    let item = make_learning_item("es-colleague", "colleague");
+    db.learning_items().upsert(&item).await.unwrap();
+
+    let (session, analysis) = exercise_analysis(
+        "Мой коллега купил стол",
+        "Mi colega compró una mesa",
+        "Mi colega compró una mesa",
+        vec![],
+    );
+    apply_analysis_to_db(&analysis, &session, &["es-colleague".to_string()], &db)
+        .await
+        .unwrap();
+
+    let updated = db.learning_items().read_all().await.unwrap();
+    assert_eq!(updated.len(), 1);
+    assert_eq!(updated[0].score, 34.0);
+    assert_eq!(updated[0].practice_count, 1);
+    assert!(updated[0].last_practiced.is_some());
+}
+
+#[tokio::test]
+async fn clean_sessions_graduate_item_out_of_weakest() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::connect(&dir.path().join("db")).await.unwrap();
+
+    let item = make_learning_item("es-colleague", "colleague");
+    db.learning_items().upsert(&item).await.unwrap();
+
+    // Two clean sessions: 0 -> 34 -> 56, crossing the mastery threshold (50).
+    for _ in 0..2 {
+        let (session, analysis) = exercise_analysis(
+            "Мой коллега купил стол",
+            "Mi colega compró una mesa",
+            "Mi colega compró una mesa",
+            vec![],
+        );
+        apply_analysis_to_db(&analysis, &session, &["es-colleague".to_string()], &db)
+            .await
+            .unwrap();
+    }
+
+    let updated = db.learning_items().read_all().await.unwrap();
+    assert_eq!(updated.len(), 1);
+    assert_eq!(updated[0].score, 56.0);
+    assert_eq!(updated[0].practice_count, 2);
+
+    // The graduated item is no longer offered for forced practice.
+    let weak = LearningItemsTable::weakest(&updated, 3);
+    assert!(weak.is_empty());
 }
 
 #[tokio::test]
