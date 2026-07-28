@@ -12,7 +12,7 @@ use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
-use crate::ui::widgets::build_footer;
+use crate::ui::widgets::{build_footer, mouse_footer_entries};
 
 #[derive(Debug, Clone)]
 pub struct ReportState {
@@ -98,13 +98,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     frame.render_widget(paragraph.scroll((state.report.scroll_offset, 0)), chunks[0]);
 
-    let mouse_entries: [(&str, &str); 2] = if state.mouse_capture {
-        [("wheel", "scroll"), ("m", "native select")]
-    } else {
-        [("mouse", "select text"), ("m", "wheel scroll")]
-    };
-    let mut entries = vec![("↑/↓", "scroll")];
-    entries.extend(mouse_entries);
+    let mut entries = vec![("↑/↓", labels.wheel_scroll)];
+    if state.report.max_scroll_offset > 0 {
+        entries.extend(mouse_footer_entries(state.mouse_capture, &labels));
+    }
     entries.push(("n", "new topic"));
     entries.push(("r", "repeat"));
     entries.push(("d", "docs"));

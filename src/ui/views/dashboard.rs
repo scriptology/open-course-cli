@@ -20,7 +20,7 @@ use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
 use crate::ui::widgets::activity_calendar;
-use crate::ui::widgets::{HintBar, Logo, StackedProgressBar};
+use crate::ui::widgets::{HintBar, Logo, StackedProgressBar, mouse_footer_entries};
 
 #[derive(Debug, Clone)]
 pub struct DashboardState {
@@ -689,7 +689,11 @@ fn draw_weak_topics(buf: &mut Buffer, area: Rect, state: &AppState, labels: Repo
 }
 
 fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
-    let mut hints: Vec<(&str, &str)> = vec![
+    let mut hints: Vec<(&str, &str)> = Vec::new();
+    if state.dashboard.max_scroll > 0 {
+        hints.extend(mouse_footer_entries(state.mouse_capture, &labels));
+    }
+    hints.extend([
         ("n", labels.start_next_label),
         ("d", labels.docs),
         ("c", labels.curriculum),
@@ -697,7 +701,7 @@ fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportL
         ("s", labels.settings),
         ("q", labels.quit),
         ("?", "help"),
-    ];
+    ]);
     if state.dashboard.weak_visible_len() > 0 {
         hints.insert(0, ("Enter", labels.start_label));
         hints.insert(0, ("↑↓", labels.select_topic));
