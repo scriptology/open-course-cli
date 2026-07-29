@@ -22,7 +22,10 @@ use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_topic_review;
 use crate::llm::prompts::build_topic_review_prompt;
 use crate::ui::colors;
-use crate::ui::labels::{get_docs_labels, get_report_labels, native_language_code};
+use crate::ui::labels::{
+    DocsLabels, ReportLabels, get_common_labels, get_docs_labels, get_report_labels,
+    native_language_code,
+};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::{OpenCourseStyleSheet, build_footer, mouse_footer_entries};
 
@@ -41,10 +44,10 @@ impl SortBy {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self, docs_labels: &DocsLabels, report_labels: &ReportLabels) -> &'static str {
         match self {
-            SortBy::Score => "score",
-            SortBy::LastPracticed => "last practiced",
+            SortBy::Score => report_labels.sort_score,
+            SortBy::LastPracticed => docs_labels.sort_last_practiced,
         }
     }
 }
@@ -153,6 +156,8 @@ fn sort_topics(state: &mut AppState, progress: &HashMap<String, ProgressTopic>) 
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let labels = get_docs_labels(native_language_code(state.config.as_ref()));
+    let report_labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -178,7 +183,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     "{} ({}: {})",
                     topic.name,
                     labels.sort,
-                    state.docs.sort_by.label()
+                    state.docs.sort_by.label(&labels, &report_labels)
                 ),
                 Style::default().fg(Color::DarkGray),
             )),
@@ -204,23 +209,22 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
         frame.render_widget(body, chunks[1]);
 
-        let report_labels = get_report_labels(native_language_code(state.config.as_ref()));
         let help = if state.docs.content.is_empty() {
             build_footer(&[
-                ("Esc", "back to list"),
+                ("Esc", common.back_to_list),
                 ("e", labels.regenerate),
                 ("p", labels.practice),
-                ("?", "help"),
+                ("?", common.help),
             ])
         } else {
             let mut entries = vec![("↑/↓", report_labels.wheel_scroll)];
             if state.docs.max_scroll_offset > 0 {
                 entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
             }
-            entries.push(("Esc", "back to list"));
+            entries.push(("Esc", common.back_to_list));
             entries.push(("e", labels.regenerate));
             entries.push(("p", labels.practice));
-            entries.push(("?", "help"));
+            entries.push(("?", common.help));
             build_footer(&entries)
         };
         frame.render_widget(
@@ -241,7 +245,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     "{} ({}: {})",
                     labels.select_topic,
                     labels.sort,
-                    state.docs.sort_by.label()
+                    state.docs.sort_by.label(&labels, &report_labels)
                 ),
                 Style::default().fg(Color::DarkGray),
             )),
@@ -252,7 +256,8 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         let body = if state.docs.loading {
             Paragraph::new(loading_message).style(Style::default().fg(colors::YELLOW))
         } else if state.docs.topics.is_empty() {
-            Paragraph::new("No topics available.").style(Style::default().fg(Color::DarkGray))
+            Paragraph::new(report_labels.no_topics_available)
+                .style(Style::default().fg(Color::DarkGray))
         } else {
             Paragraph::new("")
         };
@@ -277,16 +282,15 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             state.docs.list_overflows = false;
         }
 
-        let report_labels = get_report_labels(native_language_code(state.config.as_ref()));
-        let mut entries: Vec<(&str, &str)> = vec![("↑/↓", "navigate")];
+        let mut entries: Vec<(&str, &str)> = vec![("↑/↓", common.navigate)];
         if state.docs.list_overflows {
             entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
         }
-        entries.push(("s", "sort"));
-        entries.push(("Enter", "view"));
+        entries.push(("s", common.sort));
+        entries.push(("Enter", common.view));
         entries.push(("p", labels.practice));
-        entries.push(("Esc", "back"));
-        entries.push(("?", "help"));
+        entries.push(("Esc", common.back));
+        entries.push(("?", common.help));
         frame.render_widget(
             Paragraph::new(build_footer(&entries)).style(Style::default().fg(Color::DarkGray)),
             chunks[2],

@@ -12,7 +12,10 @@ use crate::llm::diagnostics::{
 };
 use crate::llm::factory::create_llm_model;
 use crate::ui::colors;
-use crate::ui::labels::{get_report_labels, native_language_code};
+use crate::ui::labels::{
+    ModelCheckLabels, get_common_labels, get_model_check_labels, get_report_labels,
+    native_language_code,
+};
 use crate::ui::widgets::build_footer;
 
 #[derive(Debug, Clone, Default)]
@@ -37,39 +40,40 @@ impl ModelCheckState {
 }
 
 pub fn start(state: &mut AppState, config: OpenCourseConfig, return_to: View) {
+    let mc = get_model_check_labels(native_language_code(state.config.as_ref()));
     state.model_check = ModelCheckState {
         checks: vec![
             CheckResult {
                 id: "connectivity",
-                label: "Connectivity".to_string(),
+                label: mc.check_connectivity.to_string(),
                 status: CheckStatus::Pending,
                 duration_ms: 0,
                 reasoning_ratio: None,
             },
             CheckResult {
                 id: "streaming",
-                label: "Streaming".to_string(),
+                label: mc.check_streaming.to_string(),
                 status: CheckStatus::Pending,
                 duration_ms: 0,
                 reasoning_ratio: None,
             },
             CheckResult {
                 id: "exercises",
-                label: "Exercise generation".to_string(),
+                label: mc.check_exercise_generation.to_string(),
                 status: CheckStatus::Pending,
                 duration_ms: 0,
                 reasoning_ratio: None,
             },
             CheckResult {
                 id: "analysis",
-                label: "Answer analysis".to_string(),
+                label: mc.check_answer_analysis.to_string(),
                 status: CheckStatus::Pending,
                 duration_ms: 0,
                 reasoning_ratio: None,
             },
             CheckResult {
                 id: "topic_review",
-                label: "Topic review".to_string(),
+                label: mc.check_topic_review.to_string(),
                 status: CheckStatus::Pending,
                 duration_ms: 0,
                 reasoning_ratio: None,
@@ -87,7 +91,7 @@ pub fn start(state: &mut AppState, config: OpenCourseConfig, return_to: View) {
             Err(e) => {
                 let _ = tx.try_send(LlmResult::DiagnosticUpdate(CheckResult {
                     id: "connectivity",
-                    label: "Connectivity".to_string(),
+                    label: mc.check_connectivity.to_string(),
                     status: CheckStatus::Failed(e.to_string()),
                     duration_ms: 0,
                     reasoning_ratio: None,
@@ -106,26 +110,31 @@ pub fn start(state: &mut AppState, config: OpenCourseConfig, return_to: View) {
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
+    let lang = native_language_code(state.config.as_ref());
+    let mc = get_model_check_labels(lang);
+    let common = get_common_labels(lang);
+
     let footer = if state.model_check.running {
-        format!("Running checks... | {}", build_footer(&[("?", "help")]))
+        mc.running_checks
+            .replacen("{}", &build_footer(&[("?", common.help)]), 1)
     } else {
         let (has_failed, has_warning) = model_check_verdict(&state.model_check.checks);
         let verdict = if has_failed {
-            "Some checks failed. You can change the model or continue anyway."
+            mc.verdict_failed
         } else if has_warning {
-            "Model works, but shows warnings."
+            mc.verdict_warnings
         } else {
-            "Model is ready."
+            mc.verdict_ready
         };
         format!(
             "{} | {}",
             verdict,
             build_footer(&[
-                ("Enter/c", "continue"),
-                ("Esc/b", "back to model list"),
-                ("r", "retry"),
-                ("s", "skip"),
-                ("?", "help"),
+                ("Enter/c", common.continue_label),
+                ("Esc/b", common.back_to_model_list),
+                ("r", common.retry),
+                ("s", common.skip),
+                ("?", common.help),
             ])
         )
     };
@@ -150,11 +159,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     let mut lines: Vec<Line> = Vec::new();
     if state.model_check.checks.is_empty() {
-        lines.push(Line::from("Running diagnostics...").style(Style::default().fg(colors::YELLOW)));
+        lines.push(Line::from(mc.running_diagnostics).style(Style::default().fg(colors::YELLOW)));
     } else {
         let spinner_symbol = state.spinner.symbol();
         for check in &state.model_check.checks {
-            lines.push(render_check_line(check, spinner_symbol));
+            lines.push(render_check_line(check, spinner_symbol, &mc));
         }
     }
     frame.render_widget(Paragraph::new(Text::from(lines)), chunks[1]);
@@ -165,7 +174,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     );
 }
 
-fn render_check_line<'a>(check: &'a CheckResult, spinner_symbol: &'a str) -> Line<'a> {
+fn render_check_line<'a>(
+    check: &'a CheckResult,
+    spinner_symbol: &'a str,
+    mc: &ModelCheckLabels,
+) -> Line<'a> {
     let verdict = check.verdict(Some(spinner_symbol));
     let mut spans = vec![
         Span::styled(verdict, status_style(&check.status)),
@@ -179,7 +192,10 @@ fn render_check_line<'a>(check: &'a CheckResult, spinner_symbol: &'a str) -> Lin
         )));
     }
     if let Some(ratio) = check.reasoning_ratio {
-        spans.push(Span::raw(format!(", {:.0}% reasoning", ratio * 100.0)));
+        spans.push(Span::raw(
+            mc.reasoning_suffix
+                .replace("{:.0}", &format!("{:.0}", ratio * 100.0)),
+        ));
     }
     if let Some(msg) = check.status.message() {
         spans.push(Span::raw("\n  "));

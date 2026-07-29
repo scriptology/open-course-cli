@@ -8,11 +8,17 @@ use crate::ui::help::HelpGroup;
 
 pub struct HelpOverlay<'a> {
     groups: &'a [HelpGroup],
+    title: &'a str,
+    close_hint: &'a str,
 }
 
 impl<'a> HelpOverlay<'a> {
-    pub fn new(groups: &'a [HelpGroup]) -> Self {
-        Self { groups }
+    pub fn new(groups: &'a [HelpGroup], title: &'a str, close_hint: &'a str) -> Self {
+        Self {
+            groups,
+            title,
+            close_hint,
+        }
     }
 }
 
@@ -40,7 +46,7 @@ impl Widget for HelpOverlay<'_> {
         Clear.render(popup, buf);
 
         let block = Block::default()
-            .title("Help")
+            .title(self.title)
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Blue));
         let inner = block.inner(popup);
@@ -68,7 +74,7 @@ impl Widget for HelpOverlay<'_> {
             lines.push(Line::from(""));
         }
         lines.push(Line::from(Span::styled(
-            "Esc / ?: close",
+            self.close_hint,
             Style::default().fg(Color::DarkGray),
         )));
 

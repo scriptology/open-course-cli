@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::AppState;
 use crate::ui::colors;
+use crate::ui::labels::{get_common_labels, get_update_labels, native_language_code};
 use crate::ui::widgets::build_footer;
 use crate::update::CURRENT_VERSION;
 
@@ -19,11 +20,15 @@ impl UpdateState {
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
+    let lang = native_language_code(state.config.as_ref());
+    let labels = get_update_labels(lang);
+    let common = get_common_labels(lang);
+
     let popup_area = centered_rect(60, 30, area);
     frame.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title("Update available")
+        .title(labels.title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(colors::BLUE))
         .title_style(
@@ -35,12 +40,16 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
-    let latest = state.update.latest_version.as_deref().unwrap_or("unknown");
+    let latest = state
+        .update
+        .latest_version
+        .as_deref()
+        .unwrap_or(labels.unknown_version);
 
-    let message = format!(
-        "A new version of opencourse is available.\n\nCurrent: v{}\nLatest: v{}\n\nInstall now?",
-        CURRENT_VERSION, latest
-    );
+    let message = labels
+        .message
+        .replacen("{}", CURRENT_VERSION, 1)
+        .replacen("{}", latest, 1);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -55,7 +64,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         chunks[0],
     );
 
-    let footer_text = build_footer(&[("y", "install"), ("n", "skip"), ("?", "help")]);
+    let footer_text = build_footer(&[
+        ("y", common.install),
+        ("n", common.skip),
+        ("?", common.help),
+    ]);
     frame.render_widget(
         Paragraph::new(footer_text).alignment(Alignment::Center),
         chunks[1],

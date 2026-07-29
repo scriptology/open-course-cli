@@ -1,6 +1,9 @@
 use crate::app::{AppState, View};
 use crate::config::provider::ProviderId;
-use crate::ui::labels::{ReportLabels, get_docs_labels, get_report_labels, native_language_code};
+use crate::ui::labels::{
+    CommonLabels, ReportLabels, get_common_labels, get_docs_labels, get_report_labels,
+    native_language_code,
+};
 use crate::ui::views::curriculum::CurriculumSortBy;
 use crate::ui::views::onboarding::Step as OnboardingStep;
 use crate::ui::views::session::Mode as SessionMode;
@@ -43,23 +46,29 @@ fn mouse_entries(state: &AppState, labels: ReportLabels) -> Vec<HelpEntry> {
 }
 
 pub fn groups_for(state: &AppState) -> Vec<HelpGroup> {
-    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let lang = native_language_code(state.config.as_ref());
+    let labels = get_report_labels(lang);
+    let common = get_common_labels(lang);
     match state.view {
-        View::Dashboard => dashboard_groups(state, labels),
-        View::Curriculum => curriculum_groups(state, labels),
-        View::Docs => docs_groups(state, labels),
-        View::Session => session_groups(state, labels),
-        View::Pairs => pairs_groups(labels),
-        View::Report => report_groups(state, labels),
-        View::ModelCheck => model_check_groups(state),
-        View::Settings => settings_groups(state),
-        View::Onboarding => onboarding_groups(state),
-        View::UpdateAvailable => update_groups(),
+        View::Dashboard => dashboard_groups(state, labels, common),
+        View::Curriculum => curriculum_groups(state, labels, common),
+        View::Docs => docs_groups(state, labels, common),
+        View::Session => session_groups(state, labels, common),
+        View::Pairs => pairs_groups(labels, common),
+        View::Report => report_groups(state, labels, common),
+        View::ModelCheck => model_check_groups(state, common),
+        View::Settings => settings_groups(state, common),
+        View::Onboarding => onboarding_groups(state, common),
+        View::UpdateAvailable => update_groups(common),
         View::Quitting => Vec::new(),
     }
 }
 
-fn dashboard_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
+fn dashboard_groups(
+    state: &AppState,
+    labels: ReportLabels,
+    common: CommonLabels,
+) -> Vec<HelpGroup> {
     let mut nav = Vec::new();
     let mut actions = Vec::new();
     if state.dashboard.weak_visible_len() > 0 {
@@ -69,36 +78,49 @@ fn dashboard_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
     if state.dashboard.max_scroll > 0 {
         nav.extend(mouse_entries(state, labels));
     }
-    nav.push(entry("Esc", "clear topic selection"));
+    nav.push(entry("Esc", common.clear_topic_selection));
     actions.push(entry("n", labels.start_next_label));
     actions.push(entry("d", labels.docs));
     actions.push(entry("c", labels.curriculum));
     actions.push(entry("p", labels.pairs));
     actions.push(entry("s", labels.settings));
     vec![
-        group("Navigation", nav),
-        group("Actions", actions),
-        group("Exit", vec![entry("q", labels.quit)]),
+        group(common.group_navigation, nav),
+        group(common.group_actions, actions),
+        group(common.group_exit, vec![entry("q", labels.quit)]),
     ]
 }
 
-fn curriculum_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
+fn curriculum_groups(
+    state: &AppState,
+    labels: ReportLabels,
+    common: CommonLabels,
+) -> Vec<HelpGroup> {
     if state.curriculum.pending_reset {
         return vec![group(
-            "Actions",
-            vec![entry("y", "confirm reset"), entry("n / Esc", "cancel")],
+            common.group_actions,
+            vec![
+                entry("y", format!("{} {}", common.confirm, common.reset)),
+                entry("n / Esc", common.cancel),
+            ],
         )];
     }
     if state.curriculum.pending_delete.is_some() {
         return vec![group(
-            "Actions",
-            vec![entry("y", "confirm delete"), entry("n / Esc", "cancel")],
+            common.group_actions,
+            vec![
+                entry("y", format!("{} {}", common.confirm, common.delete)),
+                entry("n / Esc", common.cancel),
+            ],
         )];
     }
     if state.curriculum.topics.is_empty() {
         return vec![
-            group("Actions", vec![entry("g / Enter", labels.generate_label)]),
-            group("Exit", vec![entry("Esc", labels.back)]),
+            group(
+                common.group_actions,
+                vec![entry("g / Enter", labels.generate_label)],
+            ),
+            group(common.group_exit, vec![entry("Esc", labels.back)]),
         ];
     }
     let sort_label = match state.curriculum.sort_by {
@@ -110,9 +132,9 @@ fn curriculum_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
         nav.extend(mouse_entries(state, labels));
     }
     vec![
-        group("Navigation", nav),
+        group(common.group_navigation, nav),
         group(
-            "Actions",
+            common.group_actions,
             vec![
                 entry("Enter", labels.docs),
                 entry("s", format!("{} ({})", labels.sort, sort_label)),
@@ -121,11 +143,15 @@ fn curriculum_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
                 entry("r", labels.reset_label),
             ],
         ),
-        group("Exit", vec![entry("Esc", labels.back)]),
+        group(common.group_exit, vec![entry("Esc", labels.back)]),
     ]
 }
 
-fn docs_groups(state: &AppState, report_labels: ReportLabels) -> Vec<HelpGroup> {
+fn docs_groups(
+    state: &AppState,
+    report_labels: ReportLabels,
+    common: CommonLabels,
+) -> Vec<HelpGroup> {
     let labels = get_docs_labels(native_language_code(state.config.as_ref()));
     if state.docs.viewing_topic.is_some() {
         let mut nav = vec![entry("↑/↓", report_labels.wheel_scroll)];
@@ -133,12 +159,12 @@ fn docs_groups(state: &AppState, report_labels: ReportLabels) -> Vec<HelpGroup> 
             nav.extend(mouse_entries(state, report_labels));
         }
         return vec![
-            group("Navigation", nav),
+            group(common.group_navigation, nav),
             group(
-                "Actions",
+                common.group_actions,
                 vec![entry("e", labels.regenerate), entry("p", labels.practice)],
             ),
-            group("Exit", vec![entry("Esc", "back to list")]),
+            group(common.group_exit, vec![entry("Esc", common.back_to_list)]),
         ];
     }
     let mut nav = vec![
@@ -149,236 +175,272 @@ fn docs_groups(state: &AppState, report_labels: ReportLabels) -> Vec<HelpGroup> 
         nav.extend(mouse_entries(state, report_labels));
     }
     vec![
-        group("Navigation", nav),
+        group(common.group_navigation, nav),
         group(
-            "Actions",
-            vec![entry("Enter", "view"), entry("p", labels.practice)],
+            common.group_actions,
+            vec![entry("Enter", common.view), entry("p", labels.practice)],
         ),
-        group("Exit", vec![entry("Esc", "back")]),
+        group(common.group_exit, vec![entry("Esc", common.back)]),
     ]
 }
 
-fn session_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
+fn session_groups(state: &AppState, labels: ReportLabels, common: CommonLabels) -> Vec<HelpGroup> {
     if state.session.loading {
-        return vec![group("Exit", vec![entry("Esc", labels.cancel)])];
+        return vec![group(common.group_exit, vec![entry("Esc", labels.cancel)])];
     }
     match state.session.mode {
         SessionMode::TopicSelection => vec![
-            group("Navigation", vec![entry("↑↓", labels.navigate)]),
-            group("Actions", vec![entry("Enter", labels.start_session)]),
-            group("Exit", vec![entry("Esc", labels.back)]),
+            group(common.group_navigation, vec![entry("↑↓", labels.navigate)]),
+            group(
+                common.group_actions,
+                vec![entry("Enter", labels.start_session)],
+            ),
+            group(common.group_exit, vec![entry("Esc", labels.back)]),
         ],
         SessionMode::Practicing => vec![
             group(
-                "Actions",
+                common.group_actions,
                 vec![
-                    entry("(type)", "write your answer"),
+                    entry("(type)", common.write_your_answer),
                     entry("Enter", labels.submit),
                 ],
             ),
-            group("Exit", vec![entry("Esc", labels.back)]),
+            group(common.group_exit, vec![entry("Esc", labels.back)]),
         ],
     }
 }
 
-fn pairs_groups(labels: ReportLabels) -> Vec<HelpGroup> {
+fn pairs_groups(labels: ReportLabels, common: CommonLabels) -> Vec<HelpGroup> {
     vec![
-        group("Navigation", vec![entry("↑/↓", labels.navigate)]),
+        group(common.group_navigation, vec![entry("↑/↓", labels.navigate)]),
         group(
-            "Actions",
+            common.group_actions,
             vec![entry("Enter", labels.switch), entry("a", labels.add_pair)],
         ),
-        group("Exit", vec![entry("Esc", labels.back)]),
+        group(common.group_exit, vec![entry("Esc", labels.back)]),
     ]
 }
 
-fn report_groups(state: &AppState, labels: ReportLabels) -> Vec<HelpGroup> {
+fn report_groups(state: &AppState, labels: ReportLabels, common: CommonLabels) -> Vec<HelpGroup> {
     let mut nav = vec![entry("↑/↓", labels.wheel_scroll)];
     if state.report.max_scroll_offset > 0 {
         nav.extend(mouse_entries(state, labels));
     }
     vec![
-        group("Navigation", nav),
+        group(common.group_navigation, nav),
         group(
-            "Actions",
+            common.group_actions,
             vec![
-                entry("n", "new topic"),
-                entry("r", "repeat"),
-                entry("d", "docs"),
+                entry("n", common.new_topic),
+                entry("r", common.repeat),
+                entry("d", common.docs),
             ],
         ),
-        group("Exit", vec![entry("Esc", "dashboard")]),
+        group(common.group_exit, vec![entry("Esc", common.dashboard)]),
     ]
 }
 
-fn model_check_groups(state: &AppState) -> Vec<HelpGroup> {
+fn model_check_groups(state: &AppState, common: CommonLabels) -> Vec<HelpGroup> {
     if state.model_check.running {
-        return vec![group("Exit", vec![entry("Esc", "cancel")])];
+        return vec![group(common.group_exit, vec![entry("Esc", common.cancel)])];
     }
     vec![
         group(
-            "Actions",
+            common.group_actions,
             vec![
-                entry("Enter / c", "continue"),
-                entry("r", "retry"),
-                entry("s", "skip"),
+                entry("Enter / c", common.continue_label),
+                entry("r", common.retry),
+                entry("s", common.skip),
             ],
         ),
-        group("Exit", vec![entry("Esc / b", "back to model list")]),
+        group(
+            common.group_exit,
+            vec![entry("Esc / b", common.back_to_model_list)],
+        ),
     ]
 }
 
-fn settings_groups(state: &AppState) -> Vec<HelpGroup> {
+fn settings_groups(state: &AppState, common: CommonLabels) -> Vec<HelpGroup> {
     if state.settings.pending_reset.is_some() {
         return vec![group(
-            "Actions",
+            common.group_actions,
             vec![
-                entry("y", "confirm reset"),
-                entry("any other key", "cancel"),
+                entry("y", format!("{} {}", common.confirm, common.reset)),
+                entry("any other key", common.cancel),
             ],
         )];
     }
     if !state.settings.in_section {
         return vec![
-            group("Navigation", vec![entry("↑/↓", "navigate")]),
-            group("Actions", vec![entry("Enter", "open")]),
-            group("Exit", vec![entry("Esc", "back")]),
+            group(common.group_navigation, vec![entry("↑/↓", common.navigate)]),
+            group(common.group_actions, vec![entry("Enter", common.open)]),
+            group(common.group_exit, vec![entry("Esc", common.back)]),
         ];
     }
     if state.settings.section == Section::Provider {
-        return provider_setup_groups(state);
+        return provider_setup_groups(state, common);
     }
     match state.settings.section {
         Section::Data => vec![
-            group("Navigation", vec![entry("↑/↓", "action")]),
-            group("Actions", vec![entry("Enter", "reset")]),
-            group("Exit", vec![entry("Esc", "back")]),
+            group(common.group_navigation, vec![entry("↑/↓", common.action)]),
+            group(common.group_actions, vec![entry("Enter", common.reset)]),
+            group(common.group_exit, vec![entry("Esc", common.back)]),
         ],
         Section::Session => vec![
-            group("Navigation", vec![entry("↑/↓", "select")]),
-            group("Exit", vec![entry("Esc", "back")]),
+            group(common.group_navigation, vec![entry("↑/↓", common.select)]),
+            group(common.group_exit, vec![entry("Esc", common.back)]),
         ],
         Section::Profile => vec![
-            group("Navigation", vec![entry("←/→", "move caret")]),
             group(
-                "Actions",
-                vec![entry("(type)", "edit"), entry("Enter", "save")],
+                common.group_navigation,
+                vec![entry("←/→", common.move_caret)],
             ),
-            group("Exit", vec![entry("Esc", "back")]),
+            group(
+                common.group_actions,
+                vec![entry("(type)", common.edit), entry("Enter", common.save)],
+            ),
+            group(common.group_exit, vec![entry("Esc", common.back)]),
         ],
         Section::Provider => unreachable!("handled above"),
     }
 }
 
-fn provider_setup_groups(state: &AppState) -> Vec<HelpGroup> {
+fn provider_setup_groups(state: &AppState, common: CommonLabels) -> Vec<HelpGroup> {
     match state.settings.provider_setup_step {
         ProviderSetupStep::SelectProvider => vec![
-            group("Navigation", vec![entry("↑/↓", "navigate")]),
-            group("Actions", vec![entry("Enter", "select")]),
-            group("Exit", vec![entry("Esc", "back")]),
+            group(common.group_navigation, vec![entry("↑/↓", common.navigate)]),
+            group(common.group_actions, vec![entry("Enter", common.select)]),
+            group(common.group_exit, vec![entry("Esc", common.back)]),
         ],
         ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
             let editable = state.settings.provider_setup_provider == ProviderId::Custom;
             let actions = if editable {
-                vec![entry("(type)", "edit"), entry("Enter", "save")]
+                vec![entry("(type)", common.edit), entry("Enter", common.save)]
             } else {
-                vec![entry("Enter", "next")]
+                vec![entry("Enter", common.next)]
             };
             vec![
-                group("Actions", actions),
-                group("Exit", vec![entry("Esc", "back")]),
+                group(common.group_actions, actions),
+                group(common.group_exit, vec![entry("Esc", common.back)]),
             ]
         }
         ProviderSetupStep::ApiKey => vec![
             group(
-                "Actions",
-                vec![entry("(type)", "edit"), entry("Enter", "save")],
+                common.group_actions,
+                vec![entry("(type)", common.edit), entry("Enter", common.save)],
             ),
-            group("Exit", vec![entry("Esc", "back")]),
+            group(common.group_exit, vec![entry("Esc", common.back)]),
         ],
         ProviderSetupStep::Model => {
             let picker = &state.settings.model_picker;
             if picker.loading {
-                vec![group("Exit", vec![entry("Esc", "back")])]
+                vec![group(common.group_exit, vec![entry("Esc", common.back)])]
             } else if picker.error.is_some() {
                 vec![
                     group(
-                        "Actions",
-                        vec![entry("Enter", "manual"), entry("r", "retry")],
+                        common.group_actions,
+                        vec![entry("Enter", common.manual), entry("r", common.retry)],
                     ),
-                    group("Exit", vec![entry("Esc", "back")]),
+                    group(common.group_exit, vec![entry("Esc", common.back)]),
                 ]
             } else if picker.manual {
                 vec![
                     group(
-                        "Actions",
-                        vec![entry("(type)", "edit"), entry("Enter", "save")],
+                        common.group_actions,
+                        vec![entry("(type)", common.edit), entry("Enter", common.save)],
                     ),
-                    group("Exit", vec![entry("Esc", "back")]),
+                    group(common.group_exit, vec![entry("Esc", common.back)]),
                 ]
             } else if picker.models.is_empty() {
                 vec![
-                    group("Actions", vec![entry("Enter", "enter manually")]),
-                    group("Exit", vec![entry("Esc", "back")]),
+                    group(
+                        common.group_actions,
+                        vec![entry("Enter", common.enter_manually)],
+                    ),
+                    group(common.group_exit, vec![entry("Esc", common.back)]),
                 ]
             } else {
                 vec![
-                    group("Navigation", vec![entry("↑/↓", "navigate")]),
-                    group("Actions", vec![entry("Enter", "select")]),
-                    group("Exit", vec![entry("Esc", "back")]),
+                    group(common.group_navigation, vec![entry("↑/↓", common.navigate)]),
+                    group(common.group_actions, vec![entry("Enter", common.select)]),
+                    group(common.group_exit, vec![entry("Esc", common.back)]),
                 ]
             }
         }
     }
 }
 
-fn onboarding_groups(state: &AppState) -> Vec<HelpGroup> {
+fn onboarding_groups(state: &AppState, common: CommonLabels) -> Vec<HelpGroup> {
     let step = state.onboarding.steps[state.onboarding.active];
     let picker = &state.onboarding.model_picker;
     let mut groups = match step {
         OnboardingStep::Provider => vec![
-            group("Navigation", vec![entry("↑/↓", "select provider")]),
-            group("Actions", vec![entry("Enter", "next")]),
+            group(
+                common.group_navigation,
+                vec![entry("↑/↓", common.select_provider)],
+            ),
+            group(common.group_actions, vec![entry("Enter", common.next)]),
         ],
         OnboardingStep::Cefr => vec![
-            group("Navigation", vec![entry("↑/↓", "select level")]),
-            group("Actions", vec![entry("Enter", "next")]),
+            group(
+                common.group_navigation,
+                vec![entry("↑/↓", common.select_level)],
+            ),
+            group(common.group_actions, vec![entry("Enter", common.next)]),
         ],
         OnboardingStep::BatchSize => vec![
-            group("Navigation", vec![entry("↑/↓", "select batch size")]),
-            group("Actions", vec![entry("Enter", "next")]),
+            group(
+                common.group_navigation,
+                vec![entry("↑/↓", common.select_batch_size)],
+            ),
+            group(common.group_actions, vec![entry("Enter", common.next)]),
         ],
-        OnboardingStep::Model if picker.loading => vec![group("Actions", Vec::new())],
+        OnboardingStep::Model if picker.loading => vec![group(common.group_actions, Vec::new())],
         OnboardingStep::Model if picker.error.is_some() => vec![group(
-            "Actions",
-            vec![entry("r", "retry"), entry("m", "enter manually")],
+            common.group_actions,
+            vec![entry("r", common.retry), entry("m", common.enter_manually)],
         )],
         OnboardingStep::Model if picker.manual => vec![group(
-            "Actions",
-            vec![entry("(type)", "model ID"), entry("Enter", "next")],
+            common.group_actions,
+            vec![
+                entry("(type)", common.model_id),
+                entry("Enter", common.next),
+            ],
         )],
         OnboardingStep::Model if !picker.models.is_empty() => vec![
-            group("Navigation", vec![entry("↑/↓", "select model")]),
-            group("Actions", vec![entry("Enter", "next")]),
+            group(
+                common.group_navigation,
+                vec![entry("↑/↓", common.select_model)],
+            ),
+            group(common.group_actions, vec![entry("Enter", common.next)]),
         ],
         _ => vec![
-            group("Navigation", vec![entry("Shift+Tab", "previous step")]),
             group(
-                "Actions",
-                vec![entry("(type)", "edit"), entry("Tab / Enter", "next")],
+                common.group_navigation,
+                vec![entry("Shift+Tab", common.previous_step)],
+            ),
+            group(
+                common.group_actions,
+                vec![
+                    entry("(type)", common.edit),
+                    entry("Tab / Enter", common.next),
+                ],
             ),
         ],
     };
-    groups.push(group("Exit", vec![entry("Esc", "quit")]));
+    groups.push(group(common.group_exit, vec![entry("Esc", common.quit)]));
     groups
 }
 
-fn update_groups() -> Vec<HelpGroup> {
+fn update_groups(common: CommonLabels) -> Vec<HelpGroup> {
     vec![
-        group("Actions", vec![entry("y", "install update")]),
         group(
-            "Exit",
-            vec![entry("n / Esc / Enter", "skip, continue to app")],
+            common.group_actions,
+            vec![entry("y", common.install_update)],
+        ),
+        group(
+            common.group_exit,
+            vec![entry("n / Esc / Enter", common.skip_continue)],
         ),
     ]
 }
