@@ -13,7 +13,7 @@ use crate::llm::factory::create_llm_model;
 use crate::llm::pipeline::generate_curriculum as generate_curriculum_llm;
 use crate::llm::prompts::build_curriculum_extension_prompt;
 use crate::ui::colors;
-use crate::ui::labels::{get_report_labels, native_language_code};
+use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::docs;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::{build_footer, draw_confirmation, mouse_footer_entries};
@@ -102,6 +102,7 @@ impl CurriculumState {
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     if state.curriculum.loading {
         let labels = get_report_labels(native_language_code(state.config.as_ref()));
+        let common = get_common_labels(native_language_code(state.config.as_ref()));
         let accent = colors::BLUE;
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -142,7 +143,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 .curriculum_progress
                 .get(&level)
                 .cloned()
-                .unwrap_or_else(|| "waiting...".to_string());
+                .unwrap_or_else(|| labels.waiting.to_string());
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(level, Style::default().fg(accent)),
@@ -157,7 +158,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", "help")]))
+            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", common.help)]))
                 .style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
@@ -165,26 +166,27 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     }
 
     if state.curriculum.pending_reset {
+        let labels = get_report_labels(native_language_code(state.config.as_ref()));
+        let common = get_common_labels(native_language_code(state.config.as_ref()));
         draw_confirmation(
             frame,
             area,
-            "Regenerate Curriculum",
-            "This will delete the current curriculum, all progress scores, and topic reviews.\nAre you sure?",
-            "y: confirm | n/Esc: cancel",
+            labels.regenerate_curriculum_title,
+            labels.regenerate_curriculum_msg,
+            common.confirm_keys,
         );
         return;
     }
 
     if let Some(topic) = &state.curriculum.pending_delete {
+        let labels = get_report_labels(native_language_code(state.config.as_ref()));
+        let common = get_common_labels(native_language_code(state.config.as_ref()));
         draw_confirmation(
             frame,
             area,
-            "Delete Topic",
-            &format!(
-                "Delete \"{}\" and its progress/review?\nThis cannot be undone.",
-                topic.name
-            ),
-            "y: confirm | n/Esc: cancel",
+            labels.delete_topic_title,
+            &labels.delete_topic_msg.replacen("{}", &topic.name, 1),
+            common.confirm_keys,
         );
         return;
     }
@@ -264,6 +266,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     frame.render_stateful_widget(list, chunks[1], &mut state.curriculum.list_state);
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
     let sort_label = match state.curriculum.sort_by {
         CurriculumSortBy::Progression => labels.sort_progression,
         CurriculumSortBy::Score => labels.sort_score,
@@ -272,7 +275,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         build_footer(&[
             ("g", labels.generate_label),
             ("Esc", labels.back),
-            ("?", "help"),
+            ("?", common.help),
         ])
     } else {
         let sort_entry = format!("{} ({})", labels.sort, sort_label);
@@ -286,7 +289,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         entries.push(("x", labels.delete_label));
         entries.push(("r", labels.reset_label));
         entries.push(("Esc", labels.back));
-        entries.push(("?", "help"));
+        entries.push(("?", common.help));
         build_footer(&entries)
     };
     frame.render_widget(
@@ -415,7 +418,8 @@ pub async fn generate_curriculum(state: &mut AppState) -> Result<()> {
 
     state.curriculum.loading = true;
     state.curriculum.pending_reset = false;
-    state.stream_status = Some("Generating curriculum plan...".to_string());
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    state.stream_status = Some(labels.generating_plan.to_string());
     state.curriculum_progress.clear();
 
     let tx = state.llm_tx.clone();

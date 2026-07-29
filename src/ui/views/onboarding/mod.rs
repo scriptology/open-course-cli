@@ -15,6 +15,7 @@ use crate::config::{OpenCourseConfig, write_config};
 use crate::error::{AppError, Result};
 use crate::llm::provider::ProviderMeta;
 use crate::ui::colors;
+use crate::ui::labels::{get_common_labels, get_onboarding_labels, native_language_code};
 use crate::ui::views::model_check;
 use crate::ui::widgets::Logo;
 use crate::ui::widgets::build_footer;
@@ -33,52 +34,57 @@ fn display_input(input: &str, step: Step) -> String {
 }
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
+    let lang = native_language_code(state.config.as_ref());
+    let labels = get_onboarding_labels(lang);
+    let common = get_common_labels(lang);
     let step = state.onboarding.current_step();
     let footer_text = match step {
         Step::Provider => build_footer(&[
-            ("↑/↓", "select provider"),
-            ("Enter", "next"),
-            ("Esc", "quit"),
-            ("?", "help"),
+            ("↑/↓", common.select_provider),
+            ("Enter", common.next),
+            ("Esc", common.quit),
+            ("?", common.help),
         ]),
         Step::Cefr => build_footer(&[
-            ("↑/↓", "select level"),
-            ("Enter", "next"),
-            ("Esc", "quit"),
-            ("?", "help"),
+            ("↑/↓", common.select_level),
+            ("Enter", common.next),
+            ("Esc", common.quit),
+            ("?", common.help),
         ]),
         Step::BatchSize => build_footer(&[
-            ("↑/↓", "select batch size"),
-            ("Enter", "next"),
-            ("Esc", "quit"),
-            ("?", "help"),
+            ("↑/↓", common.select_batch_size),
+            ("Enter", common.next),
+            ("Esc", common.quit),
+            ("?", common.help),
         ]),
-        Step::Model if state.onboarding.model_picker.loading => format!(
-            "Loading models... | {}",
-            build_footer(&[("Esc", "quit"), ("?", "help")])
+        Step::Model if state.onboarding.model_picker.loading => labels.loading_models.replace(
+            "{}",
+            &build_footer(&[("Esc", common.quit), ("?", common.help)]),
         ),
         Step::Model if state.onboarding.model_picker.error.is_some() => build_footer(&[
-            ("r", "retry"),
-            ("m", "manual"),
-            ("Esc", "quit"),
-            ("?", "help"),
+            ("r", common.retry),
+            ("m", common.manual),
+            ("Esc", common.quit),
+            ("?", common.help),
         ]),
-        Step::Model if state.onboarding.model_picker.manual => {
-            build_footer(&[("Type", "model ID"), ("Enter", "next"), ("Esc", "quit")])
-        }
+        Step::Model if state.onboarding.model_picker.manual => build_footer(&[
+            (common.type_hint, common.model_id),
+            ("Enter", common.next),
+            ("Esc", common.quit),
+        ]),
         Step::Model if !state.onboarding.model_picker.models.is_empty() => build_footer(&[
-            ("↑/↓", "select model"),
-            ("Enter", "next"),
-            ("Esc", "quit"),
-            ("?", "help"),
+            ("↑/↓", common.select_model),
+            ("Enter", common.next),
+            ("Esc", common.quit),
+            ("?", common.help),
         ]),
         Step::BaseUrl if !steps::shows_base_url_step(state.onboarding.provider) => {
-            build_footer(&[("Enter", "next"), ("Esc", "quit")])
+            build_footer(&[("Enter", common.next), ("Esc", common.quit)])
         }
         _ => build_footer(&[
-            ("Tab/Enter", "next"),
-            ("Shift+Tab", "prev"),
-            ("Esc", "quit"),
+            ("Tab/Enter", common.next),
+            ("Shift+Tab", common.prev),
+            ("Esc", common.quit),
         ]),
     };
     let mut footer_lines = vec![Line::from(footer_text)];
@@ -118,17 +124,17 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     let subtitle = Text::from(vec![
         Line::from(Span::styled(
-            "Set up your language learning profile",
+            labels.setup_subtitle,
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             build_footer(&[
-                ("Tab/Enter", "continue"),
-                ("Shift+Tab", "prev"),
-                ("Esc", "quit"),
-                ("↑/↓", "select lists"),
+                ("Tab/Enter", common.continue_label),
+                ("Shift+Tab", common.prev),
+                ("Esc", common.quit),
+                ("↑/↓", labels.select_lists),
             ]),
             Style::default().fg(Color::DarkGray),
         )),
@@ -148,8 +154,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .position(|s| *s == step)
         .map(|i| i + 1)
         .unwrap_or(1);
-    let progress = format!("Step {} of {}", current_position, visible_steps.len());
-    let title = format!("{} — {}", step.label(), progress);
+    let progress = labels
+        .step_progress
+        .replacen("{}", &current_position.to_string(), 1)
+        .replacen("{}", &visible_steps.len().to_string(), 1);
+    let title = format!("{} — {}", step.label(lang), progress);
     let card_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(accent))
@@ -217,10 +226,10 @@ fn render_model_step(
     area: ratatui::layout::Rect,
     state: &mut AppState,
 ) {
+    let labels = get_onboarding_labels(native_language_code(state.config.as_ref()));
     if state.onboarding.model_picker.loading {
         frame.render_widget(
-            Paragraph::new("Fetching available models from provider...")
-                .style(Style::default().fg(colors::YELLOW)),
+            Paragraph::new(labels.fetching_models).style(Style::default().fg(colors::YELLOW)),
             area,
         );
         return;
@@ -228,11 +237,8 @@ fn render_model_step(
 
     if let Some(err) = &state.onboarding.model_picker.error {
         frame.render_widget(
-            Paragraph::new(format!(
-                "Failed to load models:\n{}\n\nr: retry | m: enter manually",
-                err
-            ))
-            .style(Style::default().fg(Color::Red)),
+            Paragraph::new(labels.failed_load_models.replace("{}", err))
+                .style(Style::default().fg(Color::Red)),
             area,
         );
         return;
@@ -240,10 +246,7 @@ fn render_model_step(
 
     if state.onboarding.model_picker.manual {
         frame.render_widget(
-            Paragraph::new(
-                "Enter model ID manually\n(e.g. gpt-4o-mini, claude-3-5-sonnet-20241022)",
-            )
-            .style(Style::default().fg(Color::White)),
+            Paragraph::new(labels.enter_model_manually).style(Style::default().fg(Color::White)),
             area,
         );
         return;
@@ -251,8 +254,7 @@ fn render_model_step(
 
     if state.onboarding.model_picker.models.is_empty() {
         frame.render_widget(
-            Paragraph::new("No models found.\nr: retry | m: enter manually")
-                .style(Style::default().fg(Color::White)),
+            Paragraph::new(labels.no_models_found).style(Style::default().fg(Color::White)),
             area,
         );
         return;
@@ -260,16 +262,16 @@ fn render_model_step(
 
     let selected = state.onboarding.model_picker.selected;
     let total = state.onboarding.model_picker.models.len();
-    let info = format!(
-        "Model {} of {} (m: manual, r: retry, Esc: quit)",
-        selected + 1,
-        total
-    );
+    let info = labels
+        .model_picker_info
+        .replacen("{}", &(selected + 1).to_string(), 1)
+        .replacen("{}", &total.to_string(), 1);
     model_picker::draw_model_list(frame, area, &state.onboarding.model_picker, Some(&info));
 }
 
 async fn advance_onboarding(state: &mut AppState) -> Result<()> {
-    if let Err(e) = state.onboarding.apply_input() {
+    let lang = native_language_code(state.config.as_ref());
+    if let Err(e) = state.onboarding.apply_input(lang) {
         state.onboarding.error = e.to_string();
         return Ok(());
     }

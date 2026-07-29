@@ -2,6 +2,7 @@ use crate::config::provider::ProviderId;
 use crate::core::language::{is_valid_language_code, normalize_language_code};
 use crate::db::curriculum::CEFR_LEVELS;
 use crate::error::{AppError, Result};
+use crate::ui::labels::get_onboarding_labels;
 use crate::ui::widgets::model_picker::ModelPickerState;
 
 use super::steps::{Step, base_url_default, shows_base_url_step};
@@ -149,7 +150,8 @@ impl OnboardingState {
         self.error.clear();
     }
 
-    pub(super) fn apply_input(&mut self) -> Result<()> {
+    pub(super) fn apply_input(&mut self, lang: &str) -> Result<()> {
+        let labels = get_onboarding_labels(lang);
         let value = self.input.trim().to_string();
         match self.current_step() {
             Step::Provider => {
@@ -161,34 +163,34 @@ impl OnboardingState {
             Step::ApiKey => self.api_key = value,
             Step::BaseUrl => {
                 if shows_base_url_step(self.provider) && value.is_empty() {
-                    return Err(AppError::Config(
-                        "Base URL is required for this provider".to_string(),
-                    ));
+                    return Err(AppError::Config(labels.err_base_url_required.to_string()));
                 }
                 self.base_url = value;
             }
             Step::Model => {
                 if value.is_empty() {
-                    return Err(AppError::Config("Model is required".to_string()));
+                    return Err(AppError::Config(labels.err_model_required.to_string()));
                 }
                 self.model = value;
             }
             Step::NativeLanguage => {
                 let norm = normalize_language_code(&value);
                 if !is_valid_language_code(&norm) {
-                    return Err(AppError::Config(format!("Invalid language code: {value}")));
+                    return Err(AppError::Config(
+                        labels.err_invalid_language.replace("{value}", &value),
+                    ));
                 }
                 self.native_language = norm;
             }
             Step::TargetLanguage => {
                 let norm = normalize_language_code(&value);
                 if !is_valid_language_code(&norm) {
-                    return Err(AppError::Config(format!("Invalid language code: {value}")));
+                    return Err(AppError::Config(
+                        labels.err_invalid_language.replace("{value}", &value),
+                    ));
                 }
                 if norm == self.native_language {
-                    return Err(AppError::Config(
-                        "Target language must differ from native language".to_string(),
-                    ));
+                    return Err(AppError::Config(labels.err_languages_differ.to_string()));
                 }
                 self.target_language = norm;
             }
@@ -199,29 +201,35 @@ impl OnboardingState {
                     match value.parse::<u32>() {
                         Ok(age) if (1..=120).contains(&age) => self.age = age.to_string(),
                         _ => {
-                            return Err(AppError::Config(format!(
-                                "Age must be a number between 1 and 120: {value}"
-                            )));
+                            return Err(AppError::Config(
+                                labels.err_invalid_age.replace("{value}", &value),
+                            ));
                         }
                     }
                 }
             }
             Step::Cefr => {
                 if value.is_empty() {
-                    return Err(AppError::Config("CEFR level is required".to_string()));
+                    return Err(AppError::Config(labels.err_cefr_required.to_string()));
                 }
                 if !CEFR_LEVELS.contains(&value.to_uppercase().as_str()) {
-                    return Err(AppError::Config(format!("Invalid CEFR level: {value}")));
+                    return Err(AppError::Config(
+                        labels.err_invalid_cefr.replace("{value}", &value),
+                    ));
                 }
                 self.cefr = value.to_uppercase();
             }
             Step::BatchSize => {
                 if value.is_empty() {
-                    return Err(AppError::Config("Batch size is required".to_string()));
+                    return Err(AppError::Config(labels.err_batch_required.to_string()));
                 }
                 match value.parse::<u32>() {
                     Ok(n) if (2..=5).contains(&n) => self.batch_size = n,
-                    _ => return Err(AppError::Config(format!("Batch size must be 2-5: {value}"))),
+                    _ => {
+                        return Err(AppError::Config(
+                            labels.err_batch_range.replace("{value}", &value),
+                        ));
+                    }
                 }
             }
         }

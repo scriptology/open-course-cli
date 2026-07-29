@@ -14,7 +14,10 @@ use crate::config::provider::ProviderId;
 use crate::config::write_config;
 use crate::error::Result;
 use crate::ui::colors;
-use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
+use crate::ui::labels::{
+    ReportLabels, SettingsLabels, get_common_labels, get_report_labels, get_settings_labels,
+    native_language_code,
+};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::widgets::{build_footer, draw_confirmation, model_picker};
 
@@ -34,12 +37,12 @@ pub enum Section {
 }
 
 impl Section {
-    fn label(&self) -> &'static str {
+    fn label(&self, labels: &SettingsLabels) -> &'static str {
         match self {
-            Section::Provider => "Provider",
-            Section::Profile => "Profile",
-            Section::Session => "Session",
-            Section::Data => "Data",
+            Section::Provider => labels.section_provider,
+            Section::Profile => labels.section_profile,
+            Section::Session => labels.section_session,
+            Section::Data => labels.section_data,
         }
     }
 
@@ -138,14 +141,16 @@ impl SettingsState {
     }
 }
 
-fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
+fn build_body(state: &AppState, labels: ReportLabels, settings: &SettingsLabels) -> Text<'static> {
     let config = match state.config.as_ref() {
         Some(c) => c,
-        None => return Text::from("No configuration available. Press Esc to return."),
+        None => return Text::from(settings.no_config),
     };
 
     if state.settings.section == Section::Provider && state.settings.in_section {
-        return Text::from(provider_setup::build_provider_setup_body(state, config));
+        return Text::from(provider_setup::build_provider_setup_body(
+            state, config, settings,
+        ));
     }
 
     let mut lines = vec![];
@@ -154,14 +159,18 @@ fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
         let sizes = [2u32, 3, 4, 5];
         let saved_size = config.preferences.batch_size;
         let saved_idx = sizes.iter().position(|&s| s == saved_size).unwrap_or(0);
-        lines.push(Line::from("Batch size:"));
+        lines.push(Line::from(settings.batch_size_title));
         for (idx, size) in sizes.iter().enumerate() {
             let marker = if idx == state.settings.session_batch_idx {
                 "> "
             } else {
                 "  "
             };
-            let suffix = if *size == 3 { " (recommended)" } else { "" };
+            let suffix = if *size == 3 {
+                settings.recommended_suffix
+            } else {
+                ""
+            };
             let content = format!("{}{}{}", marker, size, suffix);
             let is_saved = idx == saved_idx;
             let is_cursor = idx == state.settings.session_batch_idx;
@@ -188,7 +197,7 @@ fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
     for i in 0..count {
         let is_active = i == state.settings.active_field;
         let marker = if is_active { "> " } else { "  " };
-        let label = fields::field_label(state.settings.section, i);
+        let label = fields::field_label(state.settings.section, i, settings);
 
         if is_active && state.settings.section != Section::Data && state.settings.is_text_field() {
             let value = &state.settings.input;
@@ -215,7 +224,7 @@ fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
             }
             lines.push(Line::from(spans));
         } else {
-            let value = fields::field_value(config, state.settings.section, i);
+            let value = fields::field_value(config, state.settings.section, i, settings);
             lines.push(Line::from(format!("{}{}: {}", marker, label, value)));
         }
     }
@@ -224,28 +233,34 @@ fn build_body(state: &AppState, labels: ReportLabels) -> Text<'static> {
 }
 
 fn footer_text(state: &AppState) -> String {
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
+
     if state.settings.section == Section::Provider && state.settings.in_section {
-        return provider_setup::build_provider_setup_footer(state);
+        return provider_setup::build_provider_setup_footer(state, &common);
     }
 
     match state.settings.section {
         Section::Data => build_footer(&[
-            ("↑/↓", "action"),
-            ("Enter", "reset"),
-            ("Esc", "back"),
-            ("?", "help"),
+            ("↑/↓", common.action),
+            ("Enter", common.reset),
+            ("Esc", common.back),
+            ("?", common.help),
         ]),
-        Section::Session => build_footer(&[("↑/↓", "select"), ("Esc", "back"), ("?", "help")]),
+        Section::Session => build_footer(&[
+            ("↑/↓", common.select),
+            ("Esc", common.back),
+            ("?", common.help),
+        ]),
         Section::Profile => build_footer(&[
-            ("←/→", "move caret"),
-            ("Type", "edit"),
-            ("Enter", "save"),
-            ("Esc", "back"),
+            ("←/→", common.move_caret),
+            ("Type", common.edit),
+            ("Enter", common.save),
+            ("Esc", common.back),
         ]),
         Section::Provider => build_footer(&[
-            ("Tab/Shift+Tab", "field"),
-            ("Enter", "save"),
-            ("Esc", "back"),
+            ("Tab/Shift+Tab", common.field),
+            ("Enter", common.save),
+            ("Esc", common.back),
         ]),
     }
 }
@@ -256,12 +271,17 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     }
 
     if let Some(action) = state.settings.pending_reset {
+        let lang = native_language_code(state.config.as_ref());
+        let settings = get_settings_labels(lang);
+        let common = get_common_labels(lang);
         draw_confirmation(
             frame,
             area,
-            "Reset data",
-            &format!("Confirm {}", action.label()),
-            "y: confirm | any other key: cancel",
+            settings.reset_data_title,
+            &settings
+                .confirm_action
+                .replace("{}", action.label(&settings)),
+            common.confirm_any_other,
         );
         return;
     }
@@ -279,6 +299,8 @@ fn draw_section_picker(
     state: &mut AppState,
 ) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let settings = get_settings_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -303,7 +325,7 @@ fn draw_section_picker(
 
     let items: Vec<ListItem> = Section::all()
         .iter()
-        .map(|s| ListItem::new(s.label()))
+        .map(|s| ListItem::new(s.label(&settings)))
         .collect();
 
     let list = List::new(items).highlight_symbol("> ").highlight_style(
@@ -316,10 +338,10 @@ fn draw_section_picker(
 
     frame.render_widget(
         Paragraph::new(build_footer(&[
-            ("↑/↓", "navigate"),
-            ("Enter", "open"),
-            ("Esc", "back"),
-            ("?", "help"),
+            ("↑/↓", common.navigate),
+            ("Enter", common.open),
+            ("Esc", common.back),
+            ("?", common.help),
         ]))
         .style(Style::default().fg(Color::DarkGray)),
         chunks[2],
@@ -332,6 +354,7 @@ fn draw_section_page(
     state: &mut AppState,
 ) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let settings = get_settings_labels(native_language_code(state.config.as_ref()));
     let footer_text = self::footer_text(state);
     let footer_height = footer_text.lines().count() as u16;
     let chunks = Layout::default()
@@ -352,7 +375,7 @@ fn draw_section_page(
         ),
         Span::raw(" / "),
         Span::styled(
-            state.settings.section.label(),
+            state.settings.section.label(&settings),
             Style::default().fg(Color::DarkGray),
         ),
     ]));
@@ -370,13 +393,14 @@ fn draw_section_page(
             .constraints([Constraint::Length(1), Constraint::Min(0)])
             .split(chunks[1]);
         frame.render_widget(
-            Paragraph::new("Select model:").style(Style::default().fg(Color::White)),
+            Paragraph::new(settings.select_model_title).style(Style::default().fg(Color::White)),
             body_chunks[0],
         );
         model_picker::draw_model_list(frame, body_chunks[1], &state.settings.model_picker, None);
     } else {
         frame.render_widget(
-            Paragraph::new(build_body(state, labels)).style(Style::default().fg(Color::White)),
+            Paragraph::new(build_body(state, labels, &settings))
+                .style(Style::default().fg(Color::White)),
             chunks[1],
         );
     }

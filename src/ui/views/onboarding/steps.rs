@@ -6,6 +6,7 @@ use crate::config::provider::ProviderId;
 use crate::db::curriculum::CEFR_LEVELS;
 use crate::llm::provider::ProviderMeta;
 use crate::ui::colors;
+use crate::ui::labels::{OnboardingLabels, get_onboarding_labels, native_language_code};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -21,17 +22,18 @@ pub enum Step {
 }
 
 impl Step {
-    pub(super) fn label(&self) -> &'static str {
+    pub(super) fn label(&self, lang: &str) -> &'static str {
+        let labels = get_onboarding_labels(lang);
         match self {
-            Step::NativeLanguage => "Native language (e.g. en)",
-            Step::TargetLanguage => "Target language (e.g. es)",
-            Step::Age => "Age (optional)",
-            Step::Cefr => "CEFR level (required)",
-            Step::BatchSize => "Batch size (required)",
-            Step::Provider => "Select provider",
-            Step::ApiKey => "Enter API key",
-            Step::BaseUrl => "Enter base URL",
-            Step::Model => "Select model",
+            Step::NativeLanguage => labels.step_native_language,
+            Step::TargetLanguage => labels.step_target_language,
+            Step::Age => labels.step_age,
+            Step::Cefr => labels.step_cefr,
+            Step::BatchSize => labels.step_batch_size,
+            Step::Provider => labels.step_provider,
+            Step::ApiKey => labels.step_api_key,
+            Step::BaseUrl => labels.step_base_url,
+            Step::Model => labels.step_model,
         }
     }
 
@@ -72,16 +74,13 @@ pub(super) fn is_text_step(step: Step) -> bool {
 }
 
 pub(super) fn step_help_text(step: Step, state: &AppState) -> String {
+    let labels = get_onboarding_labels(native_language_code(state.config.as_ref()));
     match step {
-        Step::ApiKey => api_key_help(state),
-        Step::BaseUrl => base_url_help(state),
-        Step::NativeLanguage => {
-            "Enter your native language code (ISO 639-1, e.g. en, ru)".to_string()
-        }
-        Step::TargetLanguage => {
-            "Enter the language you want to learn (ISO 639-1, e.g. es, de)".to_string()
-        }
-        Step::Age => "Enter your age (optional, used to pick age-appropriate contexts)".to_string(),
+        Step::ApiKey => api_key_help(state, labels),
+        Step::BaseUrl => base_url_help(state, labels),
+        Step::NativeLanguage => labels.help_native_language.to_string(),
+        Step::TargetLanguage => labels.help_target_language.to_string(),
+        Step::Age => labels.help_age.to_string(),
         _ => String::new(),
     }
 }
@@ -89,12 +88,11 @@ pub(super) fn step_help_text(step: Step, state: &AppState) -> String {
 /// Options list for selector steps (provider, CEFR, batch size) with the
 /// currently selected option highlighted in the design-system green.
 pub(super) fn step_selector_text(step: Step, state: &AppState) -> Text<'static> {
+    let labels = get_onboarding_labels(native_language_code(state.config.as_ref()));
     let intro = match step {
-        Step::Provider => "Available providers:",
-        Step::Cefr => {
-            "Select your CEFR level (required). Pick the level that best matches your current ability (self-assessment):"
-        }
-        Step::BatchSize => "Select batch size — number of exercises per session (required):",
+        Step::Provider => labels.intro_providers,
+        Step::Cefr => labels.intro_cefr,
+        Step::BatchSize => labels.intro_batch_size,
         _ => "",
     };
     let options: Vec<(String, bool)> = match step {
@@ -138,41 +136,34 @@ pub(super) fn step_selector_text(step: Step, state: &AppState) -> Text<'static> 
     Text::from(lines)
 }
 
-fn api_key_help(state: &AppState) -> String {
+fn api_key_help(state: &AppState, labels: OnboardingLabels) -> String {
     let meta = ProviderMeta::for_provider(state.onboarding.provider);
     let env_note = match meta.env_key {
         Some(name) if std::env::var(name).is_ok() => {
-            format!("\n{name} is set in your environment and will be used if you leave this blank.")
+            format!("\n{}", labels.env_var_set.replace("{name}", name))
         }
-        Some(name) => format!("\nYou can also set the {name} environment variable instead."),
+        Some(name) => format!("\n{}", labels.env_var_hint.replace("{name}", name)),
         None => String::new(),
     };
-    if meta.requires_api_key && !meta.api_key_optional {
-        format!(
-            "Enter API key for {}\n(required){}",
-            state.onboarding.provider.label(),
-            env_note
-        )
+    let template = if meta.requires_api_key && !meta.api_key_optional {
+        labels.api_key_required
     } else {
-        format!(
-            "Enter API key for {}\n(optional — press Enter to skip){}",
-            state.onboarding.provider.label(),
-            env_note
-        )
-    }
+        labels.api_key_optional
+    };
+    template
+        .replacen("{}", state.onboarding.provider.label(), 1)
+        .replacen("{}", &env_note, 1)
 }
 
-fn base_url_help(state: &AppState) -> String {
+fn base_url_help(state: &AppState, labels: OnboardingLabels) -> String {
     if shows_base_url_step(state.onboarding.provider) {
-        format!(
-            "Enter API base URL for {}\n(e.g. {})",
-            state.onboarding.provider.label(),
-            base_url_default(state.onboarding.provider)
-        )
+        labels
+            .base_url_prompt
+            .replacen("{}", state.onboarding.provider.label(), 1)
+            .replacen("{}", base_url_default(state.onboarding.provider), 1)
     } else {
-        format!(
-            "Base URL is not required for {}.\nPress Enter to continue.",
-            state.onboarding.provider.label()
-        )
+        labels
+            .base_url_not_required
+            .replacen("{}", state.onboarding.provider.label(), 1)
     }
 }

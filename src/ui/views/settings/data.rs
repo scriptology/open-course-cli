@@ -1,5 +1,6 @@
 use crate::app::AppState;
 use crate::error::Result;
+use crate::ui::labels::SettingsLabels;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResetAction {
@@ -11,35 +12,35 @@ pub enum ResetAction {
 }
 
 impl ResetAction {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self, labels: &SettingsLabels) -> &'static str {
         match self {
-            ResetAction::Progress => "reset progress",
-            ResetAction::History => "reset history",
-            ResetAction::Curriculum => "reset curriculum",
-            ResetAction::Reviews => "reset reviews",
-            ResetAction::All => "reset all data",
+            ResetAction::Progress => labels.reset_progress_action,
+            ResetAction::History => labels.reset_history_action,
+            ResetAction::Curriculum => labels.reset_curriculum_action,
+            ResetAction::Reviews => labels.reset_reviews_action,
+            ResetAction::All => labels.reset_all_action,
         }
     }
 
     /// Title of the field row in the Data section.
-    pub fn field_label(&self) -> &'static str {
+    pub fn field_label(&self, labels: &SettingsLabels) -> &'static str {
         match self {
-            ResetAction::Progress => "Reset progress",
-            ResetAction::History => "Reset history",
-            ResetAction::Curriculum => "Reset curriculum",
-            ResetAction::Reviews => "Reset reviews",
-            ResetAction::All => "Reset all",
+            ResetAction::Progress => labels.reset_progress_title,
+            ResetAction::History => labels.reset_history_title,
+            ResetAction::Curriculum => labels.reset_curriculum_title,
+            ResetAction::Reviews => labels.reset_reviews_title,
+            ResetAction::All => labels.reset_all_title,
         }
     }
 
     /// Description shown as the field value in the Data section.
-    pub fn description(&self) -> &'static str {
+    pub fn description(&self, labels: &SettingsLabels) -> &'static str {
         match self {
-            ResetAction::Progress => "Clear all progress scores",
-            ResetAction::History => "Clear all session history",
-            ResetAction::Curriculum => "Clear all curriculum topics",
-            ResetAction::Reviews => "Clear all topic reviews",
-            ResetAction::All => "Clear all data",
+            ResetAction::Progress => labels.reset_progress_desc,
+            ResetAction::History => labels.reset_history_desc,
+            ResetAction::Curriculum => labels.reset_curriculum_desc,
+            ResetAction::Reviews => labels.reset_reviews_desc,
+            ResetAction::All => labels.reset_all_desc,
         }
     }
 

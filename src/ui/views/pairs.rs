@@ -7,7 +7,7 @@ use ratatui::widgets::{List, ListItem, Paragraph};
 use crate::app::{AppState, View};
 use crate::error::Result;
 use crate::ui::colors;
-use crate::ui::labels::{get_report_labels, native_language_code};
+use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::onboarding;
 use crate::ui::widgets::build_footer;
 
@@ -34,6 +34,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         .split(area);
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     frame.render_widget(
         Paragraph::new(Text::from(vec![
@@ -93,7 +94,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         ("Enter", labels.switch),
         ("a", labels.add_pair),
         ("Esc", labels.back),
-        ("?", "help"),
+        ("?", common.help),
     ]);
     frame.render_widget(
         Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),

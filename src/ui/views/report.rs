@@ -10,7 +10,7 @@ use crate::core::session::{AnalysisResult, MentorSession, SemanticVerdict};
 use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::ui::colors;
-use crate::ui::labels::{ReportLabels, get_report_labels, native_language_code};
+use crate::ui::labels::{ReportLabels, get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
 use crate::ui::widgets::{build_footer, mouse_footer_entries};
 
@@ -81,6 +81,7 @@ impl ReportState {
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     let chunks: [Rect; 2] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
@@ -102,11 +103,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     if state.report.max_scroll_offset > 0 {
         entries.extend(mouse_footer_entries(state.mouse_capture, &labels));
     }
-    entries.push(("n", "new topic"));
-    entries.push(("r", "repeat"));
-    entries.push(("d", "docs"));
-    entries.push(("Esc", "dashboard"));
-    entries.push(("?", "help"));
+    entries.push(("n", common.new_topic));
+    entries.push(("r", common.repeat));
+    entries.push(("d", labels.docs));
+    entries.push(("Esc", common.dashboard));
+    entries.push(("?", common.help));
 
     frame.render_widget(
         Paragraph::new(Line::from(build_footer(&entries)))
@@ -230,7 +231,7 @@ fn build_report_lines(report: &ReportState, labels: ReportLabels) -> Vec<Line<'s
             let alts = sentence.acceptable_translations.join("; ");
             lines.push(Line::from(vec![
                 Span::raw("   "),
-                Span::styled("Also acceptable: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(labels.also_acceptable, Style::default().fg(Color::DarkGray)),
                 Span::raw(alts),
             ]));
         }

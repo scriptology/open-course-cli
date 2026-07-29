@@ -124,7 +124,7 @@ async fn settings_profile_shows_age_without_cefr() {
         .unwrap();
 
     let text = buffer_text(&terminal);
-    assert!(text.contains("Age"), "Profile should show Age");
+    assert!(text.contains("Возраст"), "Profile should show Age");
     assert!(
         !text.contains("CEFR"),
         "Profile should not show CEFR in settings"
@@ -148,11 +148,11 @@ async fn settings_session_shows_batch_size_selector() {
 
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("Batch size"),
+        text.contains("Размер сессии"),
         "Session should show Batch size"
     );
     assert!(
-        text.contains("recommended"),
+        text.contains("рекомендуется"),
         "Batch size 3 should be marked recommended"
     );
     assert!(
@@ -182,10 +182,10 @@ async fn settings_data_lists_reset_actions() {
 
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("Reset progress"),
+        text.contains("Сбросить прогресс"),
         "Data should show reset actions"
     );
-    assert!(text.contains("Reset all"), "Data should show Reset all");
+    assert!(text.contains("Сбросить всё"), "Data should show Reset all");
 }
 
 #[tokio::test]
@@ -273,14 +273,17 @@ async fn update_available_prompt_renders() {
 
     let text = buffer_text(&terminal);
     assert!(
-        text.contains("Update available"),
+        text.contains("Доступно обновление"),
         "Prompt should show update title"
     );
     assert!(
-        text.contains("Latest: v9.9.9"),
+        text.contains("Последняя: v9.9.9"),
         "Prompt should show latest version"
     );
-    assert!(text.contains("n: skip"), "Prompt should offer skip action");
+    assert!(
+        text.contains("n: пропустить"),
+        "Prompt should offer skip action"
+    );
 }
 
 #[tokio::test]
@@ -332,7 +335,7 @@ async fn settings_session_highlights_current_green() {
     // The current option (index 1 = 3) should have green bold marker
     // Check that the selected option has green style
     assert!(
-        text.contains("3 (recommended)"),
+        text.contains("3 (рекомендуется)"),
         "Should show batch size options"
     );
 }

@@ -79,6 +79,21 @@ pub struct ReportLabels {
     pub wheel_scroll: &'static str,
     pub select_text: &'static str,
     pub wheel_mode: &'static str,
+    pub also_acceptable: &'static str,
+    pub no_topics_available: &'static str,
+    pub waiting: &'static str,
+    pub generating_plan: &'static str,
+    pub difficulty_beginner: &'static str,
+    pub difficulty_intermediate: &'static str,
+    pub difficulty_advanced: &'static str,
+    pub regenerate_curriculum_title: &'static str,
+    pub regenerate_curriculum_msg: &'static str,
+    pub delete_topic_title: &'static str,
+    pub delete_topic_msg: &'static str,
+    pub toast_info: &'static str,
+    pub help_title: &'static str,
+    pub close_hint: &'static str,
+    pub error_footer_hint: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,6 +106,7 @@ pub struct DocsLabels {
     pub loading: &'static str,
     pub no_review: &'static str,
     pub sort: &'static str,
+    pub sort_last_practiced: &'static str,
 }
 
 const EN_REPORT: ReportLabels = ReportLabels {
@@ -171,6 +187,21 @@ const EN_REPORT: ReportLabels = ReportLabels {
     wheel_scroll: "scroll",
     select_text: "select text",
     wheel_mode: "wheel scroll",
+    also_acceptable: "Also acceptable: ",
+    no_topics_available: "No topics available.",
+    waiting: "waiting...",
+    generating_plan: "Generating curriculum plan...",
+    difficulty_beginner: "beginner",
+    difficulty_intermediate: "intermediate",
+    difficulty_advanced: "advanced",
+    regenerate_curriculum_title: "Regenerate Curriculum",
+    regenerate_curriculum_msg: "This will delete the current curriculum, all progress scores, and topic reviews.\nAre you sure?",
+    delete_topic_title: "Delete Topic",
+    delete_topic_msg: "Delete \"{}\" and its progress/review?\nThis cannot be undone.",
+    toast_info: "Info",
+    help_title: "Help",
+    close_hint: "Esc / ?: close",
+    error_footer_hint: "r: retry | m: change model | q: quit",
 };
 
 const RU_REPORT: ReportLabels = ReportLabels {
@@ -251,6 +282,21 @@ const RU_REPORT: ReportLabels = ReportLabels {
     wheel_scroll: "скролл",
     select_text: "выделение текста",
     wheel_mode: "скролл колесом",
+    also_acceptable: "Также принимается: ",
+    no_topics_available: "Нет доступных тем.",
+    waiting: "ожидание...",
+    generating_plan: "Генерация плана программы...",
+    difficulty_beginner: "начальный",
+    difficulty_intermediate: "средний",
+    difficulty_advanced: "продвинутый",
+    regenerate_curriculum_title: "Пересоздать программу",
+    regenerate_curriculum_msg: "Текущая программа, все оценки прогресса и повторения тем будут удалены.\nВы уверены?",
+    delete_topic_title: "Удалить тему",
+    delete_topic_msg: "Удалить \"{}\" вместе с прогрессом и повторением?\nДействие необратимо.",
+    toast_info: "Инфо",
+    help_title: "Помощь",
+    close_hint: "Esc / ?: закрыть",
+    error_footer_hint: "r: повторить | m: сменить модель | q: выход",
 };
 
 const EN_DOCS: DocsLabels = DocsLabels {
@@ -262,6 +308,7 @@ const EN_DOCS: DocsLabels = DocsLabels {
     loading: "Loading...",
     no_review: "No review available.",
     sort: "Sort",
+    sort_last_practiced: "last practiced",
 };
 
 const RU_DOCS: DocsLabels = DocsLabels {
@@ -273,6 +320,531 @@ const RU_DOCS: DocsLabels = DocsLabels {
     loading: "Загрузка...",
     no_review: "Повторение недоступно.",
     sort: "Сортировка",
+    sort_last_practiced: "по дате практики",
+};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CommonLabels {
+    pub help: &'static str,
+    pub back: &'static str,
+    pub scroll: &'static str,
+    pub navigate: &'static str,
+    pub select: &'static str,
+    pub view: &'static str,
+    pub save: &'static str,
+    pub edit: &'static str,
+    pub next: &'static str,
+    pub prev: &'static str,
+    pub open: &'static str,
+    pub quit: &'static str,
+    pub cancel: &'static str,
+    pub confirm: &'static str,
+    pub retry: &'static str,
+    pub skip: &'static str,
+    pub install: &'static str,
+    pub close: &'static str,
+    pub continue_label: &'static str,
+    pub manual: &'static str,
+    pub enter_manually: &'static str,
+    pub model_id: &'static str,
+    pub reset: &'static str,
+    pub delete: &'static str,
+    pub action: &'static str,
+    pub field: &'static str,
+    pub move_caret: &'static str,
+    pub dashboard: &'static str,
+    pub new_topic: &'static str,
+    pub repeat: &'static str,
+    pub back_to_list: &'static str,
+    pub back_to_model_list: &'static str,
+    pub select_model: &'static str,
+    pub select_provider: &'static str,
+    pub select_level: &'static str,
+    pub select_batch_size: &'static str,
+    pub clear_topic_selection: &'static str,
+    pub write_your_answer: &'static str,
+    pub switch_to_text_selection: &'static str,
+    pub switch_to_wheel_scroll: &'static str,
+    pub install_update: &'static str,
+    pub skip_continue: &'static str,
+    pub change_model: &'static str,
+    pub previous_step: &'static str,
+    pub type_hint: &'static str,
+    pub group_navigation: &'static str,
+    pub group_actions: &'static str,
+    pub group_exit: &'static str,
+    pub confirm_keys: &'static str,
+    pub confirm_any_other: &'static str,
+    pub sort: &'static str,
+    pub docs: &'static str,
+}
+
+const EN_COMMON: CommonLabels = CommonLabels {
+    help: "help",
+    back: "back",
+    scroll: "scroll",
+    navigate: "navigate",
+    select: "select",
+    view: "view",
+    save: "save",
+    edit: "edit",
+    next: "next",
+    prev: "prev",
+    open: "open",
+    quit: "quit",
+    cancel: "cancel",
+    confirm: "confirm",
+    retry: "retry",
+    skip: "skip",
+    install: "install",
+    close: "close",
+    continue_label: "continue",
+    manual: "manual",
+    enter_manually: "enter manually",
+    model_id: "model ID",
+    reset: "reset",
+    delete: "delete",
+    action: "action",
+    field: "field",
+    move_caret: "move caret",
+    dashboard: "dashboard",
+    new_topic: "new topic",
+    repeat: "repeat",
+    back_to_list: "back to list",
+    back_to_model_list: "back to model list",
+    select_model: "select model",
+    select_provider: "select provider",
+    select_level: "select level",
+    select_batch_size: "select batch size",
+    clear_topic_selection: "clear topic selection",
+    write_your_answer: "write your answer",
+    switch_to_text_selection: "switch to text selection",
+    switch_to_wheel_scroll: "switch to wheel scroll",
+    install_update: "install update",
+    skip_continue: "skip, continue to app",
+    change_model: "change model",
+    previous_step: "previous step",
+    type_hint: "Type",
+    group_navigation: "Navigation",
+    group_actions: "Actions",
+    group_exit: "Exit",
+    confirm_keys: "y: confirm | n/Esc: cancel",
+    confirm_any_other: "y: confirm | any other key: cancel",
+    sort: "sort",
+    docs: "docs",
+};
+
+const RU_COMMON: CommonLabels = CommonLabels {
+    help: "помощь",
+    back: "назад",
+    scroll: "прокрутка",
+    navigate: "навигация",
+    select: "выбрать",
+    view: "открыть",
+    save: "сохранить",
+    edit: "редактировать",
+    next: "далее",
+    prev: "назад",
+    open: "открыть",
+    quit: "выход",
+    cancel: "отмена",
+    confirm: "подтвердить",
+    retry: "повторить",
+    skip: "пропустить",
+    install: "установить",
+    close: "закрыть",
+    continue_label: "продолжить",
+    manual: "вручную",
+    enter_manually: "ввести вручную",
+    model_id: "ID модели",
+    reset: "сбросить",
+    delete: "удалить",
+    action: "действие",
+    field: "поле",
+    move_caret: "курсор",
+    dashboard: "на главную",
+    new_topic: "новая тема",
+    repeat: "повторить",
+    back_to_list: "к списку",
+    back_to_model_list: "к списку моделей",
+    select_model: "выберите модель",
+    select_provider: "выберите провайдера",
+    select_level: "выберите уровень",
+    select_batch_size: "выберите размер сессии",
+    clear_topic_selection: "сбросить выбор темы",
+    write_your_answer: "введите ответ",
+    switch_to_text_selection: "режим выделения",
+    switch_to_wheel_scroll: "режим прокрутки",
+    install_update: "установить обновление",
+    skip_continue: "пропустить и продолжить",
+    change_model: "сменить модель",
+    previous_step: "предыдущий шаг",
+    type_hint: "Ввод",
+    group_navigation: "Навигация",
+    group_actions: "Действия",
+    group_exit: "Выход",
+    confirm_keys: "y: подтвердить | n/Esc: отмена",
+    confirm_any_other: "y: подтвердить | любая другая клавиша: отмена",
+    sort: "сортировка",
+    docs: "документация",
+};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OnboardingLabels {
+    pub step_native_language: &'static str,
+    pub step_target_language: &'static str,
+    pub step_age: &'static str,
+    pub step_cefr: &'static str,
+    pub step_batch_size: &'static str,
+    pub step_provider: &'static str,
+    pub step_api_key: &'static str,
+    pub step_base_url: &'static str,
+    pub step_model: &'static str,
+    pub help_native_language: &'static str,
+    pub help_target_language: &'static str,
+    pub help_age: &'static str,
+    pub intro_providers: &'static str,
+    pub intro_cefr: &'static str,
+    pub intro_batch_size: &'static str,
+    pub env_var_set: &'static str,
+    pub env_var_hint: &'static str,
+    pub api_key_required: &'static str,
+    pub api_key_optional: &'static str,
+    pub base_url_prompt: &'static str,
+    pub base_url_not_required: &'static str,
+    pub setup_subtitle: &'static str,
+    pub step_progress: &'static str,
+    pub loading_models: &'static str,
+    pub fetching_models: &'static str,
+    pub failed_load_models: &'static str,
+    pub enter_model_manually: &'static str,
+    pub no_models_found: &'static str,
+    pub model_picker_info: &'static str,
+    pub select_lists: &'static str,
+    pub err_base_url_required: &'static str,
+    pub err_model_required: &'static str,
+    pub err_invalid_language: &'static str,
+    pub err_languages_differ: &'static str,
+    pub err_invalid_age: &'static str,
+    pub err_cefr_required: &'static str,
+    pub err_invalid_cefr: &'static str,
+    pub err_batch_required: &'static str,
+    pub err_batch_range: &'static str,
+}
+
+const EN_ONBOARDING: OnboardingLabels = OnboardingLabels {
+    step_native_language: "Native language (e.g. en)",
+    step_target_language: "Target language (e.g. es)",
+    step_age: "Age (optional)",
+    step_cefr: "CEFR level (required)",
+    step_batch_size: "Batch size (required)",
+    step_provider: "Select provider",
+    step_api_key: "Enter API key",
+    step_base_url: "Enter base URL",
+    step_model: "Select model",
+    help_native_language: "Enter your native language code (ISO 639-1, e.g. en, ru)",
+    help_target_language: "Enter the language you want to learn (ISO 639-1, e.g. es, de)",
+    help_age: "Enter your age (optional, used to pick age-appropriate contexts)",
+    intro_providers: "Available providers:",
+    intro_cefr: "Select your CEFR level (required). Pick the level that best matches your current ability (self-assessment):",
+    intro_batch_size: "Select batch size — number of exercises per session (required):",
+    env_var_set: "{name} is set in your environment and will be used if you leave this blank.",
+    env_var_hint: "You can also set the {name} environment variable instead.",
+    api_key_required: "Enter API key for {}\n(required){}",
+    api_key_optional: "Enter API key for {}\n(optional — press Enter to skip){}",
+    base_url_prompt: "Enter API base URL for {}\n(e.g. {})",
+    base_url_not_required: "Base URL is not required for {}.\nPress Enter to continue.",
+    setup_subtitle: "Set up your language learning profile",
+    step_progress: "Step {} of {}",
+    loading_models: "Loading models... | {}",
+    fetching_models: "Fetching available models from provider...",
+    failed_load_models: "Failed to load models:\n{}\n\nr: retry | m: enter manually",
+    enter_model_manually: "Enter model ID manually\n(e.g. gpt-4o-mini, ...)",
+    no_models_found: "No models found.\nr: retry | m: enter manually",
+    model_picker_info: "Model {} of {} (m: manual, r: retry, Esc: quit)",
+    select_lists: "select lists",
+    err_base_url_required: "Base URL is required for this provider",
+    err_model_required: "Model is required",
+    err_invalid_language: "Invalid language code: {value}",
+    err_languages_differ: "Target language must differ from native language",
+    err_invalid_age: "Age must be a number between 1 and 120: {value}",
+    err_cefr_required: "CEFR level is required",
+    err_invalid_cefr: "Invalid CEFR level: {value}",
+    err_batch_required: "Batch size is required",
+    err_batch_range: "Batch size must be 2-5: {value}",
+};
+
+const RU_ONBOARDING: OnboardingLabels = OnboardingLabels {
+    step_native_language: "Родной язык (например, ru)",
+    step_target_language: "Изучаемый язык (например, es)",
+    step_age: "Возраст (необязательно)",
+    step_cefr: "Уровень CEFR (обязательно)",
+    step_batch_size: "Размер сессии (обязательно)",
+    step_provider: "Выберите провайдера",
+    step_api_key: "Введите API-ключ",
+    step_base_url: "Введите base URL",
+    step_model: "Выберите модель",
+    help_native_language: "Введите код родного языка (ISO 639-1, например en, ru)",
+    help_target_language: "Введите язык, который хотите изучать (ISO 639-1, например es, de)",
+    help_age: "Введите возраст (необязательно, используется для подбора контекстов по возрасту)",
+    intro_providers: "Доступные провайдеры:",
+    intro_cefr: "Выберите ваш уровень CEFR (обязательно). Укажите уровень, который лучше всего соответствует вашим текущим знаниям (самооценка):",
+    intro_batch_size: "Выберите размер сессии — количество упражнений за сессию (обязательно):",
+    env_var_set: "{name} задана в окружении и будет использована, если оставить поле пустым.",
+    env_var_hint: "Также можно задать переменную окружения {name}.",
+    api_key_required: "Введите API-ключ для {}\n(обязательно){}",
+    api_key_optional: "Введите API-ключ для {}\n(необязательно — Enter, чтобы пропустить){}",
+    base_url_prompt: "Введите base URL API для {}\n(например, {})",
+    base_url_not_required: "Base URL не требуется для {}.\nНажмите Enter, чтобы продолжить.",
+    setup_subtitle: "Настройте ваш профиль изучения языка",
+    step_progress: "Шаг {} из {}",
+    loading_models: "Загрузка моделей... | {}",
+    fetching_models: "Получение списка моделей от провайдера...",
+    failed_load_models: "Не удалось загрузить модели:\n{}\n\nr: повторить | m: ввести вручную",
+    enter_model_manually: "Введите ID модели вручную\n(например, gpt-4o-mini, ...)",
+    no_models_found: "Модели не найдены.\nr: повторить | m: ввести вручную",
+    model_picker_info: "Модель {} из {} (m: вручную, r: повторить, Esc: выход)",
+    select_lists: "выбор списком",
+    err_base_url_required: "Base URL обязателен для этого провайдера",
+    err_model_required: "Модель обязательна",
+    err_invalid_language: "Недопустимый код языка: {value}",
+    err_languages_differ: "Изучаемый язык должен отличаться от родного",
+    err_invalid_age: "Возраст должен быть числом от 1 до 120: {value}",
+    err_cefr_required: "Уровень CEFR обязателен",
+    err_invalid_cefr: "Недопустимый уровень CEFR: {value}",
+    err_batch_required: "Размер сессии обязателен",
+    err_batch_range: "Размер сессии должен быть 2-5: {value}",
+};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SettingsLabels {
+    pub section_provider: &'static str,
+    pub section_profile: &'static str,
+    pub section_session: &'static str,
+    pub section_data: &'static str,
+    pub no_config: &'static str,
+    pub batch_size_title: &'static str,
+    pub recommended_suffix: &'static str,
+    pub age_label: &'static str,
+    pub none_placeholder: &'static str,
+    pub err_invalid_age: &'static str,
+    pub batch_size_label: &'static str,
+    pub err_invalid_batch: &'static str,
+    pub err_batch_range: &'static str,
+    pub reset_progress_action: &'static str,
+    pub reset_history_action: &'static str,
+    pub reset_curriculum_action: &'static str,
+    pub reset_reviews_action: &'static str,
+    pub reset_all_action: &'static str,
+    pub reset_progress_title: &'static str,
+    pub reset_history_title: &'static str,
+    pub reset_curriculum_title: &'static str,
+    pub reset_reviews_title: &'static str,
+    pub reset_all_title: &'static str,
+    pub reset_progress_desc: &'static str,
+    pub reset_history_desc: &'static str,
+    pub reset_curriculum_desc: &'static str,
+    pub reset_reviews_desc: &'static str,
+    pub reset_all_desc: &'static str,
+    pub reset_data_title: &'static str,
+    pub confirm_action: &'static str,
+    pub select_model_title: &'static str,
+    pub select_provider_title: &'static str,
+    pub base_url_label: &'static str,
+    pub base_url_readonly: &'static str,
+    pub endpoint_choose: &'static str,
+    pub endpoint_readonly: &'static str,
+    pub api_key_env: &'static str,
+    pub env_currently_set: &'static str,
+    pub env_not_set: &'static str,
+    pub api_key_label: &'static str,
+    pub loading_models: &'static str,
+    pub error_loading_models: &'static str,
+    pub model_manual_label: &'static str,
+    pub no_models_loaded: &'static str,
+    pub err_base_url_custom: &'static str,
+    pub err_endpoint_values: &'static str,
+    pub err_api_key_required: &'static str,
+    pub env_var_or_set: &'static str,
+    pub err_no_models: &'static str,
+    pub err_model_required: &'static str,
+}
+
+const EN_SETTINGS: SettingsLabels = SettingsLabels {
+    section_provider: "Provider",
+    section_profile: "Profile",
+    section_session: "Session",
+    section_data: "Data",
+    no_config: "No configuration available. Press Esc to return.",
+    batch_size_title: "Batch size:",
+    recommended_suffix: " (recommended)",
+    age_label: "Age",
+    none_placeholder: "(none)",
+    err_invalid_age: "invalid age",
+    batch_size_label: "Batch size",
+    err_invalid_batch: "Invalid batch size: {value}",
+    err_batch_range: "Batch size must be 2-5",
+    reset_progress_action: "reset progress",
+    reset_history_action: "reset history",
+    reset_curriculum_action: "reset curriculum",
+    reset_reviews_action: "reset reviews",
+    reset_all_action: "reset all data",
+    reset_progress_title: "Reset progress",
+    reset_history_title: "Reset history",
+    reset_curriculum_title: "Reset curriculum",
+    reset_reviews_title: "Reset reviews",
+    reset_all_title: "Reset all",
+    reset_progress_desc: "Clear all progress scores",
+    reset_history_desc: "Clear all session history",
+    reset_curriculum_desc: "Clear all curriculum topics",
+    reset_reviews_desc: "Clear all topic reviews",
+    reset_all_desc: "Clear all data",
+    reset_data_title: "Reset data",
+    confirm_action: "Confirm {}",
+    select_model_title: "Select model:",
+    select_provider_title: "Select provider:",
+    base_url_label: "Base URL: {}",
+    base_url_readonly: "Base URL: {} (read-only)",
+    endpoint_choose: "Endpoint: {}\n\nChoose the API endpoint path for your custom provider:\n\n  chat/completions  — OpenAI-compatible endpoints\n                    (OpenCode Go: DeepSeek, GLM, Kimi, MiMo; Ollama; OpenRouter)\n  messages          — Anthropic Messages API\n                    (OpenCode Go: Qwen, MiniMax; Anthropic)",
+    endpoint_readonly: "Endpoint: {} (read-only)\n\nThis provider uses the {} endpoint.",
+    api_key_env: "API key: {}\n\nLeave empty to use the {} environment variable{}",
+    env_currently_set: " (currently set)",
+    env_not_set: " (not currently set)",
+    api_key_label: "API key: {}",
+    loading_models: "Loading models...",
+    error_loading_models: "Error loading models: {}\n\nEnter: enter manually | r: retry | Esc: back",
+    model_manual_label: "Model (manual): {}",
+    no_models_loaded: "No models loaded.\nEnter: enter manually",
+    err_base_url_custom: "Base URL is required for custom provider",
+    err_endpoint_values: "Endpoint must be 'chat/completions' or 'messages'",
+    err_api_key_required: "API key is required for this provider{hint}",
+    env_var_or_set: " or set the {name} environment variable",
+    err_no_models: "No models loaded",
+    err_model_required: "Model is required",
+};
+
+const RU_SETTINGS: SettingsLabels = SettingsLabels {
+    section_provider: "Провайдер",
+    section_profile: "Профиль",
+    section_session: "Сессия",
+    section_data: "Данные",
+    no_config: "Конфигурация недоступна. Нажмите Esc для возврата.",
+    batch_size_title: "Размер сессии:",
+    recommended_suffix: " (рекомендуется)",
+    age_label: "Возраст",
+    none_placeholder: "(не задано)",
+    err_invalid_age: "недопустимый возраст",
+    batch_size_label: "Размер сессии",
+    err_invalid_batch: "Недопустимый размер сессии: {value}",
+    err_batch_range: "Размер сессии должен быть 2-5",
+    reset_progress_action: "сброс прогресса",
+    reset_history_action: "сброс истории",
+    reset_curriculum_action: "сброс программы",
+    reset_reviews_action: "сброс повторений",
+    reset_all_action: "сброс всех данных",
+    reset_progress_title: "Сбросить прогресс",
+    reset_history_title: "Сбросить историю",
+    reset_curriculum_title: "Сбросить программу",
+    reset_reviews_title: "Сбросить повторения",
+    reset_all_title: "Сбросить всё",
+    reset_progress_desc: "Удалить все оценки прогресса",
+    reset_history_desc: "Удалить всю историю сессий",
+    reset_curriculum_desc: "Удалить все темы программы",
+    reset_reviews_desc: "Удалить все повторения тем",
+    reset_all_desc: "Удалить все данные",
+    reset_data_title: "Сброс данных",
+    confirm_action: "Подтвердите: {}",
+    select_model_title: "Выберите модель:",
+    select_provider_title: "Выберите провайдера:",
+    base_url_label: "Base URL: {}",
+    base_url_readonly: "Base URL: {} (только чтение)",
+    endpoint_choose: "Endpoint: {}\n\nВыберите путь API-эндпоинта для вашего провайдера:\n\n  chat/completions  — OpenAI-совместимые эндпоинты\n                    (OpenCode Go: DeepSeek, GLM, Kimi, MiMo; Ollama; OpenRouter)\n  messages          — Anthropic Messages API\n                    (OpenCode Go: Qwen, MiniMax; Anthropic)",
+    endpoint_readonly: "Endpoint: {} (только чтение)\n\nЭтот провайдер использует эндпоинт {}.",
+    api_key_env: "API-ключ: {}\n\nОставьте пустым, чтобы использовать переменную окружения {}{}",
+    env_currently_set: " (задана)",
+    env_not_set: " (не задана)",
+    api_key_label: "API-ключ: {}",
+    loading_models: "Загрузка моделей...",
+    error_loading_models: "Ошибка загрузки моделей: {}\n\nEnter: ввести вручную | r: повторить | Esc: назад",
+    model_manual_label: "Модель (вручную): {}",
+    no_models_loaded: "Модели не загружены.\nEnter: ввести вручную",
+    err_base_url_custom: "Base URL обязателен для пользовательского провайдера",
+    err_endpoint_values: "Endpoint должен быть 'chat/completions' или 'messages'",
+    err_api_key_required: "API-ключ обязателен для этого провайдера{hint}",
+    env_var_or_set: " или задайте переменную окружения {name}",
+    err_no_models: "Модели не загружены",
+    err_model_required: "Модель обязательна",
+};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UpdateLabels {
+    pub title: &'static str,
+    pub unknown_version: &'static str,
+    pub message: &'static str,
+    pub installing: &'static str,
+    pub installer_failed: &'static str,
+    pub latest_placeholder: &'static str,
+}
+
+const EN_UPDATE: UpdateLabels = UpdateLabels {
+    title: "Update available",
+    unknown_version: "unknown",
+    message: "A new version of opencourse is available.\n\nCurrent: v{}\nLatest: v{}\n\nInstall now?",
+    installing: "Installing opencourse {latest}...",
+    installer_failed: "Installer failed. Press any key to continue.",
+    latest_placeholder: "latest",
+};
+
+const RU_UPDATE: UpdateLabels = UpdateLabels {
+    title: "Доступно обновление",
+    unknown_version: "неизвестно",
+    message: "Доступна новая версия opencourse.\n\nТекущая: v{}\nПоследняя: v{}\n\nУстановить сейчас?",
+    installing: "Установка opencourse {latest}...",
+    installer_failed: "Установка не удалась. Нажмите любую клавишу, чтобы продолжить.",
+    latest_placeholder: "latest",
+};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModelCheckLabels {
+    pub check_connectivity: &'static str,
+    pub check_streaming: &'static str,
+    pub check_exercise_generation: &'static str,
+    pub check_answer_analysis: &'static str,
+    pub check_topic_review: &'static str,
+    pub running_checks: &'static str,
+    pub verdict_failed: &'static str,
+    pub verdict_warnings: &'static str,
+    pub verdict_ready: &'static str,
+    pub running_diagnostics: &'static str,
+    pub reasoning_suffix: &'static str,
+}
+
+const EN_MODEL_CHECK: ModelCheckLabels = ModelCheckLabels {
+    check_connectivity: "Connectivity",
+    check_streaming: "Streaming",
+    check_exercise_generation: "Exercise generation",
+    check_answer_analysis: "Answer analysis",
+    check_topic_review: "Topic review",
+    running_checks: "Running checks... | {}",
+    verdict_failed: "Some checks failed. You can change the model or continue anyway.",
+    verdict_warnings: "Model works, but shows warnings.",
+    verdict_ready: "Model is ready.",
+    running_diagnostics: "Running diagnostics...",
+    reasoning_suffix: ", {:.0}% reasoning",
+};
+
+const RU_MODEL_CHECK: ModelCheckLabels = ModelCheckLabels {
+    check_connectivity: "Соединение",
+    check_streaming: "Стриминг",
+    check_exercise_generation: "Генерация упражнений",
+    check_answer_analysis: "Анализ ответов",
+    check_topic_review: "Повторение темы",
+    running_checks: "Выполнение проверок... | {}",
+    verdict_failed: "Некоторые проверки не прошли. Можно сменить модель или продолжить.",
+    verdict_warnings: "Модель работает, но есть предупреждения.",
+    verdict_ready: "Модель готова.",
+    running_diagnostics: "Выполнение диагностики...",
+    reasoning_suffix: ", {:.0}% рассуждений",
 };
 
 static SUPPORTED_REPORT: [(&str, ReportLabels); 17] = [
@@ -342,6 +914,41 @@ pub fn get_docs_labels(lang: &str) -> DocsLabels {
     lookup(&SUPPORTED_DOCS, lang)
 }
 
+pub fn get_common_labels(lang: &str) -> CommonLabels {
+    match normalize_language_code(lang).as_str() {
+        "ru" => RU_COMMON,
+        _ => EN_COMMON,
+    }
+}
+
+pub fn get_onboarding_labels(lang: &str) -> OnboardingLabels {
+    match normalize_language_code(lang).as_str() {
+        "ru" => RU_ONBOARDING,
+        _ => EN_ONBOARDING,
+    }
+}
+
+pub fn get_settings_labels(lang: &str) -> SettingsLabels {
+    match normalize_language_code(lang).as_str() {
+        "ru" => RU_SETTINGS,
+        _ => EN_SETTINGS,
+    }
+}
+
+pub fn get_update_labels(lang: &str) -> UpdateLabels {
+    match normalize_language_code(lang).as_str() {
+        "ru" => RU_UPDATE,
+        _ => EN_UPDATE,
+    }
+}
+
+pub fn get_model_check_labels(lang: &str) -> ModelCheckLabels {
+    match normalize_language_code(lang).as_str() {
+        "ru" => RU_MODEL_CHECK,
+        _ => EN_MODEL_CHECK,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,5 +976,49 @@ mod tests {
         for (code, _) in SUPPORTED_REPORT {
             assert!(!get_report_labels(code).session_report.is_empty());
         }
+    }
+
+    #[test]
+    fn common_labels_localized() {
+        assert_eq!(get_common_labels("ru").help, "помощь");
+        assert_eq!(get_common_labels("en").help, "help");
+        assert_eq!(get_common_labels("unknown").help, "help");
+    }
+
+    #[test]
+    fn onboarding_labels_localized() {
+        assert_eq!(
+            get_onboarding_labels("ru").step_age,
+            "Возраст (необязательно)"
+        );
+        assert_eq!(get_onboarding_labels("en").step_age, "Age (optional)");
+        assert_eq!(get_onboarding_labels("unknown").step_age, "Age (optional)");
+    }
+
+    #[test]
+    fn settings_labels_localized() {
+        assert_eq!(get_settings_labels("ru").section_data, "Данные");
+        assert_eq!(get_settings_labels("en").section_data, "Data");
+        assert_eq!(get_settings_labels("unknown").section_data, "Data");
+    }
+
+    #[test]
+    fn update_labels_localized() {
+        assert_eq!(get_update_labels("ru").title, "Доступно обновление");
+        assert_eq!(get_update_labels("en").title, "Update available");
+        assert_eq!(get_update_labels("unknown").title, "Update available");
+    }
+
+    #[test]
+    fn model_check_labels_localized() {
+        assert_eq!(get_model_check_labels("ru").verdict_ready, "Модель готова.");
+        assert_eq!(
+            get_model_check_labels("en").verdict_ready,
+            "Model is ready."
+        );
+        assert_eq!(
+            get_model_check_labels("unknown").verdict_ready,
+            "Model is ready."
+        );
     }
 }

@@ -18,7 +18,7 @@ use crate::llm::pipeline::{
 };
 use crate::llm::prompts::{build_batch_analysis_prompt, build_exercise_prompt};
 use crate::ui::colors;
-use crate::ui::labels::{get_report_labels, native_language_code};
+use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::curriculum;
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
@@ -65,6 +65,7 @@ impl SessionState {
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     if state.session.loading {
         let loading_chunks = Layout::default()
@@ -91,7 +92,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", "help")]))
+            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", common.help)]))
                 .style(Style::default().fg(Color::DarkGray)),
             loading_chunks[1],
         );
@@ -118,7 +119,15 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     .session
                     .topics
                     .iter()
-                    .map(|topic| ListItem::new(format!("{} [{}]", topic.name, topic.difficulty)))
+                    .map(|topic| {
+                        let difficulty = match topic.difficulty.as_str() {
+                            "beginner" => labels.difficulty_beginner,
+                            "intermediate" => labels.difficulty_intermediate,
+                            "advanced" => labels.difficulty_advanced,
+                            _ => topic.difficulty.as_str(),
+                        };
+                        ListItem::new(format!("{} [{}]", topic.name, difficulty))
+                    })
                     .collect()
             };
 
@@ -135,7 +144,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     ("↑↓", labels.navigate),
                     ("Enter", labels.start_session),
                     ("Esc", labels.back),
-                    ("?", "help"),
+                    ("?", common.help),
                 ]))
                 .style(Style::default().fg(Color::DarkGray)),
                 chunks[2],

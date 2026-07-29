@@ -6,6 +6,7 @@ use crate::config::provider::{ProviderConfig, ProviderId};
 use crate::config::write_config;
 use crate::error::{AppError, Result};
 use crate::llm::provider::ProviderMeta;
+use crate::ui::labels::{CommonLabels, SettingsLabels, get_settings_labels, native_language_code};
 use crate::ui::views::model_check;
 use crate::ui::widgets::build_footer;
 use crate::ui::widgets::model_picker::{self, ModelPickerAction, ModelPickerOptions};
@@ -58,14 +59,18 @@ impl SettingsState {
     }
 }
 
-pub(super) fn build_provider_setup_body(state: &AppState, config: &OpenCourseConfig) -> String {
+pub(super) fn build_provider_setup_body(
+    state: &AppState,
+    config: &OpenCourseConfig,
+    labels: &SettingsLabels,
+) -> String {
     let provider = state.settings.provider_setup_provider;
     let _provider_config = config.providers.get(&provider);
     let meta = ProviderMeta::for_provider(provider);
 
     match state.settings.provider_setup_step {
         ProviderSetupStep::SelectProvider => {
-            let mut lines = vec!["Select provider:".to_string()];
+            let mut lines = vec![labels.select_provider_title.to_string()];
             for p in ProviderId::all() {
                 let marker = if *p == provider { "> " } else { "  " };
                 lines.push(format!("{}{} - {}", marker, p.as_str(), p.label()));
@@ -74,96 +79,101 @@ pub(super) fn build_provider_setup_body(state: &AppState, config: &OpenCourseCon
         }
         ProviderSetupStep::BaseUrl => {
             if provider == ProviderId::Custom {
-                format!("Base URL: {}", state.settings.input)
+                labels.base_url_label.replace("{}", &state.settings.input)
             } else {
-                format!(
-                    "Base URL: {} (read-only)",
-                    meta.default_base_url.unwrap_or("(none)")
+                labels.base_url_readonly.replace(
+                    "{}",
+                    meta.default_base_url.unwrap_or(labels.none_placeholder),
                 )
             }
         }
         ProviderSetupStep::Endpoint => {
             if provider == ProviderId::Custom {
-                format!(
-                    "Endpoint: {}\n\nChoose the API endpoint path for your custom provider:\n\n  chat/completions  — OpenAI-compatible endpoints\n                    (OpenCode Go: DeepSeek, GLM, Kimi, MiMo; Ollama; OpenRouter)\n  messages          — Anthropic Messages API\n                    (OpenCode Go: Qwen, MiniMax; Anthropic)",
-                    state.settings.input
-                )
+                labels.endpoint_choose.replace("{}", &state.settings.input)
             } else {
-                format!(
-                    "Endpoint: {} (read-only)\n\nThis provider uses the {} endpoint.",
-                    state.settings.input, state.settings.input
-                )
+                labels
+                    .endpoint_readonly
+                    .replace("{}", &state.settings.input)
             }
         }
         ProviderSetupStep::ApiKey => {
             let masked = "*".repeat(state.settings.input.chars().count());
             match meta.env_key {
-                Some(name) if state.settings.input.is_empty() => format!(
-                    "API key: {}\n\nLeave empty to use the {} environment variable{}",
-                    masked,
-                    name,
-                    if std::env::var(name).is_ok() {
-                        " (currently set)"
+                Some(name) if state.settings.input.is_empty() => {
+                    let suffix = if std::env::var(name).is_ok() {
+                        labels.env_currently_set
                     } else {
-                        " (not currently set)"
-                    }
-                ),
-                _ => format!("API key: {}", masked),
+                        labels.env_not_set
+                    };
+                    labels
+                        .api_key_env
+                        .replacen("{}", &masked, 1)
+                        .replacen("{}", name, 1)
+                        .replacen("{}", suffix, 1)
+                }
+                _ => labels.api_key_label.replace("{}", &masked),
             }
         }
         ProviderSetupStep::Model => {
             if state.settings.model_picker.loading {
-                "Loading models...".to_string()
+                labels.loading_models.to_string()
             } else if let Some(err) = &state.settings.model_picker.error {
-                format!(
-                    "Error loading models: {}\n\nEnter: enter manually | r: retry | Esc: back",
-                    err
-                )
+                labels.error_loading_models.replace("{}", err)
             } else if state.settings.model_picker.manual {
-                format!("Model (manual): {}", state.settings.input)
+                labels
+                    .model_manual_label
+                    .replace("{}", &state.settings.input)
             } else {
-                "No models loaded.\nEnter: enter manually".to_string()
+                labels.no_models_loaded.to_string()
             }
         }
     }
 }
 
-pub(super) fn build_provider_setup_footer(state: &AppState) -> String {
+pub(super) fn build_provider_setup_footer(state: &AppState, common: &CommonLabels) -> String {
     match state.settings.provider_setup_step {
         ProviderSetupStep::SelectProvider => build_footer(&[
-            ("↑/↓", "navigate"),
-            ("Enter", "select"),
-            ("Esc", "back"),
-            ("?", "help"),
+            ("↑/↓", common.navigate),
+            ("Enter", common.select),
+            ("Esc", common.back),
+            ("?", common.help),
         ]),
         ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
             if state.settings.provider_setup_provider == ProviderId::Custom {
-                build_footer(&[("Enter", "save"), ("Esc", "back")])
+                build_footer(&[("Enter", common.save), ("Esc", common.back)])
             } else {
-                build_footer(&[("Enter", "next"), ("Esc", "back"), ("?", "help")])
+                build_footer(&[
+                    ("Enter", common.next),
+                    ("Esc", common.back),
+                    ("?", common.help),
+                ])
             }
         }
-        ProviderSetupStep::ApiKey => build_footer(&[("Enter", "save"), ("Esc", "back")]),
+        ProviderSetupStep::ApiKey => build_footer(&[("Enter", common.save), ("Esc", common.back)]),
         ProviderSetupStep::Model => {
             if state.settings.model_picker.loading {
-                build_footer(&[("Esc", "back"), ("?", "help")])
+                build_footer(&[("Esc", common.back), ("?", common.help)])
             } else if state.settings.model_picker.error.is_some() {
                 build_footer(&[
-                    ("Enter", "manual"),
-                    ("r", "retry"),
-                    ("Esc", "back"),
-                    ("?", "help"),
+                    ("Enter", common.manual),
+                    ("r", common.retry),
+                    ("Esc", common.back),
+                    ("?", common.help),
                 ])
             } else if state.settings.model_picker.manual {
-                build_footer(&[("Enter", "save"), ("Esc", "back")])
+                build_footer(&[("Enter", common.save), ("Esc", common.back)])
             } else if state.settings.model_picker.models.is_empty() {
-                build_footer(&[("Enter", "enter manually"), ("Esc", "back"), ("?", "help")])
+                build_footer(&[
+                    ("Enter", common.enter_manually),
+                    ("Esc", common.back),
+                    ("?", common.help),
+                ])
             } else {
                 build_footer(&[
-                    ("↑/↓", "navigate"),
-                    ("Enter", "select"),
-                    ("Esc", "back"),
-                    ("?", "help"),
+                    ("↑/↓", common.navigate),
+                    ("Enter", common.select),
+                    ("Esc", common.back),
+                    ("?", common.help),
                 ])
             }
         }
@@ -397,8 +407,8 @@ async fn handle_base_url_step(state: &mut AppState, code: KeyCode) -> Result<()>
                 if provider == ProviderId::Custom {
                     let value = state.settings.input.trim().to_string();
                     if value.is_empty() {
-                        state.settings.error =
-                            Some("Base URL is required for custom provider".to_string());
+                        let labels = get_settings_labels(native_language_code(Some(config)));
+                        state.settings.error = Some(labels.err_base_url_custom.to_string());
                         return Ok(());
                     }
                     if let Some(provider_config) = config.providers.get(&provider) {
@@ -436,8 +446,8 @@ async fn handle_endpoint_step(state: &mut AppState, code: KeyCode) -> Result<()>
                 if provider == ProviderId::Custom {
                     let value = state.settings.input.trim().to_string();
                     if !value.eq("chat/completions") && !value.eq("messages") {
-                        state.settings.error =
-                            Some("Endpoint must be 'chat/completions' or 'messages'".to_string());
+                        let labels = get_settings_labels(native_language_code(Some(config)));
+                        state.settings.error = Some(labels.err_endpoint_values.to_string());
                         return Ok(());
                     }
                     if let Some(provider_config) = config.providers.get(&provider) {
@@ -479,12 +489,13 @@ async fn handle_api_key_step(state: &mut AppState, code: KeyCode) -> Result<()> 
                     && value.is_empty()
                     && meta.resolve_api_key(None).is_none()
                 {
+                    let labels = get_settings_labels(native_language_code(Some(config)));
                     let hint = meta
                         .env_key
-                        .map(|name| format!(" or set the {name} environment variable"))
+                        .map(|name| labels.env_var_or_set.replace("{name}", name))
                         .unwrap_or_default();
                     state.settings.error =
-                        Some(format!("API key is required for this provider{hint}"));
+                        Some(labels.err_api_key_required.replace("{hint}", &hint));
                     return Ok(());
                 }
                 if let Some(provider_config) = config.providers.get(&provider) {
@@ -534,9 +545,10 @@ async fn handle_model_step(state: &mut AppState, code: KeyCode) -> Result<()> {
             }
         }
         ModelPickerAction::ExitManual => {
+            let labels = get_settings_labels(native_language_code(state.config.as_ref()));
             state.settings.model_picker.error = None;
             if state.settings.model_picker.models.is_empty() {
-                state.settings.model_picker.error = Some("No models loaded".to_string());
+                state.settings.model_picker.error = Some(labels.err_no_models.to_string());
             }
         }
         ModelPickerAction::EmptyEnter => {
@@ -562,7 +574,8 @@ async fn handle_model_step(state: &mut AppState, code: KeyCode) -> Result<()> {
 
 fn save_model_and_run_diagnostics(state: &mut AppState, model_id: String) -> Result<()> {
     if model_id.is_empty() {
-        return Err(AppError::Config("Model is required".to_string()));
+        let labels = get_settings_labels(native_language_code(state.config.as_ref()));
+        return Err(AppError::Config(labels.err_model_required.to_string()));
     }
     let provider = state.settings.provider_setup_provider;
     let config_clone = {

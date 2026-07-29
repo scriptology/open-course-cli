@@ -21,6 +21,7 @@ use crate::error::{AppError, Result};
 use crate::llm::diagnostics::CheckResult;
 use crate::llm::model_listing::ModelInfo;
 use crate::ui::help;
+use crate::ui::labels::{get_report_labels, get_update_labels, native_language_code};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::views::{
     CurriculumState, DashboardState, DocsState, ModelCheckState, OnboardingState, PairsState,
@@ -449,18 +450,19 @@ async fn run_installer_and_exit(state: &mut AppState) -> Result<()> {
     use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode};
     use std::io::{Write, stdout};
 
+    let update_labels = get_update_labels(native_language_code(state.config.as_ref()));
     let latest = state
         .update
         .latest_version
         .clone()
-        .unwrap_or_else(|| "latest".to_string());
+        .unwrap_or_else(|| update_labels.latest_placeholder.to_string());
 
     // Restore the normal terminal before handing control to the installer.
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen)?;
     stdout().flush()?;
 
-    println!("Installing opencourse {latest}...");
+    println!("{}", update_labels.installing.replace("{latest}", &latest));
 
     let status = std::process::Command::new("sh")
         .arg("-c")
@@ -469,7 +471,7 @@ async fn run_installer_and_exit(state: &mut AppState) -> Result<()> {
 
     if !status.success() {
         ratatui::crossterm::terminal::enable_raw_mode()?;
-        state.error = Some("Installer failed. Press any key to continue.".to_string());
+        state.error = Some(update_labels.installer_failed.to_string());
         return Ok(());
     }
 
@@ -539,9 +541,13 @@ pub async fn switch_pair(state: &mut AppState, pair_id: &str) -> Result<()> {
 
 fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     let area = frame.area();
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
 
     if let Some(err) = &state.error {
-        frame.render_widget(ErrorBox::new(err), area);
+        frame.render_widget(
+            ErrorBox::new(err, labels.error, labels.error_footer_hint),
+            area,
+        );
         return;
     }
 
@@ -560,11 +566,18 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
     }
 
     if state.help_open {
-        frame.render_widget(HelpOverlay::new(&help::groups_for(state)), area);
+        frame.render_widget(
+            HelpOverlay::new(
+                &help::groups_for(state),
+                labels.help_title,
+                labels.close_hint,
+            ),
+            area,
+        );
     }
 
     if let Some(toast) = &state.toast {
-        frame.render_widget(ToastWidget::new(toast), area);
+        frame.render_widget(ToastWidget::new(toast, labels), area);
     }
 }
 

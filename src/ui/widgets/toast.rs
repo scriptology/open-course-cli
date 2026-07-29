@@ -5,6 +5,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 
+use crate::ui::labels::ReportLabels;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToastLevel {
     Info,
@@ -42,11 +44,12 @@ impl Toast {
 
 pub struct ToastWidget<'a> {
     toast: &'a Toast,
+    labels: ReportLabels,
 }
 
 impl<'a> ToastWidget<'a> {
-    pub fn new(toast: &'a Toast) -> Self {
-        Self { toast }
+    pub fn new(toast: &'a Toast, labels: ReportLabels) -> Self {
+        Self { toast, labels }
     }
 }
 
@@ -57,8 +60,8 @@ impl Widget for ToastWidget<'_> {
             ToastLevel::Info => Color::Green,
         };
         let title = match self.toast.level {
-            ToastLevel::Error => "Error",
-            ToastLevel::Info => "Info",
+            ToastLevel::Error => self.labels.error,
+            ToastLevel::Info => self.labels.toast_info,
         };
 
         let max_width = area.width.saturating_sub(2).max(10);
