@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/scriptology/open-course-cli/compare/v0.6.1...v0.7.0) (2026-07-29)
+
+
+### Features
+
+* **ui:** localize all UI texts ([8289e19](https://github.com/scriptology/open-course-cli/commit/8289e19c4adec3a550191170198d09c16202a392))
+* **ui:** localize all UI texts ([29b73ae](https://github.com/scriptology/open-course-cli/commit/29b73aeb6ddfa1ba901243244094bfe86e3c4ba3))
+
+
+### Bug Fixes
+
+* **ui:** print the analysis report to the main screen for native scroll and selection ([1b49abb](https://github.com/scriptology/open-course-cli/commit/1b49abbe89f5b2dcf492c0fc4b942a91e58c87bd))
+* **ui:** print the analysis report to the main screen for native scroll and selection ([c0053d0](https://github.com/scriptology/open-course-cli/commit/c0053d0b5de7806ae23f50880d9d330e354e332a))
+* **ui:** wrap long lines in topic documentation view ([122170c](https://github.com/scriptology/open-course-cli/commit/122170c961a2ac91454807f5010f36c55914ae9d))
+* **ui:** wrap long lines in topic documentation view ([bf1a1ca](https://github.com/scriptology/open-course-cli/commit/bf1a1ca139cc2b5e17d7343d11e26d009248aa42))
+
 ## [0.6.1](https://github.com/scriptology/open-course-cli/compare/v0.6.0...v0.6.1) (2026-07-28)
 
 
