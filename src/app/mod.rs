@@ -177,6 +177,17 @@ pub async fn run_app(
     let mut mouse_captured = false;
 
     loop {
+        // The analysis report lives on the main screen (not in the alternate
+        // screen): it is printed once, so the terminal's native scrollback
+        // and text selection work. The TUI resumes on any navigation key.
+        if state.view == View::Report {
+            run_report_screen(terminal, &mut state, &mut events, &mut llm_rx).await?;
+            // Mouse capture was released while on the main screen; let the
+            // desired-capture check below re-apply it if the new view needs it.
+            mouse_captured = false;
+            continue;
+        }
+
         terminal.draw(|frame| draw(frame, &mut state))?;
 
         if state.view == View::Session
@@ -234,6 +245,72 @@ pub async fn run_app(
         }
     }
 
+    Ok(())
+}
+
+/// Shows the analysis report on the main screen: leaves the alternate screen,
+/// prints the report once (native scrollback + native text selection), then
+/// waits for a navigation key. Re-enters the alternate screen before
+/// returning. There is no custom scrolling and no mouse capture here.
+async fn run_report_screen(
+    terminal: &mut DefaultTerminal,
+    state: &mut AppState,
+    events: &mut EventStream,
+    llm_rx: &mut mpsc::Receiver<LlmResult>,
+) -> Result<()> {
+    use ratatui::crossterm::event::DisableMouseCapture;
+    use ratatui::crossterm::execute;
+    use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
+    report::print(state)?;
+
+    while state.view == View::Report {
+        tokio::select! {
+            Some(event) = events.next() => {
+                match event {
+                    Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && key.code == KeyCode::Char('c')
+                        {
+                            state.view = View::Quitting;
+                            break;
+                        }
+                        let previous_view = state.view;
+                        if let Err(e) = report::handle_key(state, key.code).await {
+                            state.error = Some(e.to_string());
+                        }
+                        // Errors are rendered by the TUI error box; leave the
+                        // main screen so the user actually sees them.
+                        if state.error.is_some() {
+                            state.view = View::Dashboard;
+                        }
+                        if state.view == View::Dashboard && previous_view != View::Dashboard {
+                            let config = state.config.as_ref();
+                            if let Err(e) = state.dashboard.refresh(&state.db, config).await {
+                                state.error = Some(e.to_string());
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => state.error = Some(e.to_string()),
+                }
+            }
+            Some(result) = llm_rx.recv() => {
+                apply_llm_result(state, result).await;
+            }
+        }
+        if state.quit_requested.load(Ordering::Relaxed) {
+            state.view = View::Quitting;
+        }
+    }
+
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.clear()?;
     Ok(())
 }
 
@@ -317,7 +394,6 @@ async fn handle_mouse(state: &mut AppState, mouse: MouseEvent) -> Result<()> {
     let delta: i32 = if down { 3 } else { -3 };
     match state.view {
         View::Dashboard => state.dashboard.scroll_by(delta),
-        View::Report => state.report.scroll_by(delta),
         View::Docs if state.docs.viewing_topic.is_some() => state.docs.scroll_by(delta),
         View::Docs => {
             let len = state.docs.topics.len();
@@ -350,12 +426,11 @@ fn is_text_input_active(state: &AppState) -> bool {
 }
 
 /// Views where the mouse wheel is useful and there is no text input, so mouse
-/// capture can be enabled without breaking typing.
+/// capture can be enabled without breaking typing. The report view is
+/// excluded on purpose: it is printed to the main screen, where scrolling and
+/// text selection are handled natively by the terminal.
 fn view_supports_mouse(view: View) -> bool {
-    matches!(
-        view,
-        View::Dashboard | View::Report | View::Docs | View::Curriculum
-    )
+    matches!(view, View::Dashboard | View::Docs | View::Curriculum)
 }
 
 /// Whether the current view's content is taller than its viewport. Mouse
@@ -366,7 +441,6 @@ fn view_supports_mouse(view: View) -> bool {
 fn view_content_overflows(state: &AppState) -> bool {
     match state.view {
         View::Dashboard => state.dashboard.max_scroll > 0,
-        View::Report => state.report.max_scroll_offset > 0,
         View::Docs if state.docs.viewing_topic.is_some() => state.docs.max_scroll_offset > 0,
         View::Docs => state.docs.list_overflows,
         View::Curriculum => state.curriculum.list_overflows,
@@ -556,7 +630,9 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         View::Dashboard => dashboard::draw(frame, area, state),
         View::Session => session::draw(frame, area, state),
         View::Docs => docs::draw(frame, area, state),
-        View::Report => report::draw(frame, area, state),
+        // The report is printed to the main screen by `run_report_screen`;
+        // the TUI never draws it.
+        View::Report => {}
         View::Curriculum => curriculum::draw(frame, area, state),
         View::Settings => settings::draw(frame, area, state),
         View::ModelCheck => model_check::draw(frame, area, state),
@@ -609,9 +685,10 @@ mod tests {
         assert!(view_content_overflows(&state));
 
         state.view = View::Report;
+        // The report is printed to the main screen; it never captures the
+        // mouse, no matter how long the content is.
         assert!(!view_content_overflows(&state));
-        state.report.max_scroll_offset = 5;
-        assert!(view_content_overflows(&state));
+        assert!(!view_supports_mouse(state.view));
 
         state.view = View::Docs;
         assert!(!view_content_overflows(&state));

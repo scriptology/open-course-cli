@@ -1,8 +1,13 @@
+use std::io::Write;
+
 use ratatui::crossterm::event::KeyCode;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::crossterm::style::{
+    Attribute, Color as CrosstermColor, ContentStyle, Print, PrintStyledContent, ResetColor,
+    StyledContent,
+};
+use ratatui::crossterm::{ExecutableCommand, QueueableCommand};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::text::{Line, Span};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::app::{AppState, View};
@@ -12,15 +17,13 @@ use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
-use crate::ui::widgets::{build_footer, mouse_footer_entries};
+use crate::ui::widgets::build_footer;
 
 #[derive(Debug, Clone)]
 pub struct ReportState {
     pub analysis: AnalysisResult,
     pub session: MentorSession,
     pub weak_topics: Vec<Topic>,
-    pub scroll_offset: u16,
-    pub max_scroll_offset: u16,
     pub target_topic_id: Option<String>,
     pub target_topic_name: Option<String>,
 }
@@ -42,8 +45,6 @@ impl Default for ReportState {
                 current_exercise_index: 0,
             },
             weak_topics: Vec::new(),
-            scroll_offset: 0,
-            max_scroll_offset: 0,
             target_topic_id: None,
             target_topic_name: None,
         }
@@ -55,7 +56,7 @@ impl ReportState {
         Self::default()
     }
 
-    /// Builds the report shown after a session analysis, scrolled to top.
+    /// Builds the report shown after a session analysis.
     pub fn from_analysis(
         analysis: AnalysisResult,
         session: MentorSession,
@@ -69,51 +70,84 @@ impl ReportState {
             weak_topics,
             target_topic_id,
             target_topic_name,
-            ..Default::default()
         }
-    }
-
-    pub fn scroll_by(&mut self, delta: i32) {
-        let max = self.max_scroll_offset as i32;
-        self.scroll_offset = (self.scroll_offset as i32 + delta).clamp(0, max) as u16;
     }
 }
 
-pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
+/// Prints the full report onto the main screen (the app leaves the alternate
+/// screen while the report is shown) so the terminal's native scrollback and
+/// native text selection just work. There is intentionally no custom
+/// scrolling and no pinned footer on this page: the command line is printed
+/// last and scrolls away with the content.
+pub fn print(state: &AppState) -> Result<()> {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let common = get_common_labels(native_language_code(state.config.as_ref()));
-
-    let chunks: [Rect; 2] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
-
-    let (paragraph, max_offset) = {
-        let lines = build_report_lines(&state.report, labels);
-        let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true });
-        let line_count = paragraph.line_count(chunks[0].width);
-        let max_offset = line_count.saturating_sub(chunks[0].height as usize) as u16;
-        (paragraph, max_offset)
-    };
-
-    state.report.scroll_offset = state.report.scroll_offset.min(max_offset);
-    state.report.max_scroll_offset = max_offset;
-
-    frame.render_widget(paragraph.scroll((state.report.scroll_offset, 0)), chunks[0]);
-
-    let mut entries = vec![("↑/↓", labels.wheel_scroll)];
-    if state.report.max_scroll_offset > 0 {
-        entries.extend(mouse_footer_entries(state.mouse_capture, &labels));
+    let mut stdout = std::io::stdout();
+    stdout.queue(Print("\r\n"))?;
+    for line in build_report_lines(&state.report, labels) {
+        print_line(&mut stdout, &line, None)?;
     }
-    entries.push(("n", common.new_topic));
-    entries.push(("r", common.repeat));
-    entries.push(("d", labels.docs));
-    entries.push(("Esc", common.dashboard));
-    entries.push(("?", common.help));
+    let footer = Line::from(build_footer(&[
+        ("n", common.new_topic),
+        ("r", common.repeat),
+        ("d", labels.docs),
+        ("Esc", common.dashboard),
+    ]));
+    print_line(&mut stdout, &footer, Some(Color::DarkGray))?;
+    stdout.execute(ResetColor)?;
+    stdout.flush()?;
+    Ok(())
+}
 
-    frame.render_widget(
-        Paragraph::new(Line::from(build_footer(&entries)))
-            .style(Style::default().fg(Color::DarkGray)),
-        chunks[1],
-    );
+fn print_line(stdout: &mut impl Write, line: &Line, fallback_fg: Option<Color>) -> Result<()> {
+    for span in &line.spans {
+        let mut style = span.style;
+        if style.fg.is_none() {
+            style.fg = fallback_fg;
+        }
+        stdout.queue(PrintStyledContent(StyledContent::new(
+            to_content_style(style),
+            span.content.as_ref(),
+        )))?;
+    }
+    stdout.queue(Print("\r\n"))?;
+    Ok(())
+}
+
+fn to_content_style(style: Style) -> ContentStyle {
+    let mut converted = ContentStyle::new();
+    converted.foreground_color = style.fg.map(to_crossterm_color);
+    if style.add_modifier.contains(Modifier::BOLD) {
+        converted.attributes.set(Attribute::Bold);
+    }
+    if style.add_modifier.contains(Modifier::ITALIC) {
+        converted.attributes.set(Attribute::Italic);
+    }
+    converted
+}
+
+fn to_crossterm_color(color: Color) -> CrosstermColor {
+    match color {
+        Color::Reset => CrosstermColor::Reset,
+        Color::Black => CrosstermColor::Black,
+        Color::Red => CrosstermColor::DarkRed,
+        Color::Green => CrosstermColor::DarkGreen,
+        Color::Yellow => CrosstermColor::DarkYellow,
+        Color::Blue => CrosstermColor::DarkBlue,
+        Color::Magenta => CrosstermColor::DarkMagenta,
+        Color::Cyan => CrosstermColor::DarkCyan,
+        Color::Gray => CrosstermColor::Grey,
+        Color::DarkGray => CrosstermColor::DarkGrey,
+        Color::LightRed => CrosstermColor::Red,
+        Color::LightGreen => CrosstermColor::Green,
+        Color::LightYellow => CrosstermColor::Yellow,
+        Color::LightBlue => CrosstermColor::Blue,
+        Color::LightMagenta => CrosstermColor::Magenta,
+        Color::LightCyan => CrosstermColor::Cyan,
+        Color::White => CrosstermColor::White,
+        Color::Rgb(r, g, b) => CrosstermColor::Rgb { r, g, b },
+        Color::Indexed(i) => CrosstermColor::AnsiValue(i),
+    }
 }
 
 pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
@@ -143,12 +177,6 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                     state.view = View::Docs;
                 }
             }
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
-            state.report.scroll_by(1);
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.report.scroll_by(-1);
         }
         _ => {}
     }
@@ -440,23 +468,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scroll_by_clamps_to_bounds() {
-        let mut state = ReportState {
-            max_scroll_offset: 10,
-            ..Default::default()
-        };
-
-        state.scroll_by(3);
-        assert_eq!(state.scroll_offset, 3);
-
-        state.scroll_by(-5);
-        assert_eq!(state.scroll_offset, 0);
-
-        state.scroll_by(100);
-        assert_eq!(state.scroll_offset, 10);
-    }
-
-    #[test]
     fn report_header_shows_topic_name() {
         let report = ReportState {
             target_topic_name: Some("Preterito".to_string()),
@@ -465,5 +476,34 @@ mod tests {
         let lines = build_report_lines(&report, get_report_labels("ru"));
         let header: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(header, "Тема: Preterito");
+    }
+
+    #[test]
+    fn ratatui_colors_convert_to_crossterm() {
+        assert_eq!(
+            to_crossterm_color(Color::Rgb(0x34, 0xda, 0xb7)),
+            CrosstermColor::Rgb {
+                r: 0x34,
+                g: 0xda,
+                b: 0xb7
+            }
+        );
+        assert_eq!(
+            to_crossterm_color(Color::DarkGray),
+            CrosstermColor::DarkGrey
+        );
+        assert_eq!(to_crossterm_color(Color::Red), CrosstermColor::DarkRed);
+    }
+
+    #[test]
+    fn bold_and_italic_modifiers_convert_to_attributes() {
+        let style = Style::default()
+            .fg(colors::GREEN)
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::ITALIC);
+        let converted = to_content_style(style);
+        assert!(converted.foreground_color.is_some());
+        assert!(converted.attributes.has(Attribute::Bold));
+        assert!(converted.attributes.has(Attribute::Italic));
     }
 }

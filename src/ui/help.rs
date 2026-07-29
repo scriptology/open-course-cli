@@ -55,7 +55,7 @@ pub fn groups_for(state: &AppState) -> Vec<HelpGroup> {
         View::Docs => docs_groups(state, labels, common),
         View::Session => session_groups(state, labels, common),
         View::Pairs => pairs_groups(labels, common),
-        View::Report => report_groups(state, labels, common),
+        View::Report => report_groups(common),
         View::ModelCheck => model_check_groups(state, common),
         View::Settings => settings_groups(state, common),
         View::Onboarding => onboarding_groups(state, common),
@@ -221,13 +221,10 @@ fn pairs_groups(labels: ReportLabels, common: CommonLabels) -> Vec<HelpGroup> {
     ]
 }
 
-fn report_groups(state: &AppState, labels: ReportLabels, common: CommonLabels) -> Vec<HelpGroup> {
-    let mut nav = vec![entry("↑/↓", labels.wheel_scroll)];
-    if state.report.max_scroll_offset > 0 {
-        nav.extend(mouse_entries(state, labels));
-    }
+fn report_groups(common: CommonLabels) -> Vec<HelpGroup> {
+    // The report is printed to the main screen: it has no scrolling and no
+    // mouse modes, only the navigation keys below.
     vec![
-        group(common.group_navigation, nav),
         group(
             common.group_actions,
             vec![
