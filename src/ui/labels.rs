@@ -94,6 +94,8 @@ pub struct ReportLabels {
     pub help_title: &'static str,
     pub close_hint: &'static str,
     pub error_footer_hint: &'static str,
+    pub mouse_select_mode: &'static str,
+    pub mouse_wheel_mode: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -202,6 +204,8 @@ const EN_REPORT: ReportLabels = ReportLabels {
     help_title: "Help",
     close_hint: "Esc / ?: close",
     error_footer_hint: "r: retry | m: change model | q: quit",
+    mouse_select_mode: "Text selection enabled — mouse scroll off. Press m to switch back.",
+    mouse_wheel_mode: "Mouse scroll enabled — text selection off. Press m to switch back.",
 };
 
 const RU_REPORT: ReportLabels = ReportLabels {
@@ -297,6 +301,8 @@ const RU_REPORT: ReportLabels = ReportLabels {
     help_title: "Помощь",
     close_hint: "Esc / ?: закрыть",
     error_footer_hint: "r: повторить | m: сменить модель | q: выход",
+    mouse_select_mode: "Выделение текста включено — скролл мышью выключен. Нажмите m для возврата.",
+    mouse_wheel_mode: "Скролл мышью включён — выделение текста выключено. Нажмите m для возврата.",
 };
 
 const EN_DOCS: DocsLabels = DocsLabels {

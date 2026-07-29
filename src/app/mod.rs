@@ -273,12 +273,21 @@ async fn handle_event(state: &mut AppState, event: Event) -> Result<()> {
             }
 
             // On mouse-enabled views `m` toggles between wheel-scroll mode and
-            // native text-selection mode (capture off).
+            // native text-selection mode (capture off). A toast makes the
+            // switch explicit — otherwise users can't tell why selection or
+            // scrolling stopped working.
             if matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'))
                 && view_supports_mouse(state.view)
             {
                 let enabled = !state.mouse_capture;
                 state.set_mouse_capture(enabled)?;
+                let labels = get_report_labels(native_language_code(state.config.as_ref()));
+                let message = if enabled {
+                    labels.mouse_wheel_mode
+                } else {
+                    labels.mouse_select_mode
+                };
+                state.toast = Some(Toast::info(message));
                 return Ok(());
             }
 
@@ -625,5 +634,49 @@ mod tests {
 
         state.view = View::Session;
         assert!(!view_content_overflows(&state));
+    }
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(ratatui::crossterm::event::KeyEvent::new(
+            code,
+            KeyModifiers::NONE,
+        ))
+    }
+
+    #[tokio::test]
+    async fn m_toggles_mouse_mode_and_shows_toast() {
+        let mut state = test_state().await;
+        state.view = View::Report;
+        assert!(state.mouse_capture);
+        assert!(state.toast.is_none());
+
+        handle_event(&mut state, key(KeyCode::Char('m')))
+            .await
+            .unwrap();
+        assert!(!state.mouse_capture);
+        assert_eq!(
+            state.toast.as_ref().unwrap().message,
+            get_report_labels("en").mouse_select_mode
+        );
+
+        handle_event(&mut state, key(KeyCode::Char('m')))
+            .await
+            .unwrap();
+        assert!(state.mouse_capture);
+        assert_eq!(
+            state.toast.as_ref().unwrap().message,
+            get_report_labels("en").mouse_wheel_mode
+        );
+    }
+
+    #[tokio::test]
+    async fn m_ignored_on_views_without_mouse_support() {
+        let mut state = test_state().await;
+        state.view = View::Session;
+        handle_event(&mut state, key(KeyCode::Char('m')))
+            .await
+            .unwrap();
+        assert!(state.mouse_capture);
+        assert!(state.toast.is_none());
     }
 }
