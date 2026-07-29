@@ -6,7 +6,7 @@ use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use tokio::sync::mpsc;
 use tui_markdown::{Options, from_str_with_options};
 use unicode_normalization::UnicodeNormalization;
@@ -199,7 +199,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         } else {
             let options = Options::new(OpenCourseStyleSheet);
             let text = from_str_with_options(&content, &options);
-            let paragraph = Paragraph::new(text);
+            let paragraph = wrapped_content_paragraph(text);
             let line_count = paragraph.line_count(chunks[1].width);
             let max_offset = line_count.saturating_sub(chunks[1].height as usize) as u16;
             state.docs.scroll_offset = state.docs.scroll_offset.min(max_offset);
@@ -397,6 +397,13 @@ async fn start_practice_from_docs(state: &mut AppState) -> Result<()> {
     Ok(())
 }
 
+/// Builds the documentation body paragraph: wraps long lines instead of
+/// clipping them at the right edge. `trim: false` keeps markdown
+/// indentation (nested lists) intact.
+fn wrapped_content_paragraph(text: Text<'_>) -> Paragraph<'_> {
+    Paragraph::new(text).wrap(Wrap { trim: false })
+}
+
 pub fn start_viewing(state: &mut AppState, topic: Topic) {
     state.docs.viewing_topic = Some(topic);
     state.docs.content.clear();
@@ -494,5 +501,16 @@ mod tests {
 
         state.scroll_by(100);
         assert_eq!(state.scroll_offset, 10);
+    }
+
+    #[test]
+    fn content_paragraph_wraps_long_lines() {
+        let long_line = "a".repeat(100);
+        let paragraph = wrapped_content_paragraph(Text::from(long_line));
+        // Without wrapping this would be a single (clipped) line; with
+        // wrapping a 100-char line needs multiple rows at width 40.
+        assert!(paragraph.line_count(40) >= 3);
+        // Full width fits the line on one row.
+        assert_eq!(paragraph.line_count(120), 1);
     }
 }
