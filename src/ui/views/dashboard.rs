@@ -18,9 +18,9 @@ use crate::db::curriculum::Topic;
 use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_common_labels, get_report_labels, native_language_code};
-use crate::ui::views::{docs, session};
+use crate::ui::views::session;
 use crate::ui::widgets::activity_calendar;
-use crate::ui::widgets::{HintBar, Logo, StackedProgressBar, mouse_footer_entries};
+use crate::ui::widgets::{HintBar, Logo, StackedProgressBar};
 
 #[derive(Debug, Clone)]
 pub struct DashboardState {
@@ -690,24 +690,18 @@ fn draw_weak_topics(buf: &mut Buffer, area: Rect, state: &AppState, labels: Repo
 
 fn draw_hint_bar(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
     let common = get_common_labels(native_language_code(state.config.as_ref()));
-    let mut hints: Vec<(&str, &str)> = Vec::new();
-    if state.dashboard.max_scroll > 0 {
-        hints.extend(mouse_footer_entries(state.mouse_capture, &labels));
-    }
-    hints.extend([
+    // Weak-topic selection (↑↓/Enter/Esc) still works but is intentionally not
+    // advertised here; it is documented in the help overlay instead.
+    let hints: Vec<(&str, &str)> = vec![
         ("n", labels.start_next_label),
-        ("d", labels.docs),
         ("c", labels.curriculum),
         ("p", labels.pairs),
         ("s", labels.settings),
         ("q", labels.quit),
         ("?", common.help),
-    ]);
-    if state.dashboard.weak_visible_len() > 0 {
-        hints.insert(0, ("Enter", labels.start_label));
-        hints.insert(0, ("↑↓", labels.select_topic));
-    }
+    ];
     HintBar::new(&hints)
+        .accent("n")
         .model(state.dashboard.model.as_str())
         .render(area, buf);
 }
@@ -722,11 +716,6 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                 state.view = View::Session;
                 session::start_new_topic_session(state).await?;
             }
-        }
-        KeyCode::Char('d') => {
-            docs::load(state).await?;
-            state.docs.return_to = None;
-            state.view = View::Docs;
         }
         KeyCode::Char('c') => state.view = View::Curriculum,
         KeyCode::Char('p') => state.view = View::Pairs,

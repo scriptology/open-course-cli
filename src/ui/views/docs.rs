@@ -27,7 +27,7 @@ use crate::ui::labels::{
     native_language_code,
 };
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{OpenCourseStyleSheet, build_footer_wrapped, mouse_footer_entries};
+use crate::ui::widgets::{OpenCourseStyleSheet, build_footer_wrapped};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortBy {
@@ -164,38 +164,27 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     // are refreshed below on every draw.
     let width = area.width as usize;
     let footer = if state.docs.viewing_topic.is_some() {
-        if state.docs.content.is_empty() {
-            build_footer_wrapped(
-                &[
-                    ("Esc", common.back_to_list),
-                    ("e", labels.regenerate),
-                    ("p", labels.practice),
-                    ("?", common.help),
-                ],
-                width,
-            )
-        } else {
-            let mut entries = vec![("↑/↓", report_labels.wheel_scroll)];
-            if state.docs.max_scroll_offset > 0 {
-                entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
-            }
-            entries.push(("Esc", common.back_to_list));
-            entries.push(("e", labels.regenerate));
-            entries.push(("p", labels.practice));
-            entries.push(("?", common.help));
-            build_footer_wrapped(&entries, width)
-        }
+        build_footer_wrapped(
+            &[
+                ("Esc", common.all_topics),
+                ("e", labels.regenerate),
+                ("n", common.start_practice),
+                ("?", common.help),
+            ],
+            width,
+        )
     } else {
-        let mut entries: Vec<(&str, &str)> = vec![("↑/↓", common.navigate)];
-        if state.docs.list_overflows {
-            entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
-        }
-        entries.push(("s", common.sort));
-        entries.push(("Enter", common.view));
-        entries.push(("p", labels.practice));
-        entries.push(("Esc", common.back));
-        entries.push(("?", common.help));
-        build_footer_wrapped(&entries, width)
+        build_footer_wrapped(
+            &[
+                ("↑/↓", common.navigate),
+                ("s", common.sort),
+                ("Enter", common.view),
+                ("n", common.start_practice),
+                ("Esc", common.back),
+                ("?", common.help),
+            ],
+            width,
+        )
     };
     let footer_height = footer.lines().count() as u16;
 
@@ -331,7 +320,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                 }
             }
             KeyCode::Char('e') => request_regenerate(state),
-            KeyCode::Char('p') => {
+            KeyCode::Char('n') => {
                 start_practice_from_docs(state).await?;
             }
             KeyCode::Char('j') | KeyCode::Down => {
@@ -374,7 +363,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
                     start_viewing(state, topic);
                 }
             }
-            KeyCode::Char('p') => {
+            KeyCode::Char('n') => {
                 start_practice_from_docs(state).await?;
             }
             _ => {}
