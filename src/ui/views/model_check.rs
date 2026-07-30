@@ -138,7 +138,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             width,
         );
         let mut lines: Vec<String> = wrapped.lines().map(|s| s.to_string()).collect();
-        let first = format!("{} | {}", verdict, lines.first().map(String::as_str).unwrap_or(""));
+        let first = format!(
+            "{} | {}",
+            verdict,
+            lines.first().map(String::as_str).unwrap_or("")
+        );
         if first.chars().count() <= width {
             if !lines.is_empty() {
                 lines[0] = first;

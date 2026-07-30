@@ -249,7 +249,11 @@ fn footer_text(state: &AppState, width: usize) -> String {
             width,
         ),
         Section::Session => build_footer_wrapped(
-            &[("↑/↓", common.select), ("Esc", common.back), ("?", common.help)],
+            &[
+                ("↑/↓", common.select),
+                ("Esc", common.back),
+                ("?", common.help),
+            ],
             width,
         ),
         Section::Profile => build_footer_wrapped(
@@ -395,7 +399,8 @@ fn draw_section_page(
     // The provider wizard renders its own step bodies: input boxes with a
     // caret for BaseUrl/ApiKey, a selector for Endpoint, and a real list
     // widget for the model list; every other body is plain text.
-    let in_provider_wizard = state.settings.section == Section::Provider && state.settings.in_section;
+    let in_provider_wizard =
+        state.settings.section == Section::Provider && state.settings.in_section;
     let step = state.settings.provider_setup_step;
     let custom_provider = state.settings.provider_setup_provider == ProviderId::Custom;
 

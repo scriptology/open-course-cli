@@ -114,10 +114,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             ],
             width,
         ),
-        Mode::Practicing => build_footer_wrapped(
-            &[("Enter", labels.submit), ("Esc", labels.back)],
-            width,
-        ),
+        Mode::Practicing => {
+            build_footer_wrapped(&[("Enter", labels.submit), ("Esc", labels.back)], width)
+        }
     };
     let chunks = screen_chunks(area, footer_text.lines().count() as u16);
 

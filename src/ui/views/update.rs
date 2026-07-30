@@ -52,7 +52,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         .replacen("{}", latest, 1);
 
     let footer_text = build_footer_wrapped(
-        &[("y", common.install), ("n", common.skip), ("?", common.help)],
+        &[
+            ("y", common.install),
+            ("n", common.skip),
+            ("?", common.help),
+        ],
         inner.width as usize,
     );
     let chunks = Layout::default()

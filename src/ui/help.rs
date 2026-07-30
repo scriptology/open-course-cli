@@ -154,7 +154,10 @@ fn docs_groups(
         group(common.group_navigation, nav),
         group(
             common.group_actions,
-            vec![entry("Enter", common.view), entry("n", common.start_practice)],
+            vec![
+                entry("Enter", common.view),
+                entry("n", common.start_practice),
+            ],
         ),
         group(common.group_exit, vec![entry("Esc", common.back)]),
     ]

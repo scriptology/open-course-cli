@@ -424,9 +424,7 @@ async fn settings_endpoint_step_cycles_options() {
         "Down should switch endpoint to messages"
     );
 
-    settings::handle_key(&mut state, KeyCode::Up)
-        .await
-        .unwrap();
+    settings::handle_key(&mut state, KeyCode::Up).await.unwrap();
     assert_eq!(
         state.settings.input, "chat/completions",
         "Up should switch endpoint back to chat/completions"
@@ -546,9 +544,15 @@ async fn settings_endpoint_step_wraps_on_narrow_terminal() {
         text.contains("chat/completions"),
         "endpoint options should wrap, not truncate"
     );
-    assert!(text.contains("messages"), "messages option should be visible");
+    assert!(
+        text.contains("messages"),
+        "messages option should be visible"
+    );
     // The footer reflows onto multiple lines: every command survives.
-    assert!(text.contains("Enter"), "footer should keep the Enter command");
+    assert!(
+        text.contains("Enter"),
+        "footer should keep the Enter command"
+    );
     assert!(text.contains("Esc"), "footer should keep the Esc command");
     assert!(text.contains("назад"), "footer should keep the back action");
 }

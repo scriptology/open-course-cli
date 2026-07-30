@@ -197,10 +197,7 @@ fn wrap_line(line: &Line<'static>, max_width: usize) -> Vec<Line<'static>> {
         }
         for (word, word_style) in split_word(&text, style, body_width) {
             let word_width = display_width(&word);
-            let pending_width: usize = pending_spaces
-                .iter()
-                .map(|(s, _)| display_width(s))
-                .sum();
+            let pending_width: usize = pending_spaces.iter().map(|(s, _)| display_width(s)).sum();
             if width > indent && width + pending_width + word_width > max_width {
                 out.push(Line::from(std::mem::take(&mut current)));
                 if indent > 0 {
@@ -627,7 +624,10 @@ mod tests {
     #[test]
     fn wrap_line_keeps_short_and_empty_lines_intact() {
         let short = wrap_line(&Line::from("short"), 80);
-        assert_eq!(short.iter().map(line_text).collect::<Vec<_>>(), vec!["short"]);
+        assert_eq!(
+            short.iter().map(line_text).collect::<Vec<_>>(),
+            vec!["short"]
+        );
         let empty = wrap_line(&Line::from(""), 80);
         assert_eq!(empty.iter().map(line_text).collect::<Vec<_>>(), vec![""]);
     }
