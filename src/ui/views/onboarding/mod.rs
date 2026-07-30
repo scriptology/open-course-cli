@@ -175,7 +175,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             .constraints([Constraint::Length(3), Constraint::Min(0)])
             .split(card_inner);
 
-        let input_paragraph = render_input_paragraph(&state.onboarding.input, step, accent);
+        let input_paragraph = crate::ui::widgets::text_input::input_paragraph(
+            &display_input(&state.onboarding.input, step),
+            None,
+            accent,
+        );
         frame.render_widget(input_paragraph, inner_chunks[0]);
 
         let help_text = steps::step_help_text(step, state);
@@ -201,24 +205,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         Paragraph::new(footer_lines).style(Style::default().fg(Color::DarkGray)),
         chunks[2],
     );
-}
-
-fn render_input_paragraph(input: &str, step: Step, accent: Color) -> Paragraph<'_> {
-    let display = display_input(input, step);
-    let text = Text::from(Line::from(vec![
-        Span::raw(display),
-        Span::styled(
-            "█",
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        ),
-    ]));
-    Paragraph::new(text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(accent)),
-        )
-        .style(Style::default().fg(Color::White))
 }
 
 fn render_model_step(

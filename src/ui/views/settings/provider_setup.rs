@@ -1,4 +1,8 @@
 use ratatui::crossterm::event::KeyCode;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::Paragraph;
 
 use crate::app::{AppState, LlmResult, View};
 use crate::config::OpenCourseConfig;
@@ -6,10 +10,12 @@ use crate::config::provider::{ProviderConfig, ProviderId};
 use crate::config::write_config;
 use crate::error::{AppError, Result};
 use crate::llm::provider::ProviderMeta;
+use crate::ui::colors;
 use crate::ui::labels::{CommonLabels, SettingsLabels, get_settings_labels, native_language_code};
 use crate::ui::views::model_check;
 use crate::ui::widgets::build_footer;
 use crate::ui::widgets::model_picker::{self, ModelPickerAction, ModelPickerOptions};
+use crate::ui::widgets::text_input;
 
 use super::{Section, SettingsState};
 
@@ -77,43 +83,16 @@ pub(super) fn build_provider_setup_body(
             }
             lines.join("\n")
         }
-        ProviderSetupStep::BaseUrl => {
-            if provider == ProviderId::Custom {
-                labels.base_url_label.replace("{}", &state.settings.input)
-            } else {
-                labels.base_url_readonly.replace(
-                    "{}",
-                    meta.default_base_url.unwrap_or(labels.none_placeholder),
-                )
-            }
-        }
-        ProviderSetupStep::Endpoint => {
-            if provider == ProviderId::Custom {
-                labels.endpoint_choose.replace("{}", &state.settings.input)
-            } else {
-                labels
-                    .endpoint_readonly
-                    .replace("{}", &state.settings.input)
-            }
-        }
-        ProviderSetupStep::ApiKey => {
-            let masked = "*".repeat(state.settings.input.chars().count());
-            match meta.env_key {
-                Some(name) if state.settings.input.is_empty() => {
-                    let suffix = if std::env::var(name).is_ok() {
-                        labels.env_currently_set
-                    } else {
-                        labels.env_not_set
-                    };
-                    labels
-                        .api_key_env
-                        .replacen("{}", &masked, 1)
-                        .replacen("{}", name, 1)
-                        .replacen("{}", suffix, 1)
-                }
-                _ => labels.api_key_label.replace("{}", &masked),
-            }
-        }
+        // Editable BaseUrl (Custom) and ApiKey render as input boxes in
+        // `draw_input_step`; the bodies below are the read-only fallbacks.
+        ProviderSetupStep::BaseUrl => labels.base_url_readonly.replace(
+            "{}",
+            meta.default_base_url.unwrap_or(labels.none_placeholder),
+        ),
+        ProviderSetupStep::Endpoint => labels
+            .endpoint_readonly
+            .replace("{}", &state.settings.input),
+        ProviderSetupStep::ApiKey => String::new(),
         ProviderSetupStep::Model => {
             if state.settings.model_picker.loading {
                 labels.loading_models.to_string()
@@ -130,6 +109,96 @@ pub(super) fn build_provider_setup_body(
     }
 }
 
+/// Renders the BaseUrl / ApiKey wizard steps as a bordered input box with a
+/// block caret (same look as the onboarding inputs) plus a hint line below.
+pub(super) fn draw_input_step(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    state: &AppState,
+    labels: &SettingsLabels,
+) {
+    let provider = state.settings.provider_setup_provider;
+    let meta = ProviderMeta::for_provider(provider);
+    let is_api_key = state.settings.provider_setup_step == ProviderSetupStep::ApiKey;
+
+    let (title, display) = if is_api_key {
+        (
+            labels.api_key_title,
+            "*".repeat(state.settings.input.chars().count()),
+        )
+    } else {
+        (labels.base_url_title, state.settings.input.clone())
+    };
+
+    let hint = if is_api_key {
+        match meta.env_key {
+            Some(name) if state.settings.input.is_empty() => {
+                let suffix = if std::env::var(name).is_ok() {
+                    labels.env_currently_set
+                } else {
+                    labels.env_not_set
+                };
+                labels
+                    .api_key_env_hint
+                    .replacen("{}", name, 1)
+                    .replacen("{}", suffix, 1)
+            }
+            _ => String::new(),
+        }
+    } else {
+        let example = match provider {
+            ProviderId::Custom => "https://opencode.ai/zen/go/v1",
+            _ => meta.default_base_url.unwrap_or(""),
+        };
+        if example.is_empty() {
+            String::new()
+        } else {
+            labels.base_url_example.replace("{}", example)
+        }
+    };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(0)])
+        .split(area);
+
+    let input = text_input::input_paragraph(&display, Some(title), colors::BLUE);
+    frame.render_widget(input, chunks[0]);
+
+    if !hint.is_empty() {
+        frame.render_widget(
+            Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
+            chunks[1],
+        );
+    }
+}
+
+/// Endpoint step for the Custom provider: an arrow-key selector between the
+/// two supported API endpoint paths.
+pub(super) fn build_endpoint_selector(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
+    let options = [
+        ("chat/completions", labels.endpoint_chat_desc),
+        ("messages", labels.endpoint_messages_desc),
+    ];
+    let mut lines = vec![Line::from(labels.endpoint_prompt.to_string())];
+    for (value, desc) in options {
+        let selected = state.settings.input.trim() == value;
+        let marker = if selected { "> " } else { "  " };
+        let style = if selected {
+            Style::default()
+                .fg(colors::GREEN)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{marker}{value} — {desc}"),
+            style,
+        )));
+    }
+    Text::from(lines)
+}
+
 pub(super) fn build_provider_setup_footer(state: &AppState, common: &CommonLabels) -> String {
     match state.settings.provider_setup_step {
         ProviderSetupStep::SelectProvider => build_footer(&[
@@ -138,9 +207,24 @@ pub(super) fn build_provider_setup_footer(state: &AppState, common: &CommonLabel
             ("Esc", common.back),
             ("?", common.help),
         ]),
-        ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
+        ProviderSetupStep::BaseUrl => {
             if state.settings.provider_setup_provider == ProviderId::Custom {
                 build_footer(&[("Enter", common.save), ("Esc", common.back)])
+            } else {
+                build_footer(&[
+                    ("Enter", common.next),
+                    ("Esc", common.back),
+                    ("?", common.help),
+                ])
+            }
+        }
+        ProviderSetupStep::Endpoint => {
+            if state.settings.provider_setup_provider == ProviderId::Custom {
+                build_footer(&[
+                    ("↑/↓", common.select),
+                    ("Enter", common.save),
+                    ("Esc", common.back),
+                ])
             } else {
                 build_footer(&[
                     ("Enter", common.next),
@@ -426,9 +510,11 @@ async fn handle_base_url_step(state: &mut AppState, code: KeyCode) -> Result<()>
         }
         KeyCode::Char(c) if state.settings.provider_setup_provider == ProviderId::Custom => {
             state.settings.input.push(c);
+            state.settings.error = None;
         }
         KeyCode::Backspace if state.settings.provider_setup_provider == ProviderId::Custom => {
             state.settings.input.pop();
+            state.settings.error = None;
         }
         _ => {}
     }
@@ -436,6 +522,7 @@ async fn handle_base_url_step(state: &mut AppState, code: KeyCode) -> Result<()>
 }
 
 async fn handle_endpoint_step(state: &mut AppState, code: KeyCode) -> Result<()> {
+    let custom = state.settings.provider_setup_provider == ProviderId::Custom;
     match code {
         KeyCode::Esc => {
             go_back_provider_setup_step(state);
@@ -443,13 +530,8 @@ async fn handle_endpoint_step(state: &mut AppState, code: KeyCode) -> Result<()>
         KeyCode::Enter => {
             if let Some(config) = state.config.as_mut() {
                 let provider = state.settings.provider_setup_provider;
-                if provider == ProviderId::Custom {
+                if custom {
                     let value = state.settings.input.trim().to_string();
-                    if !value.eq("chat/completions") && !value.eq("messages") {
-                        let labels = get_settings_labels(native_language_code(Some(config)));
-                        state.settings.error = Some(labels.err_endpoint_values.to_string());
-                        return Ok(());
-                    }
                     if let Some(provider_config) = config.providers.get(&provider) {
                         let updated = provider_config.clone().with_endpoint(Some(value));
                         config.providers.insert(provider, updated);
@@ -463,11 +545,13 @@ async fn handle_endpoint_step(state: &mut AppState, code: KeyCode) -> Result<()>
                 }
             }
         }
-        KeyCode::Char(c) if state.settings.provider_setup_provider == ProviderId::Custom => {
-            state.settings.input.push(c);
-        }
-        KeyCode::Backspace if state.settings.provider_setup_provider == ProviderId::Custom => {
-            state.settings.input.pop();
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') if custom => {
+            state.settings.input = if state.settings.input.trim() == "messages" {
+                "chat/completions".to_string()
+            } else {
+                "messages".to_string()
+            };
+            state.settings.error = None;
         }
         _ => {}
     }
@@ -516,9 +600,11 @@ async fn handle_api_key_step(state: &mut AppState, code: KeyCode) -> Result<()> 
         }
         KeyCode::Char(c) => {
             state.settings.input.push(c);
+            state.settings.error = None;
         }
         KeyCode::Backspace => {
             state.settings.input.pop();
+            state.settings.error = None;
         }
         _ => {}
     }

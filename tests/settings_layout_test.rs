@@ -402,3 +402,123 @@ async fn settings_provider_skips_readonly_steps() {
         state.settings.provider_setup_step
     );
 }
+
+#[tokio::test]
+async fn settings_endpoint_step_cycles_options() {
+    use open_course_cli::ui::views::settings::ProviderSetupStep;
+    use ratatui::crossterm::event::KeyCode;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Provider;
+    state.settings.provider_setup_provider = ProviderId::Custom;
+    state.settings.provider_setup_step = ProviderSetupStep::Endpoint;
+    state.settings.input = "chat/completions".to_string();
+
+    settings::handle_key(&mut state, KeyCode::Down)
+        .await
+        .unwrap();
+    assert_eq!(
+        state.settings.input, "messages",
+        "Down should switch endpoint to messages"
+    );
+
+    settings::handle_key(&mut state, KeyCode::Up)
+        .await
+        .unwrap();
+    assert_eq!(
+        state.settings.input, "chat/completions",
+        "Up should switch endpoint back to chat/completions"
+    );
+}
+
+#[tokio::test]
+async fn settings_endpoint_step_renders_selector() {
+    use open_course_cli::ui::views::settings::ProviderSetupStep;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Provider;
+    state.settings.provider_setup_provider = ProviderId::Custom;
+    state.settings.provider_setup_step = ProviderSetupStep::Endpoint;
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("> chat/completions"),
+        "Endpoint step should highlight chat/completions"
+    );
+    assert!(
+        text.contains("  messages"),
+        "Endpoint step should list messages option"
+    );
+}
+
+#[tokio::test]
+async fn settings_api_key_step_renders_input_box() {
+    use open_course_cli::ui::views::settings::ProviderSetupStep;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Provider;
+    state.settings.provider_setup_provider = ProviderId::OpenAi;
+    state.settings.provider_setup_step = ProviderSetupStep::ApiKey;
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("API-ключ"),
+        "ApiKey step should render a titled input box"
+    );
+    assert!(
+        text.contains("********"),
+        "ApiKey value should be masked (config key is \"test-key\")"
+    );
+    assert!(
+        !text.contains("test-key"),
+        "ApiKey value should not be shown in plain text"
+    );
+    assert!(text.contains("█"), "ApiKey input should show a caret");
+}
+
+#[tokio::test]
+async fn settings_base_url_step_renders_input_box() {
+    use open_course_cli::ui::views::settings::ProviderSetupStep;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Provider;
+    state.settings.provider_setup_provider = ProviderId::Custom;
+    state.settings.provider_setup_step = ProviderSetupStep::BaseUrl;
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("Base URL"),
+        "BaseUrl step should render a titled input box"
+    );
+    assert!(
+        text.contains("https://opencode.ai/zen/go/v1"),
+        "BaseUrl step should show an example hint"
+    );
+    assert!(text.contains("█"), "BaseUrl input should show a caret");
+}

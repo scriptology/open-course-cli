@@ -11,6 +11,7 @@ pub mod progress_bar;
 pub mod sparkline;
 pub mod spinner;
 pub mod stacked_progress;
+pub mod text_input;
 pub mod toast;
 
 pub mod logo;

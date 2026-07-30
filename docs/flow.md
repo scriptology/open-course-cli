@@ -173,7 +173,9 @@ Available keys:
 Sections:
 
 - **Provider**: provider, API key (falls back to the provider's environment variable when left
-  blank — see Onboarding), base URL, endpoint, model.
+  blank — see Onboarding), base URL, endpoint, model. Base URL and API key are typed into input
+  boxes with a caret (as in Onboarding); the endpoint path (`chat/completions` / `messages`) is
+  chosen with `↑/↓`.
 - **Profile**: age and CEFR for the active pair. To change languages, add a new pair from the Pairs screen.
 - **Session**: batch size (2–5), hint mode (auto/on-demand).
 - **Data**: reset progress, history, curriculum, reviews, or all data.

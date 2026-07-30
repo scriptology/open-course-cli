@@ -61,9 +61,8 @@ impl SettingsState {
         if self.section == Section::Provider {
             match self.provider_setup_step {
                 ProviderSetupStep::ApiKey => true,
-                ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
-                    self.provider_setup_provider == ProviderId::Custom
-                }
+                ProviderSetupStep::BaseUrl => self.provider_setup_provider == ProviderId::Custom,
+                ProviderSetupStep::Endpoint => false,
                 ProviderSetupStep::Model => self.model_picker.manual,
                 ProviderSetupStep::SelectProvider => false,
             }
@@ -381,13 +380,29 @@ fn draw_section_page(
     ]));
     frame.render_widget(Paragraph::new(header), chunks[0]);
 
-    // The provider wizard's model list renders as a real list widget; every
-    // other body is plain text.
-    let show_model_list = state.settings.section == Section::Provider
-        && state.settings.provider_setup_step == ProviderSetupStep::Model
+    // The provider wizard renders its own step bodies: input boxes with a
+    // caret for BaseUrl/ApiKey, a selector for Endpoint, and a real list
+    // widget for the model list; every other body is plain text.
+    let in_provider_wizard = state.settings.section == Section::Provider && state.settings.in_section;
+    let step = state.settings.provider_setup_step;
+    let custom_provider = state.settings.provider_setup_provider == ProviderId::Custom;
+
+    let show_model_list = in_provider_wizard
+        && step == ProviderSetupStep::Model
         && state.settings.model_picker.shows_list();
 
-    if show_model_list {
+    if in_provider_wizard
+        && (step == ProviderSetupStep::ApiKey
+            || (step == ProviderSetupStep::BaseUrl && custom_provider))
+    {
+        provider_setup::draw_input_step(frame, chunks[1], state, &settings);
+    } else if in_provider_wizard && step == ProviderSetupStep::Endpoint && custom_provider {
+        frame.render_widget(
+            Paragraph::new(provider_setup::build_endpoint_selector(state, &settings))
+                .style(Style::default().fg(Color::White)),
+            chunks[1],
+        );
+    } else if show_model_list {
         let body_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
