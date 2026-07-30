@@ -82,10 +82,13 @@ impl ReportState {
 pub fn print(state: &AppState) -> Result<()> {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let common = get_common_labels(native_language_code(state.config.as_ref()));
+    let max_width = report_line_width();
     let mut stdout = std::io::stdout();
     stdout.queue(Print("\r\n"))?;
     for line in build_report_lines(&state.report, labels) {
-        print_line(&mut stdout, &line, None)?;
+        for wrapped in wrap_line(&line, max_width) {
+            print_line(&mut stdout, &wrapped, None)?;
+        }
     }
     let footer = Line::from(build_footer(&[
         ("n", common.new_topic),
@@ -93,10 +96,122 @@ pub fn print(state: &AppState) -> Result<()> {
         ("d", labels.docs),
         ("Esc", common.dashboard),
     ]));
-    print_line(&mut stdout, &footer, Some(Color::DarkGray))?;
+    for wrapped in wrap_line(&footer, max_width) {
+        print_line(&mut stdout, &wrapped, Some(Color::DarkGray))?;
+    }
     stdout.execute(ResetColor)?;
     stdout.flush()?;
     Ok(())
+}
+
+/// The width report lines are wrapped to: the terminal width, with a sane
+/// fallback and a floor so tiny windows still get a usable wrap.
+fn report_line_width() -> usize {
+    ratatui::crossterm::terminal::size()
+        .map(|(w, _)| w as usize)
+        .unwrap_or(80)
+        .max(20)
+}
+
+/// Display-column width of a text fragment (wide chars count as 2).
+fn display_width(text: &str) -> usize {
+    Span::raw(text.to_string()).width()
+}
+
+/// Splits a word into chunks of at most `body_width` columns. Words that fit
+/// are returned as-is; only longer ones are broken (mid-word, as a fallback).
+fn split_word(text: &str, style: Style, body_width: usize) -> Vec<(String, Style)> {
+    if display_width(text) <= body_width {
+        return vec![(text.to_string(), style)];
+    }
+    let mut chunks = Vec::new();
+    let mut chunk = String::new();
+    for c in text.chars() {
+        chunk.push(c);
+        if display_width(&chunk) >= body_width {
+            chunks.push((std::mem::take(&mut chunk), style));
+        }
+    }
+    if !chunk.is_empty() {
+        chunks.push((chunk, style));
+    }
+    chunks
+}
+
+/// Word-wraps a single report line to `max_width` display columns, preserving
+/// span styles. The terminal wraps at the last column regardless of word
+/// boundaries, so long lines are split here instead: at spaces, keeping words
+/// whole, with continuation lines indented like the original. A word longer
+/// than the line is the only case still broken mid-word.
+fn wrap_line(line: &Line<'static>, max_width: usize) -> Vec<Line<'static>> {
+    let indent = line
+        .spans
+        .iter()
+        .flat_map(|s| s.content.chars())
+        .take_while(|c| *c == ' ')
+        .count()
+        .min(max_width / 2);
+    let body_width = max_width - indent;
+
+    // Token stream: runs of spaces / non-spaces, each with its span's style.
+    let mut tokens: Vec<(String, Style, bool)> = Vec::new();
+    for span in &line.spans {
+        let mut buf = String::new();
+        let mut buf_is_space: Option<bool> = None;
+        for c in span.content.chars() {
+            let is_space = c == ' ';
+            if buf_is_space == Some(!is_space) {
+                tokens.push((std::mem::take(&mut buf), span.style, !is_space));
+            }
+            buf_is_space = Some(is_space);
+            buf.push(c);
+        }
+        if !buf.is_empty() {
+            tokens.push((buf, span.style, buf_is_space.unwrap_or(false)));
+        }
+    }
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
+    if indent > 0 {
+        current.push(Span::raw(" ".repeat(indent)));
+    }
+    let mut width = indent;
+    let mut pending_spaces: Vec<(String, Style)> = Vec::new();
+
+    for (text, style, is_space) in tokens {
+        if is_space {
+            // Spaces between words are kept verbatim; leading spaces of a
+            // continuation line are dropped.
+            if width > indent {
+                pending_spaces.push((text, style));
+            }
+            continue;
+        }
+        for (word, word_style) in split_word(&text, style, body_width) {
+            let word_width = display_width(&word);
+            let pending_width: usize = pending_spaces
+                .iter()
+                .map(|(s, _)| display_width(s))
+                .sum();
+            if width > indent && width + pending_width + word_width > max_width {
+                out.push(Line::from(std::mem::take(&mut current)));
+                if indent > 0 {
+                    current.push(Span::raw(" ".repeat(indent)));
+                }
+                width = indent;
+                pending_spaces.clear();
+            }
+            for (spaces, space_style) in pending_spaces.drain(..) {
+                width += display_width(&spaces);
+                current.push(Span::styled(spaces, space_style));
+            }
+            width += word_width;
+            current.push(Span::styled(word, word_style));
+        }
+    }
+    out.push(Line::from(current));
+    out
 }
 
 fn print_line(stdout: &mut impl Write, line: &Line, fallback_fg: Option<Color>) -> Result<()> {
@@ -466,6 +581,49 @@ fn correct_answer_spans(text: &str, student: &str) -> Vec<Span<'static>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn line_text(line: &Line) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn wrap_line_breaks_at_word_boundaries() {
+        let line = Line::from("one two three four five");
+        let wrapped = wrap_line(&line, 12);
+        let texts: Vec<String> = wrapped.iter().map(line_text).collect();
+        assert_eq!(texts, vec!["one two", "three four", "five"]);
+        for text in &texts {
+            assert!(text.chars().count() <= 12);
+        }
+    }
+
+    #[test]
+    fn wrap_line_preserves_indent_and_styles() {
+        let line = Line::from(vec![
+            Span::raw("   ↪ "),
+            Span::styled("alpha beta gamma delta", Style::default().fg(Color::Red)),
+        ]);
+        let wrapped = wrap_line(&line, 14);
+        let texts: Vec<String> = wrapped.iter().map(line_text).collect();
+        assert_eq!(texts, vec!["   ↪ alpha", "   beta gamma", "   delta"]);
+        assert_eq!(wrapped[1].spans[1].style.fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn wrap_line_hard_splits_long_words() {
+        let line = Line::from("abcdefghij");
+        let wrapped = wrap_line(&line, 4);
+        let texts: Vec<String> = wrapped.iter().map(line_text).collect();
+        assert_eq!(texts, vec!["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn wrap_line_keeps_short_and_empty_lines_intact() {
+        let short = wrap_line(&Line::from("short"), 80);
+        assert_eq!(short.iter().map(line_text).collect::<Vec<_>>(), vec!["short"]);
+        let empty = wrap_line(&Line::from(""), 80);
+        assert_eq!(empty.iter().map(line_text).collect::<Vec<_>>(), vec![""]);
+    }
 
     #[test]
     fn report_header_shows_topic_name() {
