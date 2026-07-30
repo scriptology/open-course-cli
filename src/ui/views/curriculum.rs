@@ -16,7 +16,7 @@ use crate::ui::colors;
 use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::docs;
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{build_footer, draw_confirmation, mouse_footer_entries};
+use crate::ui::widgets::{build_footer_wrapped, draw_confirmation, mouse_footer_entries};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CurriculumSortBy {
@@ -104,12 +104,16 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         let labels = get_report_labels(native_language_code(state.config.as_ref()));
         let common = get_common_labels(native_language_code(state.config.as_ref()));
         let accent = colors::BLUE;
+        let footer_text = build_footer_wrapped(
+            &[("Esc", labels.cancel), ("?", common.help)],
+            area.width as usize,
+        );
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),
                 Constraint::Min(0),
-                Constraint::Length(1),
+                Constraint::Length(footer_text.lines().count() as u16),
             ])
             .split(area);
 
@@ -158,8 +162,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", common.help)]))
-                .style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
         return;
@@ -192,14 +195,49 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     }
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
     let accent = colors::BLUE;
     let header_height = 3;
+
+    // The footer is built before the layout so its wrapped line count can
+    // drive the layout; it reads `list_overflows` from the previous frame,
+    // which is fine — the flag is refreshed below on every draw.
+    let sort_label = match state.curriculum.sort_by {
+        CurriculumSortBy::Progression => labels.sort_progression,
+        CurriculumSortBy::Score => labels.sort_score,
+    };
+    let help = if state.curriculum.topics.is_empty() {
+        build_footer_wrapped(
+            &[
+                ("g", labels.generate_label),
+                ("Esc", labels.back),
+                ("?", common.help),
+            ],
+            area.width as usize,
+        )
+    } else {
+        let sort_entry = format!("{} ({})", labels.sort, sort_label);
+        let mut entries: Vec<(&str, &str)> = vec![("↑↓", labels.navigate)];
+        if state.curriculum.list_overflows {
+            entries.extend(mouse_footer_entries(state.mouse_capture, &labels));
+        }
+        entries.push(("Enter", labels.docs));
+        entries.push(("s", sort_entry.as_str()));
+        entries.push(("a", labels.add_topics_label));
+        entries.push(("x", labels.delete_label));
+        entries.push(("r", labels.reset_label));
+        entries.push(("Esc", labels.back));
+        entries.push(("?", common.help));
+        build_footer_wrapped(&entries, area.width as usize)
+    };
+    let footer_height = help.lines().count() as u16;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(header_height),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(footer_height),
         ])
         .split(area);
 
@@ -211,10 +249,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         Line::from(""),
     ];
     if !state.curriculum.topics.is_empty() {
-        let sort_label = match state.curriculum.sort_by {
-            CurriculumSortBy::Progression => labels.sort_progression,
-            CurriculumSortBy::Score => labels.sort_score,
-        };
         header_lines.push(Line::from(Span::styled(
             format!("{}: {}", labels.sort, sort_label),
             Style::default().fg(Color::DarkGray),
@@ -265,33 +299,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
     frame.render_stateful_widget(list, chunks[1], &mut state.curriculum.list_state);
 
-    let labels = get_report_labels(native_language_code(state.config.as_ref()));
-    let common = get_common_labels(native_language_code(state.config.as_ref()));
-    let sort_label = match state.curriculum.sort_by {
-        CurriculumSortBy::Progression => labels.sort_progression,
-        CurriculumSortBy::Score => labels.sort_score,
-    };
-    let help = if state.curriculum.topics.is_empty() {
-        build_footer(&[
-            ("g", labels.generate_label),
-            ("Esc", labels.back),
-            ("?", common.help),
-        ])
-    } else {
-        let sort_entry = format!("{} ({})", labels.sort, sort_label);
-        let mut entries: Vec<(&str, &str)> = vec![("↑↓", labels.navigate)];
-        if state.curriculum.list_overflows {
-            entries.extend(mouse_footer_entries(state.mouse_capture, &labels));
-        }
-        entries.push(("Enter", labels.docs));
-        entries.push(("s", sort_entry.as_str()));
-        entries.push(("a", labels.add_topics_label));
-        entries.push(("x", labels.delete_label));
-        entries.push(("r", labels.reset_label));
-        entries.push(("Esc", labels.back));
-        entries.push(("?", common.help));
-        build_footer(&entries)
-    };
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
         chunks[2],

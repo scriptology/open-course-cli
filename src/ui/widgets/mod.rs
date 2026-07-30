@@ -19,7 +19,7 @@ pub mod logo;
 pub use cards::Card;
 pub use confirmation::draw_confirmation;
 pub use error_box::ErrorBox;
-pub use footer::{build_footer, mouse_footer_entries};
+pub use footer::{build_footer, build_footer_wrapped, mouse_footer_entries};
 pub use help_overlay::HelpOverlay;
 pub use hint_bar::HintBar;
 pub use logo::Logo;

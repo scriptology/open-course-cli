@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{ReportLabels, get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::{docs, session};
-use crate::ui::widgets::build_footer;
+use crate::ui::widgets::build_footer_wrapped;
 
 #[derive(Debug, Clone)]
 pub struct ReportState {
@@ -90,14 +90,21 @@ pub fn print(state: &AppState) -> Result<()> {
             print_line(&mut stdout, &wrapped, None)?;
         }
     }
-    let footer = Line::from(build_footer(&[
-        ("n", common.new_topic),
-        ("r", common.repeat),
-        ("d", labels.docs),
-        ("Esc", common.dashboard),
-    ]));
-    for wrapped in wrap_line(&footer, max_width) {
-        print_line(&mut stdout, &wrapped, Some(Color::DarkGray))?;
+    let footer = build_footer_wrapped(
+        &[
+            ("n", common.new_topic),
+            ("r", common.repeat),
+            ("d", labels.docs),
+            ("Esc", common.dashboard),
+        ],
+        max_width,
+    );
+    for line in footer.lines() {
+        print_line(
+            &mut stdout,
+            &Line::from(line.to_string()),
+            Some(Color::DarkGray),
+        )?;
     }
     stdout.execute(ResetColor)?;
     stdout.flush()?;

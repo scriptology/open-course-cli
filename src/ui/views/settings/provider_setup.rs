@@ -13,7 +13,7 @@ use crate::llm::provider::ProviderMeta;
 use crate::ui::colors;
 use crate::ui::labels::{CommonLabels, SettingsLabels, get_settings_labels, native_language_code};
 use crate::ui::views::model_check;
-use crate::ui::widgets::build_footer;
+use crate::ui::widgets::build_footer_wrapped;
 use crate::ui::widgets::model_picker::{self, ModelPickerAction, ModelPickerOptions};
 use crate::ui::widgets::text_input;
 
@@ -199,66 +199,93 @@ pub(super) fn build_endpoint_selector(state: &AppState, labels: &SettingsLabels)
     Text::from(lines)
 }
 
-pub(super) fn build_provider_setup_footer(state: &AppState, common: &CommonLabels) -> String {
+pub(super) fn build_provider_setup_footer(
+    state: &AppState,
+    common: &CommonLabels,
+    width: usize,
+) -> String {
     match state.settings.provider_setup_step {
-        ProviderSetupStep::SelectProvider => build_footer(&[
-            ("↑/↓", common.navigate),
-            ("Enter", common.select),
-            ("Esc", common.back),
-            ("?", common.help),
-        ]),
+        ProviderSetupStep::SelectProvider => build_footer_wrapped(
+            &[
+                ("↑/↓", common.navigate),
+                ("Enter", common.select),
+                ("Esc", common.back),
+                ("?", common.help),
+            ],
+            width,
+        ),
         ProviderSetupStep::BaseUrl => {
             if state.settings.provider_setup_provider == ProviderId::Custom {
-                build_footer(&[("Enter", common.save), ("Esc", common.back)])
+                build_footer_wrapped(&[("Enter", common.save), ("Esc", common.back)], width)
             } else {
-                build_footer(&[
-                    ("Enter", common.next),
-                    ("Esc", common.back),
-                    ("?", common.help),
-                ])
+                build_footer_wrapped(
+                    &[
+                        ("Enter", common.next),
+                        ("Esc", common.back),
+                        ("?", common.help),
+                    ],
+                    width,
+                )
             }
         }
         ProviderSetupStep::Endpoint => {
             if state.settings.provider_setup_provider == ProviderId::Custom {
-                build_footer(&[
-                    ("↑/↓", common.select),
-                    ("Enter", common.save),
-                    ("Esc", common.back),
-                ])
+                build_footer_wrapped(
+                    &[
+                        ("↑/↓", common.select),
+                        ("Enter", common.save),
+                        ("Esc", common.back),
+                    ],
+                    width,
+                )
             } else {
-                build_footer(&[
-                    ("Enter", common.next),
-                    ("Esc", common.back),
-                    ("?", common.help),
-                ])
+                build_footer_wrapped(
+                    &[
+                        ("Enter", common.next),
+                        ("Esc", common.back),
+                        ("?", common.help),
+                    ],
+                    width,
+                )
             }
         }
-        ProviderSetupStep::ApiKey => build_footer(&[("Enter", common.save), ("Esc", common.back)]),
+        ProviderSetupStep::ApiKey => {
+            build_footer_wrapped(&[("Enter", common.save), ("Esc", common.back)], width)
+        }
         ProviderSetupStep::Model => {
             if state.settings.model_picker.loading {
-                build_footer(&[("Esc", common.back), ("?", common.help)])
+                build_footer_wrapped(&[("Esc", common.back), ("?", common.help)], width)
             } else if state.settings.model_picker.error.is_some() {
-                build_footer(&[
-                    ("Enter", common.manual),
-                    ("r", common.retry),
-                    ("Esc", common.back),
-                    ("?", common.help),
-                ])
+                build_footer_wrapped(
+                    &[
+                        ("Enter", common.manual),
+                        ("r", common.retry),
+                        ("Esc", common.back),
+                        ("?", common.help),
+                    ],
+                    width,
+                )
             } else if state.settings.model_picker.manual {
-                build_footer(&[("Enter", common.save), ("Esc", common.back)])
+                build_footer_wrapped(&[("Enter", common.save), ("Esc", common.back)], width)
             } else if state.settings.model_picker.models.is_empty() {
-                build_footer(&[
-                    ("Enter", common.enter_manually),
-                    ("Esc", common.back),
-                    ("?", common.help),
-                ])
+                build_footer_wrapped(
+                    &[
+                        ("Enter", common.enter_manually),
+                        ("Esc", common.back),
+                        ("?", common.help),
+                    ],
+                    width,
+                )
             } else {
-                build_footer(&[
-                    ("↑/↓", common.navigate),
-                    ("Enter", common.select),
-                    ("Esc", common.back),
-                    ("?", common.help),
-                ])
+                build_footer_wrapped(
+                    &[
+                        ("↑/↓", common.navigate),
+                        ("Enter", common.select),
+                        ("Esc", common.back),
+                        ("?", common.help),
+                    ],
+                    width,
+                )
             }
         }
     }

@@ -19,7 +19,7 @@ use crate::ui::labels::{
     native_language_code,
 };
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{build_footer, draw_confirmation, model_picker};
+use crate::ui::widgets::{build_footer_wrapped, draw_confirmation, model_picker};
 
 pub use data::ResetAction;
 pub use provider_setup::{
@@ -231,36 +231,44 @@ fn build_body(state: &AppState, labels: ReportLabels, settings: &SettingsLabels)
     Text::from(lines)
 }
 
-fn footer_text(state: &AppState) -> String {
+fn footer_text(state: &AppState, width: usize) -> String {
     let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     if state.settings.section == Section::Provider && state.settings.in_section {
-        return provider_setup::build_provider_setup_footer(state, &common);
+        return provider_setup::build_provider_setup_footer(state, &common, width);
     }
 
     match state.settings.section {
-        Section::Data => build_footer(&[
-            ("↑/↓", common.action),
-            ("Enter", common.reset),
-            ("Esc", common.back),
-            ("?", common.help),
-        ]),
-        Section::Session => build_footer(&[
-            ("↑/↓", common.select),
-            ("Esc", common.back),
-            ("?", common.help),
-        ]),
-        Section::Profile => build_footer(&[
-            ("←/→", common.move_caret),
-            ("Type", common.edit),
-            ("Enter", common.save),
-            ("Esc", common.back),
-        ]),
-        Section::Provider => build_footer(&[
-            ("Tab/Shift+Tab", common.field),
-            ("Enter", common.save),
-            ("Esc", common.back),
-        ]),
+        Section::Data => build_footer_wrapped(
+            &[
+                ("↑/↓", common.action),
+                ("Enter", common.reset),
+                ("Esc", common.back),
+                ("?", common.help),
+            ],
+            width,
+        ),
+        Section::Session => build_footer_wrapped(
+            &[("↑/↓", common.select), ("Esc", common.back), ("?", common.help)],
+            width,
+        ),
+        Section::Profile => build_footer_wrapped(
+            &[
+                ("←/→", common.move_caret),
+                ("Type", common.edit),
+                ("Enter", common.save),
+                ("Esc", common.back),
+            ],
+            width,
+        ),
+        Section::Provider => build_footer_wrapped(
+            &[
+                ("Tab/Shift+Tab", common.field),
+                ("Enter", common.save),
+                ("Esc", common.back),
+            ],
+            width,
+        ),
     }
 }
 
@@ -300,12 +308,22 @@ fn draw_section_picker(
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let settings = get_settings_labels(native_language_code(state.config.as_ref()));
     let common = get_common_labels(native_language_code(state.config.as_ref()));
+    let footer_text = build_footer_wrapped(
+        &[
+            ("↑/↓", common.navigate),
+            ("Enter", common.open),
+            ("Esc", common.back),
+            ("?", common.help),
+        ],
+        area.width as usize,
+    );
+    let footer_height = footer_text.lines().count() as u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(footer_height),
         ])
         .split(area);
 
@@ -336,13 +354,7 @@ fn draw_section_picker(
     frame.render_stateful_widget(list, chunks[1], &mut state.settings.section_list_state);
 
     frame.render_widget(
-        Paragraph::new(build_footer(&[
-            ("↑/↓", common.navigate),
-            ("Enter", common.open),
-            ("Esc", common.back),
-            ("?", common.help),
-        ]))
-        .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray)),
         chunks[2],
     );
 }
@@ -354,7 +366,7 @@ fn draw_section_page(
 ) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let settings = get_settings_labels(native_language_code(state.config.as_ref()));
-    let footer_text = self::footer_text(state);
+    let footer_text = self::footer_text(state, area.width as usize);
     let footer_height = footer_text.lines().count() as u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -399,7 +411,8 @@ fn draw_section_page(
     } else if in_provider_wizard && step == ProviderSetupStep::Endpoint && custom_provider {
         frame.render_widget(
             Paragraph::new(provider_setup::build_endpoint_selector(state, &settings))
-                .style(Style::default().fg(Color::White)),
+                .style(Style::default().fg(Color::White))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
             chunks[1],
         );
     } else if show_model_list {

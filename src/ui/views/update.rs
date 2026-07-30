@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use crate::app::AppState;
 use crate::ui::colors;
 use crate::ui::labels::{get_common_labels, get_update_labels, native_language_code};
-use crate::ui::widgets::build_footer;
+use crate::ui::widgets::build_footer_wrapped;
 use crate::update::CURRENT_VERSION;
 
 #[derive(Debug, Default)]
@@ -51,9 +51,16 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         .replacen("{}", CURRENT_VERSION, 1)
         .replacen("{}", latest, 1);
 
+    let footer_text = build_footer_wrapped(
+        &[("y", common.install), ("n", common.skip), ("?", common.help)],
+        inner.width as usize,
+    );
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(footer_text.lines().count() as u16),
+        ])
         .split(inner);
 
     let text = ratatui::text::Text::from(message);
@@ -64,11 +71,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &AppState) {
         chunks[0],
     );
 
-    let footer_text = build_footer(&[
-        ("y", common.install),
-        ("n", common.skip),
-        ("?", common.help),
-    ]);
     frame.render_widget(
         Paragraph::new(footer_text).alignment(Alignment::Center),
         chunks[1],

@@ -23,7 +23,7 @@ use crate::ui::views::curriculum;
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
 };
-use crate::ui::widgets::{Card, build_footer};
+use crate::ui::widgets::{Card, build_footer_wrapped};
 
 #[derive(Debug, Clone, Default)]
 pub enum Mode {
@@ -68,9 +68,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     if state.session.loading {
+        let footer_text = build_footer_wrapped(
+            &[("Esc", labels.cancel), ("?", common.help)],
+            area.width as usize,
+        );
+        let footer_height = footer_text.lines().count() as u16;
         let loading_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .constraints([Constraint::Min(0), Constraint::Length(footer_height)])
             .split(area);
 
         let spinner_symbol = state.spinner.symbol();
@@ -92,14 +97,29 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         );
 
         frame.render_widget(
-            Paragraph::new(build_footer(&[("Esc", labels.cancel), ("?", common.help)]))
-                .style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray)),
             loading_chunks[1],
         );
         return;
     }
 
-    let chunks = screen_chunks(area);
+    let width = area.width as usize;
+    let footer_text = match state.session.mode {
+        Mode::TopicSelection => build_footer_wrapped(
+            &[
+                ("↑↓", labels.navigate),
+                ("Enter", labels.start_session),
+                ("Esc", labels.back),
+                ("?", common.help),
+            ],
+            width,
+        ),
+        Mode::Practicing => build_footer_wrapped(
+            &[("Enter", labels.submit), ("Esc", labels.back)],
+            width,
+        ),
+    };
+    let chunks = screen_chunks(area, footer_text.lines().count() as u16);
 
     match state.session.mode {
         Mode::TopicSelection => {
@@ -140,13 +160,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             frame.render_stateful_widget(list, chunks[1], &mut state.session.list_state);
 
             frame.render_widget(
-                Paragraph::new(build_footer(&[
-                    ("↑↓", labels.navigate),
-                    ("Enter", labels.start_session),
-                    ("Esc", labels.back),
-                    ("?", common.help),
-                ]))
-                .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
                 chunks[2],
             );
         }
@@ -180,11 +194,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             frame.render_widget(Paragraph::new(input_text), input_inner);
 
             frame.render_widget(
-                Paragraph::new(build_footer(&[
-                    ("Enter", labels.submit),
-                    ("Esc", labels.back),
-                ]))
-                .style(Style::default().fg(Color::DarkGray)),
+                Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
                 chunks[2],
             );
         }

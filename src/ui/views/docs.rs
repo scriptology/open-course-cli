@@ -27,7 +27,7 @@ use crate::ui::labels::{
     native_language_code,
 };
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{OpenCourseStyleSheet, build_footer, mouse_footer_entries};
+use crate::ui::widgets::{OpenCourseStyleSheet, build_footer_wrapped, mouse_footer_entries};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortBy {
@@ -159,12 +159,52 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let report_labels = get_report_labels(native_language_code(state.config.as_ref()));
     let common = get_common_labels(native_language_code(state.config.as_ref()));
 
+    // The footer is built before the layout so its wrapped line count can
+    // drive the layout; the overflow flags are from the previous frame and
+    // are refreshed below on every draw.
+    let width = area.width as usize;
+    let footer = if state.docs.viewing_topic.is_some() {
+        if state.docs.content.is_empty() {
+            build_footer_wrapped(
+                &[
+                    ("Esc", common.back_to_list),
+                    ("e", labels.regenerate),
+                    ("p", labels.practice),
+                    ("?", common.help),
+                ],
+                width,
+            )
+        } else {
+            let mut entries = vec![("↑/↓", report_labels.wheel_scroll)];
+            if state.docs.max_scroll_offset > 0 {
+                entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
+            }
+            entries.push(("Esc", common.back_to_list));
+            entries.push(("e", labels.regenerate));
+            entries.push(("p", labels.practice));
+            entries.push(("?", common.help));
+            build_footer_wrapped(&entries, width)
+        }
+    } else {
+        let mut entries: Vec<(&str, &str)> = vec![("↑/↓", common.navigate)];
+        if state.docs.list_overflows {
+            entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
+        }
+        entries.push(("s", common.sort));
+        entries.push(("Enter", common.view));
+        entries.push(("p", labels.practice));
+        entries.push(("Esc", common.back));
+        entries.push(("?", common.help));
+        build_footer_wrapped(&entries, width)
+    };
+    let footer_height = footer.lines().count() as u16;
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(footer_height),
         ])
         .split(area);
 
@@ -209,26 +249,8 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 
         frame.render_widget(body, chunks[1]);
 
-        let help = if state.docs.content.is_empty() {
-            build_footer(&[
-                ("Esc", common.back_to_list),
-                ("e", labels.regenerate),
-                ("p", labels.practice),
-                ("?", common.help),
-            ])
-        } else {
-            let mut entries = vec![("↑/↓", report_labels.wheel_scroll)];
-            if state.docs.max_scroll_offset > 0 {
-                entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
-            }
-            entries.push(("Esc", common.back_to_list));
-            entries.push(("e", labels.regenerate));
-            entries.push(("p", labels.practice));
-            entries.push(("?", common.help));
-            build_footer(&entries)
-        };
         frame.render_widget(
-            Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(footer.as_str()).style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
     } else {
@@ -282,17 +304,8 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             state.docs.list_overflows = false;
         }
 
-        let mut entries: Vec<(&str, &str)> = vec![("↑/↓", common.navigate)];
-        if state.docs.list_overflows {
-            entries.extend(mouse_footer_entries(state.mouse_capture, &report_labels));
-        }
-        entries.push(("s", common.sort));
-        entries.push(("Enter", common.view));
-        entries.push(("p", labels.practice));
-        entries.push(("Esc", common.back));
-        entries.push(("?", common.help));
         frame.render_widget(
-            Paragraph::new(build_footer(&entries)).style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(footer.as_str()).style(Style::default().fg(Color::DarkGray)),
             chunks[2],
         );
     }

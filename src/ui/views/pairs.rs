@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::ui::colors;
 use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::onboarding;
-use crate::ui::widgets::build_footer;
+use crate::ui::widgets::build_footer_wrapped;
 
 #[derive(Debug, Clone, Default)]
 pub struct PairsState {
@@ -24,17 +24,26 @@ impl PairsState {
 
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut AppState) {
     let accent = colors::GREEN;
+    let labels = get_report_labels(native_language_code(state.config.as_ref()));
+    let common = get_common_labels(native_language_code(state.config.as_ref()));
+    let hint = build_footer_wrapped(
+        &[
+            ("↑/↓", labels.navigate),
+            ("Enter", labels.switch),
+            ("a", labels.add_pair),
+            ("Esc", labels.back),
+            ("?", common.help),
+        ],
+        area.width as usize,
+    );
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(hint.lines().count() as u16),
         ])
         .split(area);
-
-    let labels = get_report_labels(native_language_code(state.config.as_ref()));
-    let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     frame.render_widget(
         Paragraph::new(Text::from(vec![
@@ -89,13 +98,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     list_state.select(Some(state.pairs.selected));
     frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
-    let hint = build_footer(&[
-        ("↑/↓", labels.navigate),
-        ("Enter", labels.switch),
-        ("a", labels.add_pair),
-        ("Esc", labels.back),
-        ("?", common.help),
-    ]);
     frame.render_widget(
         Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
         chunks[2],

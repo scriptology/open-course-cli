@@ -522,3 +522,33 @@ async fn settings_base_url_step_renders_input_box() {
     );
     assert!(text.contains("█"), "BaseUrl input should show a caret");
 }
+
+#[tokio::test]
+async fn settings_endpoint_step_wraps_on_narrow_terminal() {
+    use open_course_cli::ui::views::settings::ProviderSetupStep;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Provider;
+    state.settings.provider_setup_provider = ProviderId::Custom;
+    state.settings.provider_setup_step = ProviderSetupStep::Endpoint;
+
+    let backend = TestBackend::new(40, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    // The selector wraps instead of truncating: all options stay visible.
+    assert!(
+        text.contains("chat/completions"),
+        "endpoint options should wrap, not truncate"
+    );
+    assert!(text.contains("messages"), "messages option should be visible");
+    // The footer reflows onto multiple lines: every command survives.
+    assert!(text.contains("Enter"), "footer should keep the Enter command");
+    assert!(text.contains("Esc"), "footer should keep the Esc command");
+    assert!(text.contains("назад"), "footer should keep the back action");
+}
