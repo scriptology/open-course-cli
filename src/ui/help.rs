@@ -30,21 +30,6 @@ fn group(title: &'static str, entries: Vec<HelpEntry>) -> HelpGroup {
     HelpGroup { title, entries }
 }
 
-fn mouse_entries(state: &AppState, labels: ReportLabels) -> Vec<HelpEntry> {
-    if state.mouse_capture {
-        vec![
-            entry("wheel", labels.wheel_scroll),
-            entry("m", labels.select_text),
-            entry("Shift+drag", labels.select_text),
-        ]
-    } else {
-        vec![
-            entry("mouse", labels.select_text),
-            entry("m", labels.wheel_mode),
-        ]
-    }
-}
-
 pub fn groups_for(state: &AppState) -> Vec<HelpGroup> {
     let lang = native_language_code(state.config.as_ref());
     let labels = get_report_labels(lang);
@@ -75,12 +60,8 @@ fn dashboard_groups(
         nav.push(entry("↑↓", labels.select_topic));
         actions.push(entry("Enter", labels.start_label));
     }
-    if state.dashboard.max_scroll > 0 {
-        nav.extend(mouse_entries(state, labels));
-    }
     nav.push(entry("Esc", common.clear_topic_selection));
     actions.push(entry("n", labels.start_next_label));
-    actions.push(entry("d", labels.docs));
     actions.push(entry("c", labels.curriculum));
     actions.push(entry("p", labels.pairs));
     actions.push(entry("s", labels.settings));
@@ -127,16 +108,14 @@ fn curriculum_groups(
         CurriculumSortBy::Progression => labels.sort_progression,
         CurriculumSortBy::Score => labels.sort_score,
     };
-    let mut nav = vec![entry("↑↓", labels.navigate)];
-    if state.curriculum.list_overflows {
-        nav.extend(mouse_entries(state, labels));
-    }
+    let nav = vec![entry("↑↓", labels.navigate)];
     vec![
         group(common.group_navigation, nav),
         group(
             common.group_actions,
             vec![
-                entry("Enter", labels.docs),
+                entry("Enter", common.start_practice),
+                entry("d", labels.docs),
                 entry("s", format!("{} ({})", labels.sort, sort_label)),
                 entry("a", labels.add_topics_label),
                 entry("x", labels.delete_label),
@@ -154,31 +133,31 @@ fn docs_groups(
 ) -> Vec<HelpGroup> {
     let labels = get_docs_labels(native_language_code(state.config.as_ref()));
     if state.docs.viewing_topic.is_some() {
-        let mut nav = vec![entry("↑/↓", report_labels.wheel_scroll)];
-        if state.docs.max_scroll_offset > 0 {
-            nav.extend(mouse_entries(state, report_labels));
-        }
+        let nav = vec![entry("↑/↓", report_labels.wheel_scroll)];
         return vec![
             group(common.group_navigation, nav),
             group(
                 common.group_actions,
-                vec![entry("e", labels.regenerate), entry("p", labels.practice)],
+                vec![
+                    entry("e", labels.regenerate),
+                    entry("n", common.start_practice),
+                ],
             ),
-            group(common.group_exit, vec![entry("Esc", common.back_to_list)]),
+            group(common.group_exit, vec![entry("Esc", common.all_topics)]),
         ];
     }
-    let mut nav = vec![
+    let nav = vec![
         entry("↑/↓", report_labels.navigate),
         entry("s", labels.sort),
     ];
-    if state.docs.list_overflows {
-        nav.extend(mouse_entries(state, report_labels));
-    }
     vec![
         group(common.group_navigation, nav),
         group(
             common.group_actions,
-            vec![entry("Enter", common.view), entry("p", labels.practice)],
+            vec![
+                entry("Enter", common.view),
+                entry("n", common.start_practice),
+            ],
         ),
         group(common.group_exit, vec![entry("Esc", common.back)]),
     ]

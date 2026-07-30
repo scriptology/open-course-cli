@@ -43,8 +43,7 @@ Main hub after onboarding. Available keys:
 
 | Key | Action |
 |-----|--------|
-| `n` | **New topic** — start the next balanced session: a due review (weakest decayed topic) or the next untouched curriculum topic; every 3rd session is a review when topics are due. If the curriculum is empty, opens the Curriculum view; if there is nothing to review or learn, the curriculum is extended by 5 new topics. |
-| `d` | **Docs** — browse touched topics and view their theory docs. |
+| `n` | **Start** — start the next balanced session: a due review (weakest decayed topic) or the next untouched curriculum topic; every 3rd session is a review when topics are due. If the curriculum is empty, opens the Curriculum view; if there is nothing to review or learn, the curriculum is extended by 5 new topics. |
 | `c` | **Curriculum** — view the full curriculum. |
 | `p` | **Pairs** — switch between language pairs or add a new one. |
 | `s` | **Settings** — edit profile, provider, batch size, hint mode. |
@@ -52,6 +51,8 @@ Main hub after onboarding. Available keys:
 | `↑`/`↓` | Show and move the selector in the **Weak topics** block (top 5 weakest topics). |
 | `Enter` | Start a review session for the selected weak topic. |
 | `Esc` | Hide the weak-topics selector. |
+
+Only the main commands are shown in the hint bar; the weak-topics keys (`↑`/`↓`, `Enter`, `Esc`) still work and are listed in the help overlay (`?`).
 
 If the app starts and there is no curriculum, it redirects to the Curriculum view automatically.
 
@@ -100,7 +101,8 @@ Available keys:
 | `r` | Reset curriculum, progress, and reviews, then regenerate (only when non-empty). |
 | `a` | Add 5 new topics extending the existing curriculum (only when non-empty). |
 | `s` | Toggle sort: progression vs score (only when non-empty). |
-| `Enter` | Open the selected topic in Docs (`Esc` there returns to this list). |
+| `Enter` | Start a practice session for the selected topic. |
+| `d` | Open the selected topic's doc in Docs (`Esc` there returns to this list). |
 | `Esc` | Back to Dashboard. |
 
 Curriculum generation runs in parallel by CEFR level. The screen shows per-level progress: each level displays whether it is waiting, thinking/writing, or complete.
@@ -127,20 +129,22 @@ During a session:
 
 ---
 
-## Docs (`d`)
+## Docs
+
+Docs are reachable from the Curriculum view (`d` on a topic) or from the session report (`d`); there is no dedicated key on the Dashboard.
 
 - Lists touched topics (or all curriculum topics if nothing has been practiced yet).
 - `s` toggles sort.
 - `Enter` opens the selected topic's AI-generated explanation.
-- In the topic view, `↑/↓` or the mouse wheel scrolls, `e` regenerates the review, and `p` starts a practice session for that topic.
+- In the topic view, `↑/↓` or the mouse wheel scrolls, `e` regenerates the review, and `n` starts a practice session for that topic. `Esc` returns to the all-topics list.
 - Cache is used when available; otherwise the explanation is generated live.
-- Press `Esc` to go back. When Docs was opened directly from another screen (Enter on a topic in Curriculum, or `d` on the session report), `Esc` returns to that screen instead of the docs list.
+- When the docs list was opened from another screen (`d` on a topic in Curriculum, or `d` on the session report), `Esc` on the list returns to that screen.
 
 ### Mouse: scroll vs text selection
 
 On the Dashboard, Report, Docs, and Curriculum screens the mouse wheel scrolls the content (or moves the list selection), while the command bar stays pinned at the bottom. Because the terminal sends all mouse activity to the app in this mode, plain native drag-selection is disabled; you have two ways to copy text:
 
-- Press `m` to toggle mouse capture off — drag and copy natively, then press `m` again to get wheel scrolling back. The hint bar shows which mode is active.
+- Press `m` to toggle mouse capture off — drag and copy natively, then press `m` again to get wheel scrolling back. The toggle is not advertised in the UI; it is only documented here.
 - In most terminals, Shift+drag (Option+drag in iTerm2) selects text even while mouse capture is on.
 
 ---
@@ -173,7 +177,9 @@ Available keys:
 Sections:
 
 - **Provider**: provider, API key (falls back to the provider's environment variable when left
-  blank — see Onboarding), base URL, endpoint, model.
+  blank — see Onboarding), base URL, endpoint, model. Base URL and API key are typed into input
+  boxes with a caret (as in Onboarding); the endpoint path (`chat/completions` / `messages`) is
+  chosen with `↑/↓`.
 - **Profile**: age and CEFR for the active pair. To change languages, add a new pair from the Pairs screen.
 - **Session**: batch size (2–5), hint mode (auto/on-demand).
 - **Data**: reset progress, history, curriculum, reviews, or all data.

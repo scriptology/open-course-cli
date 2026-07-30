@@ -16,7 +16,7 @@ use crate::ui::labels::{
     ModelCheckLabels, get_common_labels, get_model_check_labels, get_report_labels,
     native_language_code,
 };
-use crate::ui::widgets::build_footer;
+use crate::ui::widgets::{build_footer, build_footer_wrapped};
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelCheckState {
@@ -114,6 +114,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let mc = get_model_check_labels(lang);
     let common = get_common_labels(lang);
 
+    let width = area.width as usize;
     let footer = if state.model_check.running {
         mc.running_checks
             .replacen("{}", &build_footer(&[("?", common.help)]), 1)
@@ -126,17 +127,30 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         } else {
             mc.verdict_ready
         };
-        format!(
-            "{} | {}",
-            verdict,
-            build_footer(&[
+        let wrapped = build_footer_wrapped(
+            &[
                 ("Enter/c", common.continue_label),
                 ("Esc/b", common.back_to_model_list),
                 ("r", common.retry),
                 ("s", common.skip),
                 ("?", common.help),
-            ])
-        )
+            ],
+            width,
+        );
+        let mut lines: Vec<String> = wrapped.lines().map(|s| s.to_string()).collect();
+        let first = format!(
+            "{} | {}",
+            verdict,
+            lines.first().map(String::as_str).unwrap_or("")
+        );
+        if first.chars().count() <= width {
+            if !lines.is_empty() {
+                lines[0] = first;
+            }
+            lines.join("\n")
+        } else {
+            format!("{}\n{}", verdict, lines.join("\n"))
+        }
     };
     let footer_height = footer.lines().count() as u16;
     let chunks = Layout::vertical([

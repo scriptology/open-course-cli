@@ -18,11 +18,11 @@ pub fn select_previous_wrapping(state: &mut ratatui::widgets::ListState, len: us
     state.select(Some((selected + len - 1) % len));
 }
 
-pub fn screen_chunks(area: Rect) -> [Rect; 3] {
+pub fn screen_chunks(area: Rect, footer_height: u16) -> [Rect; 3] {
     Layout::vertical([
         Constraint::Min(3),
         Constraint::Min(3),
-        Constraint::Length(1),
+        Constraint::Length(footer_height.max(1)),
     ])
     .areas(area)
 }

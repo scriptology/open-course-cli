@@ -8,6 +8,7 @@ use ratatui::widgets::{Paragraph, Widget};
 pub struct HintBar {
     hints: Vec<(String, String)>,
     model_name: Option<String>,
+    accent_key: Option<String>,
 }
 
 impl HintBar {
@@ -18,6 +19,7 @@ impl HintBar {
                 .map(|(k, l)| (k.to_string(), l.to_string()))
                 .collect(),
             model_name: None,
+            accent_key: None,
         }
     }
 
@@ -29,6 +31,13 @@ impl HintBar {
         self.model_name = Some(model.into());
         self
     }
+
+    /// Highlights one hint (by its key) in green — used for the primary
+    /// action of the screen.
+    pub fn accent(mut self, key: &str) -> Self {
+        self.accent_key = Some(key.to_string());
+        self
+    }
 }
 
 impl Widget for HintBar {
@@ -37,15 +46,22 @@ impl Widget for HintBar {
             .hints
             .iter()
             .flat_map(|(key, label)| {
-                [
-                    Span::styled(
-                        format!("{}:", key),
-                        Style::default()
-                            .fg(colors::BLUE)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(format!("{}  ", label)),
-                ]
+                let accented = self.accent_key.as_deref() == Some(key.as_str());
+                let key_style = if accented {
+                    Style::default()
+                        .fg(colors::GREEN)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(colors::BLUE)
+                        .add_modifier(Modifier::BOLD)
+                };
+                let label_span = if accented {
+                    Span::styled(format!("{}  ", label), Style::default().fg(colors::GREEN))
+                } else {
+                    Span::raw(format!("{}  ", label))
+                };
+                [Span::styled(format!("{}:", key), key_style), label_span]
             })
             .collect();
 

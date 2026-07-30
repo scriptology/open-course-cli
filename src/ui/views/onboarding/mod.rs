@@ -19,6 +19,7 @@ use crate::ui::labels::{get_common_labels, get_onboarding_labels, native_languag
 use crate::ui::views::model_check;
 use crate::ui::widgets::Logo;
 use crate::ui::widgets::build_footer;
+use crate::ui::widgets::build_footer_wrapped;
 use crate::ui::widgets::model_picker;
 
 pub use handlers::handle_key;
@@ -38,56 +39,78 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let labels = get_onboarding_labels(lang);
     let common = get_common_labels(lang);
     let step = state.onboarding.current_step();
+    let width = area.width as usize;
     let footer_text = match step {
-        Step::Provider => build_footer(&[
-            ("↑/↓", common.select_provider),
-            ("Enter", common.next),
-            ("Esc", common.quit),
-            ("?", common.help),
-        ]),
-        Step::Cefr => build_footer(&[
-            ("↑/↓", common.select_level),
-            ("Enter", common.next),
-            ("Esc", common.quit),
-            ("?", common.help),
-        ]),
-        Step::BatchSize => build_footer(&[
-            ("↑/↓", common.select_batch_size),
-            ("Enter", common.next),
-            ("Esc", common.quit),
-            ("?", common.help),
-        ]),
+        Step::Provider => build_footer_wrapped(
+            &[
+                ("↑/↓", common.select_provider),
+                ("Enter", common.next),
+                ("Esc", common.quit),
+                ("?", common.help),
+            ],
+            width,
+        ),
+        Step::Cefr => build_footer_wrapped(
+            &[
+                ("↑/↓", common.select_level),
+                ("Enter", common.next),
+                ("Esc", common.quit),
+                ("?", common.help),
+            ],
+            width,
+        ),
+        Step::BatchSize => build_footer_wrapped(
+            &[
+                ("↑/↓", common.select_batch_size),
+                ("Enter", common.next),
+                ("Esc", common.quit),
+                ("?", common.help),
+            ],
+            width,
+        ),
         Step::Model if state.onboarding.model_picker.loading => labels.loading_models.replace(
             "{}",
-            &build_footer(&[("Esc", common.quit), ("?", common.help)]),
+            &build_footer_wrapped(&[("Esc", common.quit), ("?", common.help)], width),
         ),
-        Step::Model if state.onboarding.model_picker.error.is_some() => build_footer(&[
-            ("r", common.retry),
-            ("m", common.manual),
-            ("Esc", common.quit),
-            ("?", common.help),
-        ]),
-        Step::Model if state.onboarding.model_picker.manual => build_footer(&[
-            (common.type_hint, common.model_id),
-            ("Enter", common.next),
-            ("Esc", common.quit),
-        ]),
-        Step::Model if !state.onboarding.model_picker.models.is_empty() => build_footer(&[
-            ("↑/↓", common.select_model),
-            ("Enter", common.next),
-            ("Esc", common.quit),
-            ("?", common.help),
-        ]),
+        Step::Model if state.onboarding.model_picker.error.is_some() => build_footer_wrapped(
+            &[
+                ("r", common.retry),
+                ("m", common.manual),
+                ("Esc", common.quit),
+                ("?", common.help),
+            ],
+            width,
+        ),
+        Step::Model if state.onboarding.model_picker.manual => build_footer_wrapped(
+            &[
+                (common.type_hint, common.model_id),
+                ("Enter", common.next),
+                ("Esc", common.quit),
+            ],
+            width,
+        ),
+        Step::Model if !state.onboarding.model_picker.models.is_empty() => build_footer_wrapped(
+            &[
+                ("↑/↓", common.select_model),
+                ("Enter", common.next),
+                ("Esc", common.quit),
+                ("?", common.help),
+            ],
+            width,
+        ),
         Step::BaseUrl if !steps::shows_base_url_step(state.onboarding.provider) => {
-            build_footer(&[("Enter", common.next), ("Esc", common.quit)])
+            build_footer_wrapped(&[("Enter", common.next), ("Esc", common.quit)], width)
         }
-        _ => build_footer(&[
-            ("Tab/Enter", common.next),
-            ("Shift+Tab", common.prev),
-            ("Esc", common.quit),
-        ]),
+        _ => build_footer_wrapped(
+            &[
+                ("Tab/Enter", common.next),
+                ("Shift+Tab", common.prev),
+                ("Esc", common.quit),
+            ],
+            width,
+        ),
     };
-    let mut footer_lines = vec![Line::from(footer_text)];
+    let mut footer_lines: Vec<Line> = footer_text.lines().map(Line::from).collect();
     if !state.onboarding.error.is_empty() {
         footer_lines.push(
             Line::from(state.onboarding.error.clone()).style(Style::default().fg(Color::Red)),
@@ -175,7 +198,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             .constraints([Constraint::Length(3), Constraint::Min(0)])
             .split(card_inner);
 
-        let input_paragraph = render_input_paragraph(&state.onboarding.input, step, accent);
+        let input_paragraph = crate::ui::widgets::text_input::input_paragraph(
+            &display_input(&state.onboarding.input, step),
+            None,
+            accent,
+        );
         frame.render_widget(input_paragraph, inner_chunks[0]);
 
         let help_text = steps::step_help_text(step, state);
@@ -201,24 +228,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         Paragraph::new(footer_lines).style(Style::default().fg(Color::DarkGray)),
         chunks[2],
     );
-}
-
-fn render_input_paragraph(input: &str, step: Step, accent: Color) -> Paragraph<'_> {
-    let display = display_input(input, step);
-    let text = Text::from(Line::from(vec![
-        Span::raw(display),
-        Span::styled(
-            "█",
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        ),
-    ]));
-    Paragraph::new(text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(accent)),
-        )
-        .style(Style::default().fg(Color::White))
 }
 
 fn render_model_step(

@@ -11,6 +11,7 @@ pub mod progress_bar;
 pub mod sparkline;
 pub mod spinner;
 pub mod stacked_progress;
+pub mod text_input;
 pub mod toast;
 
 pub mod logo;
@@ -18,7 +19,7 @@ pub mod logo;
 pub use cards::Card;
 pub use confirmation::draw_confirmation;
 pub use error_box::ErrorBox;
-pub use footer::{build_footer, mouse_footer_entries};
+pub use footer::{build_footer, build_footer_wrapped};
 pub use help_overlay::HelpOverlay;
 pub use hint_bar::HintBar;
 pub use logo::Logo;

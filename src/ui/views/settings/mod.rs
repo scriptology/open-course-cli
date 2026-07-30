@@ -19,7 +19,7 @@ use crate::ui::labels::{
     native_language_code,
 };
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{build_footer, draw_confirmation, model_picker};
+use crate::ui::widgets::{build_footer_wrapped, draw_confirmation, model_picker};
 
 pub use data::ResetAction;
 pub use provider_setup::{
@@ -61,9 +61,8 @@ impl SettingsState {
         if self.section == Section::Provider {
             match self.provider_setup_step {
                 ProviderSetupStep::ApiKey => true,
-                ProviderSetupStep::BaseUrl | ProviderSetupStep::Endpoint => {
-                    self.provider_setup_provider == ProviderId::Custom
-                }
+                ProviderSetupStep::BaseUrl => self.provider_setup_provider == ProviderId::Custom,
+                ProviderSetupStep::Endpoint => false,
                 ProviderSetupStep::Model => self.model_picker.manual,
                 ProviderSetupStep::SelectProvider => false,
             }
@@ -232,36 +231,48 @@ fn build_body(state: &AppState, labels: ReportLabels, settings: &SettingsLabels)
     Text::from(lines)
 }
 
-fn footer_text(state: &AppState) -> String {
+fn footer_text(state: &AppState, width: usize) -> String {
     let common = get_common_labels(native_language_code(state.config.as_ref()));
 
     if state.settings.section == Section::Provider && state.settings.in_section {
-        return provider_setup::build_provider_setup_footer(state, &common);
+        return provider_setup::build_provider_setup_footer(state, &common, width);
     }
 
     match state.settings.section {
-        Section::Data => build_footer(&[
-            ("↑/↓", common.action),
-            ("Enter", common.reset),
-            ("Esc", common.back),
-            ("?", common.help),
-        ]),
-        Section::Session => build_footer(&[
-            ("↑/↓", common.select),
-            ("Esc", common.back),
-            ("?", common.help),
-        ]),
-        Section::Profile => build_footer(&[
-            ("←/→", common.move_caret),
-            ("Type", common.edit),
-            ("Enter", common.save),
-            ("Esc", common.back),
-        ]),
-        Section::Provider => build_footer(&[
-            ("Tab/Shift+Tab", common.field),
-            ("Enter", common.save),
-            ("Esc", common.back),
-        ]),
+        Section::Data => build_footer_wrapped(
+            &[
+                ("↑/↓", common.action),
+                ("Enter", common.reset),
+                ("Esc", common.back),
+                ("?", common.help),
+            ],
+            width,
+        ),
+        Section::Session => build_footer_wrapped(
+            &[
+                ("↑/↓", common.select),
+                ("Esc", common.back),
+                ("?", common.help),
+            ],
+            width,
+        ),
+        Section::Profile => build_footer_wrapped(
+            &[
+                ("←/→", common.move_caret),
+                ("Type", common.edit),
+                ("Enter", common.save),
+                ("Esc", common.back),
+            ],
+            width,
+        ),
+        Section::Provider => build_footer_wrapped(
+            &[
+                ("Tab/Shift+Tab", common.field),
+                ("Enter", common.save),
+                ("Esc", common.back),
+            ],
+            width,
+        ),
     }
 }
 
@@ -301,12 +312,22 @@ fn draw_section_picker(
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let settings = get_settings_labels(native_language_code(state.config.as_ref()));
     let common = get_common_labels(native_language_code(state.config.as_ref()));
+    let footer_text = build_footer_wrapped(
+        &[
+            ("↑/↓", common.navigate),
+            ("Enter", common.open),
+            ("Esc", common.back),
+            ("?", common.help),
+        ],
+        area.width as usize,
+    );
+    let footer_height = footer_text.lines().count() as u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(footer_height),
         ])
         .split(area);
 
@@ -337,13 +358,7 @@ fn draw_section_picker(
     frame.render_stateful_widget(list, chunks[1], &mut state.settings.section_list_state);
 
     frame.render_widget(
-        Paragraph::new(build_footer(&[
-            ("↑/↓", common.navigate),
-            ("Enter", common.open),
-            ("Esc", common.back),
-            ("?", common.help),
-        ]))
-        .style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray)),
         chunks[2],
     );
 }
@@ -355,7 +370,7 @@ fn draw_section_page(
 ) {
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     let settings = get_settings_labels(native_language_code(state.config.as_ref()));
-    let footer_text = self::footer_text(state);
+    let footer_text = self::footer_text(state, area.width as usize);
     let footer_height = footer_text.lines().count() as u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -381,13 +396,31 @@ fn draw_section_page(
     ]));
     frame.render_widget(Paragraph::new(header), chunks[0]);
 
-    // The provider wizard's model list renders as a real list widget; every
-    // other body is plain text.
-    let show_model_list = state.settings.section == Section::Provider
-        && state.settings.provider_setup_step == ProviderSetupStep::Model
+    // The provider wizard renders its own step bodies: input boxes with a
+    // caret for BaseUrl/ApiKey, a selector for Endpoint, and a real list
+    // widget for the model list; every other body is plain text.
+    let in_provider_wizard =
+        state.settings.section == Section::Provider && state.settings.in_section;
+    let step = state.settings.provider_setup_step;
+    let custom_provider = state.settings.provider_setup_provider == ProviderId::Custom;
+
+    let show_model_list = in_provider_wizard
+        && step == ProviderSetupStep::Model
         && state.settings.model_picker.shows_list();
 
-    if show_model_list {
+    if in_provider_wizard
+        && (step == ProviderSetupStep::ApiKey
+            || (step == ProviderSetupStep::BaseUrl && custom_provider))
+    {
+        provider_setup::draw_input_step(frame, chunks[1], state, &settings);
+    } else if in_provider_wizard && step == ProviderSetupStep::Endpoint && custom_provider {
+        frame.render_widget(
+            Paragraph::new(provider_setup::build_endpoint_selector(state, &settings))
+                .style(Style::default().fg(Color::White))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
+            chunks[1],
+        );
+    } else if show_model_list {
         let body_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
