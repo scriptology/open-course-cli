@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/scriptology/open-course-cli/compare/v0.7.0...v0.8.0) (2026-07-30)
+
+
+### Features
+
+* **ui:** render provider host/API key steps as caret input boxes, endpoint as selector ([3209b0c](https://github.com/scriptology/open-course-cli/commit/3209b0c7fdd53e694e48a0bd597119e6eb278d49))
+* **ui:** rework dashboard/curriculum/docs hotkeys and hide wheel/m hints ([f49a96c](https://github.com/scriptology/open-course-cli/commit/f49a96ccd1cc43615520a1d009642da46c27bc95))
+
+
+### Bug Fixes
+
+* **ui:** reflow footers and wrap the endpoint selector on narrow terminals ([aff6bab](https://github.com/scriptology/open-course-cli/commit/aff6babad256212bcf475f2eb7a216ec1eef58c4))
+* **ui:** word-wrap the report page instead of breaking words mid-line ([5e5bf6c](https://github.com/scriptology/open-course-cli/commit/5e5bf6c7dcb666628109c46ea70578d206d16d35))
+
 ## [0.7.0](https://github.com/scriptology/open-course-cli/compare/v0.6.1...v0.7.0) (2026-07-29)
 
 
