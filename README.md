@@ -111,10 +111,15 @@ or re-run the install command from [Install](#install), or `cargo install open-c
 
 ## Architecture
 
-- `src/ui/` — ratatui screens and widgets.
-- `src/core/` — session orchestration, dashboard stats, spaced-repetition logic.
-- `src/db/` — LanceDB tables and schemas.
-- `src/llm/` — LLM client, prompts, streaming, and diagnostics.
+The project is a Cargo workspace under `crates/`:
+
+- `crates/cli/` — the `opencourse` binary: app event loop, ratatui screens and widgets (a thin adapter over the service layer).
+- `crates/service/` — business logic: session flow, curriculum operations, data resets.
+- `crates/core/` — domain types, session orchestration, dashboard stats, spaced-repetition logic.
+- `crates/db/` — LanceDB tables and schemas.
+- `crates/llm/` — LLM client, prompts, streaming, and diagnostics.
+- `crates/config/` — config file, profile, providers, and data migrations.
+- `crates/sync/` — cloud sync client (protocol, outbox push/pull, token store).
 
 ## Development
 
@@ -132,24 +137,19 @@ pre-commit install
 
 ## Releasing a new version
 
-Releases are built automatically from Git tags via GitHub Actions.
+Releases are automated with [release-please](https://github.com/googleapis/release-please) and GitHub Actions.
 
-1. Bump the version in `Cargo.toml` (and run `cargo build` to update `Cargo.lock`).
-2. Commit and push the version bump.
-3. Create and push a tag:
-
-   ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
-
-4. GitHub Actions will build binaries for:
+1. Merge changes to `main` using conventional commits. release-please keeps a release PR open that bumps the version in `crates/cli/Cargo.toml` and updates `crates/cli/CHANGELOG.md`.
+2. Merge the release PR — release-please creates the version tag (e.g. `v0.9.0`).
+3. GitHub Actions builds binaries for:
    - `aarch64-apple-darwin` (Apple Silicon)
    - `x86_64-apple-darwin` (Intel Mac)
    - `x86_64-unknown-linux-gnu` (Linux)
 
-   …and publish them to the GitHub Release.
-5. The installer script at `installer.sh` always points to the latest release.
+   …and publishes them to the GitHub Release.
+4. The installer script at `installer.sh` always points to the latest release.
+
+The workspace crates all share one version; only `crates/cli` (the `opencourse` binary) is released, and its version is the release version.
 
 ### Supported release platforms
 
@@ -158,3 +158,7 @@ Releases are built automatically from Git tags via GitHub Actions.
 | `aarch64-apple-darwin` | macOS | Apple Silicon |
 | `x86_64-apple-darwin` | macOS | Intel |
 | `x86_64-unknown-linux-gnu` | Linux | x86_64 |
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.

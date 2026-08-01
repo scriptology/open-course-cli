@@ -1,0 +1,14 @@
+[package]
+name = "open-course-core"
+version = "0.8.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = { workspace = true }
+uuid = { workspace = true }

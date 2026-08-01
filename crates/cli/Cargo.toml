@@ -1,0 +1,39 @@
+[package]
+name = "open-course-cli"
+version = "0.8.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "opencourse"
+path = "src/main.rs"
+
+[dependencies]
+open-course-core = { workspace = true }
+open-course-db = { workspace = true }
+open-course-llm = { workspace = true }
+open-course-config = { workspace = true }
+open-course-service = { workspace = true }
+open-course-sync = { workspace = true }
+
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tui-markdown = { workspace = true }
+
+tokio = { workspace = true }
+futures-util = { workspace = true }
+
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+
+clap = { workspace = true }
+
+anyhow = { workspace = true }
+chrono = { workspace = true }
+time = { workspace = true }
+unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

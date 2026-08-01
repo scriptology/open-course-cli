@@ -1,0 +1,16 @@
+[package]
+name = "open-course-service"
+version = "0.8.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+open-course-core = { workspace = true }
+open-course-db = { workspace = true }
+open-course-llm = { workspace = true }
+open-course-config = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }

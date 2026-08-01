@@ -1,0 +1,20 @@
+[package]
+name = "open-course-sync"
+version = "0.8.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+open-course-core = { workspace = true }
+open-course-db = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+keyring = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+axum = "0.8"
