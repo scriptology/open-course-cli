@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/scriptology/open-course-cli/compare/v0.9.0...v0.9.1) (2026-08-01)
+
+
+### Bug Fixes
+
+* release binaries never built, false "Updated" on failed download ([7a94e2c](https://github.com/scriptology/open-course-cli/commit/7a94e2c0caa841ba307bc618f98197f1ab1cfd0e))
+* release binaries never built, false "Updated" on failed download ([f89fbc7](https://github.com/scriptology/open-course-cli/commit/f89fbc7ff1b5986e08e1181cc0ca212021b115f7))
+
 ## [0.9.0](https://github.com/scriptology/open-course-cli/compare/v0.8.0...v0.9.0) (2026-08-01)
 
 
