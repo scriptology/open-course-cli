@@ -7,7 +7,10 @@ const GITHUB_LATEST_API: &str =
 
 const GITHUB_LATEST_PAGE: &str = "https://github.com/scriptology/open-course-cli/releases/latest";
 
-const INSTALL_COMMAND: &str = "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/scriptology/open-course-cli/releases/latest/download/opencourse-installer.sh | sh";
+/// Downloads the installer to a temp file first and only then runs it: with a
+/// plain `curl | sh` pipe a failed download (e.g. a release without assets)
+/// pipes nothing into `sh`, which exits 0 and fakes a successful update.
+const INSTALL_COMMAND: &str = "tmp=\"$(mktemp)\" && curl --proto '=https' --tlsv1.2 -LsSf https://github.com/scriptology/open-course-cli/releases/latest/download/opencourse-installer.sh -o \"$tmp\" && sh \"$tmp\"; rc=$?; rm -f \"$tmp\"; exit $rc";
 
 /// Query GitHub for the latest release tag and return it without the leading
 /// `v`. Any network or parse error is treated as "no update available" so the
