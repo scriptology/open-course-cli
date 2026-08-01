@@ -1,13 +1,16 @@
-[package]
-name = "open-course-cli"
-version = "0.8.0"
-edition = "2024"
+[workspace]
+members = ["crates/*"]
+resolver = "3"
 
-[[bin]]
-name = "opencourse"
-path = "src/main.rs"
+[workspace.dependencies]
+# Internal crates
+open-course-core = { path = "crates/core", version = "0.8.0" }
+open-course-db = { path = "crates/db", version = "0.8.0" }
+open-course-llm = { path = "crates/llm", version = "0.8.0" }
+open-course-config = { path = "crates/config", version = "0.8.0" }
+open-course-service = { path = "crates/service", version = "0.8.0" }
+open-course-sync = { path = "crates/sync", version = "0.8.0" }
 
-[dependencies]
 # TUI
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
@@ -44,6 +47,8 @@ chrono = { version = "0.4", features = ["serde"] }
 time = "0.3"
 unicode-normalization = "0.1"
 regex = "1"
+uuid = { version = "1", features = ["v7"] }
+keyring = "3"
 
-[dev-dependencies]
+# Dev
 tempfile = "3"

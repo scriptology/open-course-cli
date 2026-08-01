@@ -183,8 +183,43 @@ Sections:
 - **Profile**: age and CEFR for the active pair. To change languages, add a new pair from the Pairs screen.
 - **Session**: batch size (2–5), hint mode (auto/on-demand).
 - **Data**: reset progress, history, curriculum, reviews, or all data.
+- **Account**: cloud sign-in and sync (see below).
 
 Changes are saved immediately. Press `Esc` to return to the dashboard.
+
+---
+
+## Account & Sync
+
+The **Account** section in Settings connects the app to the cloud. Sync is strictly opt-in: nothing leaves the device until you sign in and explicitly enable sync for the current pair.
+
+### Signing in
+
+1. Choose **Sign in** — the app starts a device flow and shows a short **code** and a **verification URL** (it also tries to open the browser for you).
+2. Confirm the code in the browser. The app polls in the background; if the code expires, use **Retry sign in**.
+3. On success the access token is stored in the **system keychain** (falling back to a plain 0600 file with a visible warning when the keychain is unavailable — never in the config file), and the account email and device id are saved to the config.
+
+The section shows: account email, device, token storage backend, subscription status (best-effort, "unavailable" offline), **last sync** time, and the number of **pending changes** waiting in the local outbox. If the server rejects the token, a "sign-in required" notice appears (nothing is deleted — just sign in again).
+
+Actions: **Sync now** (pull, then push), **Sync for this pair** on/off, **Sign out** (removes the token and clears the account from the config; pending changes are kept).
+
+### What is synced
+
+- Syncs: course curriculum (topics), topic progress, session scores, words and phrases (learning items), service metadata.
+- Not synced: exercise answers and texts, topic notes (reviews), debug dumps, provider settings and API keys — these never leave the device.
+
+### Background sync
+
+- **Pull on start**: when signed in and sync is enabled for the pair, the app pulls remote changes in the background on startup (short timeout, never blocks the UI).
+- **Push after session**: after each finished session, its changes are pushed in the background. Network errors only surface in the Account section — nothing is lost, the outbox is retried next time.
+
+### First device on a pair / conflicts
+
+Curriculum is a sync-once entity: the first machine to push marks the canonical curriculum in the cloud. When you enable sync on a pair that already has a cloud curriculum, or a push hits a conflict, a dialog offers:
+
+- **Use the cloud curriculum** (adopt) — local topics missing from the cloud one are retired (their progress is kept, just inactive). If you have local progress, a second question offers **Merge with the cloud** (last-writer-wins by timestamp) or **Start from the cloud, discard local**.
+- **Keep mine and replace the cloud** (replace) — your curriculum becomes the new canonical version on every device.
+- **Cancel** — nothing changes; sync stays disabled (or the conflict unresolved).
 
 ---
 
