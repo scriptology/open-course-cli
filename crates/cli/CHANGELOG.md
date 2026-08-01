@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/scriptology/open-course-cli/compare/v0.8.0...v0.9.0) (2026-08-01)
+
+
+### Features
+
+* optional cloud sync — workspace split, sync client, account UI ([be63a52](https://github.com/scriptology/open-course-cli/commit/be63a52170c5e7526a5e34d9d19647e9114f988c))
+* optional cloud sync — workspace split, sync client, account UI ([001bc39](https://github.com/scriptology/open-course-cli/commit/001bc39cb0f2042c5e8e7aad51781b5b4ac7b8ee))
+
 ## [0.8.0](https://github.com/scriptology/open-course-cli/compare/v0.7.0...v0.8.0) (2026-07-30)
 
 
