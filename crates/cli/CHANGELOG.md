@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.2](https://github.com/scriptology/open-course-cli/compare/v0.9.1...v0.9.2) (2026-08-02)
+
+
+### Bug Fixes
+
+* one error style across the CLI, action before error in Account ([56791f8](https://github.com/scriptology/open-course-cli/commit/56791f81323313066c67095bfd908ba3361bb5ff))
+* one error style across the CLI, action before error in Account ([c50a4e5](https://github.com/scriptology/open-course-cli/commit/c50a4e5f43abf146535596cf50c069a60aaf7d1d))
+
 ## [0.9.1](https://github.com/scriptology/open-course-cli/compare/v0.9.0...v0.9.1) (2026-08-01)
 
 
