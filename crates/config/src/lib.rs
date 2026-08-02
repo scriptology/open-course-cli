@@ -41,7 +41,7 @@ pub struct SyncConfig {
     pub device_id: Option<String>,
 }
 
-pub const DEFAULT_SYNC_SERVER_URL: &str = "https://api.opencourse.app";
+pub const DEFAULT_SYNC_SERVER_URL: &str = "https://api.open-course.eu";
 pub const SYNC_SERVER_URL_ENV: &str = "OPEN_COURSE_SYNC_URL";
 
 /// Sync server base URL: the `OPEN_COURSE_SYNC_URL` env var wins over the

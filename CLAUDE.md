@@ -114,7 +114,7 @@ The sync client crate defines the protocol the future server must implement (cam
 - **Engine** (`engine.rs`): `push` drains the outbox (only after server confirmation — repeats are safe), `pull` applies changes with per-row last-writer-wins on `updated_at` (missing local timestamp = oldest; ties and implausible future local timestamps go to the incoming row).
 - **Binding** (`bind.rs`): `first_bind_choices` (FreshLocal/FreshCloud/Conflict), `adopt_cloud_curriculum` (take the cloud canon, tombstone local topics not in it, optional progress wipe that bypasses the outbox) and `replace_cloud_curriculum` (push local topics as the new canon with `forceCurriculum` and version `max(cloud, local)+1`).
 - **Tokens** (`tokens.rs`): `TokenStore` keeps the access token in the OS keychain when available, falling back to a 0600 `auth.json` in the data dir (the UI warns about the file backend). Tokens never touch the config file.
-- The server URL comes from `resolve_sync_server_url` (config crate): env `OPEN_COURSE_SYNC_URL` > `config.sync.serverUrl` > `https://api.opencourse.app`.
+- The server URL comes from `resolve_sync_server_url` (config crate): env `OPEN_COURSE_SYNC_URL` > `config.sync.serverUrl` > `https://api.open-course.eu`.
 
 ## Testing conventions
 
