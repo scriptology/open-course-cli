@@ -9,35 +9,10 @@ use crate::client::LlmClient;
 use crate::debug_log::log_debug_event;
 use crate::streaming::StreamChunk;
 use open_course_core::error::{AppError, Result};
+pub(crate) use open_course_core::llm::response::LlmResponse;
 
 pub(crate) const LLM_TIMEOUT_SECONDS: u64 = 60;
 pub(crate) const LLM_CURRICULUM_TIMEOUT_SECONDS: u64 = 300;
-
-#[derive(Debug, Clone)]
-pub(crate) struct LlmResponse {
-    pub raw: String,
-    pub content_chars: usize,
-    pub reasoning_chars: usize,
-}
-
-impl LlmResponse {
-    pub fn empty() -> Self {
-        Self {
-            raw: String::new(),
-            content_chars: 0,
-            reasoning_chars: 0,
-        }
-    }
-
-    pub fn from_text(text: String) -> Self {
-        let chars = text.chars().count();
-        Self {
-            raw: text,
-            content_chars: chars,
-            reasoning_chars: 0,
-        }
-    }
-}
 
 pub(crate) fn send_status(label: &str, stream_tx: Option<&mpsc::Sender<LlmResult>>) {
     if let Some(tx) = stream_tx {

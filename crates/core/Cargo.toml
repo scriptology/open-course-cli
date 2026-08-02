@@ -12,3 +12,4 @@ chrono = { workspace = true }
 thiserror = { workspace = true }
 unicode-normalization = { workspace = true }
 uuid = { workspace = true }
+regex = { workspace = true }

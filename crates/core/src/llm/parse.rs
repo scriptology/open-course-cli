@@ -1,24 +1,24 @@
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 
-use crate::transport::LlmResponse;
-use open_course_core::curriculum::Topic;
-use open_course_core::error::{AppError, Result};
-use open_course_core::session::{AnalysisResult, Exercise, SentenceAnalysis};
+use crate::curriculum::Topic;
+use crate::error::{AppError, Result};
+use crate::llm::response::LlmResponse;
+use crate::session::{AnalysisResult, Exercise, SentenceAnalysis};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct Exercises {
+pub struct Exercises {
     pub exercises: Vec<Exercise>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct LevelCurriculum {
+pub struct LevelCurriculum {
     pub topics: Vec<Topic>,
 }
 
-pub(crate) fn parse_exercises(
+pub fn parse_exercises(
     cleaned: &str,
     content_chars: usize,
     reasoning_chars: usize,
@@ -49,7 +49,7 @@ pub(crate) fn parse_exercises(
     ))
 }
 
-pub(crate) fn exercise_parse_errors(cleaned: &str) -> String {
+pub fn exercise_parse_errors(cleaned: &str) -> String {
     let wrapper_err = from_str::<Exercises>(cleaned)
         .err()
         .map(|e| format!("as {{exercises}}: {e}"))
@@ -61,7 +61,7 @@ pub(crate) fn exercise_parse_errors(cleaned: &str) -> String {
     format!("{wrapper_err}; {vec_err}")
 }
 
-pub(crate) fn parse_analysis(
+pub fn parse_analysis(
     cleaned: &str,
     expected_sentence_count: usize,
     content_chars: usize,
@@ -109,7 +109,7 @@ pub(crate) fn parse_analysis(
     )
 }
 
-pub(crate) fn validate_analysis_sentences(
+pub fn validate_analysis_sentences(
     mut analysis: AnalysisResult,
     expected_sentence_count: usize,
     content_chars: usize,
@@ -135,7 +135,7 @@ pub(crate) fn validate_analysis_sentences(
     Ok(analysis)
 }
 
-pub(crate) fn analysis_parse_errors(cleaned: &str, expected_sentence_count: usize) -> String {
+pub fn analysis_parse_errors(cleaned: &str, expected_sentence_count: usize) -> String {
     let top_err = from_str::<AnalysisResult>(cleaned)
         .err()
         .map(|e| format!("top-level: {e}"))
@@ -147,7 +147,7 @@ pub(crate) fn analysis_parse_errors(cleaned: &str, expected_sentence_count: usiz
     format!("expected {expected_sentence_count} sentences; top-level: {top_err}; array: {arr_err}")
 }
 
-pub(crate) fn parse_curriculum_level(
+pub fn parse_curriculum_level(
     cleaned: &str,
     level: &str,
     content_chars: usize,
@@ -180,14 +180,14 @@ pub(crate) fn parse_curriculum_level(
     Ok(level_curriculum.topics)
 }
 
-pub(crate) fn curriculum_parse_errors(cleaned: &str, level: &str) -> String {
+pub fn curriculum_parse_errors(cleaned: &str, level: &str) -> String {
     from_str::<LevelCurriculum>(cleaned)
         .err()
         .map(|e| format!("{level} curriculum parse: {e}"))
         .unwrap_or_default()
 }
 
-pub(crate) fn build_parse_error(
+pub fn build_parse_error(
     kind: &str,
     response: &LlmResponse,
     cleaned: &str,
@@ -223,7 +223,7 @@ pub(crate) fn build_parse_error(
     ))
 }
 
-pub(crate) fn clean_json_response(raw: &str) -> String {
+pub fn clean_json_response(raw: &str) -> String {
     // Replace raw newlines with spaces so models that emit multi-line strings
     // without escaping do not break JSON parsing.
     let trimmed = raw.trim().replace('\r', "").replace('\n', " ");
@@ -272,7 +272,7 @@ static CURRICULUM_ID_RE: std::sync::LazyLock<regex::Regex> =
 /// Some models return ids containing brackets, semicolons, etc., which break
 /// JSON parsing. This replaces every id value with a kebab-case string
 /// containing only lowercase letters, digits, and hyphens.
-pub(crate) fn sanitize_curriculum_ids(raw: &str) -> String {
+pub fn sanitize_curriculum_ids(raw: &str) -> String {
     CURRICULUM_ID_RE
         .replace_all(raw, |caps: &regex::Captures| {
             let value = &caps[1];
@@ -295,7 +295,7 @@ pub(crate) fn sanitize_curriculum_ids(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use open_course_core::session::SemanticVerdict;
+    use crate::session::SemanticVerdict;
 
     // --- clean_json_response ---
 

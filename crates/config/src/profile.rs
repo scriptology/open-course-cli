@@ -1,21 +1,15 @@
 use serde::{Deserialize, Serialize};
 
+// Re-exported from core so the profile type is shared with the LLM
+// prompt/parsing code and external consumers; the config file format is
+// unchanged.
+pub use open_course_core::profile::UserProfile;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LanguagePair {
     pub id: String,
     pub profile: UserProfile,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct UserProfile {
-    pub native_language: String,
-    pub target_language: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub age: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub self_assessed_cefr: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

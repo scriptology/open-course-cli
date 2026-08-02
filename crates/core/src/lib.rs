@@ -4,6 +4,8 @@ pub mod error;
 pub mod history;
 pub mod language;
 pub mod learning_items;
+pub mod llm;
+pub mod profile;
 pub mod progress;
 pub mod reviews;
 pub mod session;
