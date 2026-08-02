@@ -17,7 +17,7 @@ use open_course_sync::{
 
 use crate::app::AppState;
 use crate::ui::labels::SettingsLabels;
-use crate::ui::widgets::Toast;
+use crate::ui::widgets::{Toast, error_lines};
 
 /// Messages from background sync tasks to the event loop.
 #[derive(Debug)]
@@ -155,8 +155,10 @@ pub struct AccountState {
     pub outbox_len: Option<usize>,
     pub subscription: Option<String>,
     pub relogin_required: bool,
-    /// Transient status/error line (sync result, network error).
+    /// Transient status line (sync result, info).
     pub notice: Option<String>,
+    /// Error line, shown as-is in the shared error style.
+    pub error: Option<String>,
     pub syncing: bool,
     /// Active action row.
     pub field: usize,
@@ -179,6 +181,7 @@ pub async fn on_enter(state: &mut AppState) {
     let account = &mut state.settings.account;
     account.field = 0;
     account.notice = None;
+    account.error = None;
     if let Some(config) = state.config.as_ref() {
         account.email = config.sync.as_ref().and_then(|s| s.account_email.clone());
         account.device_id = config.sync.as_ref().and_then(|s| s.device_id.clone());
@@ -229,6 +232,7 @@ pub async fn activate(state: &mut AppState) -> Result<()> {
 fn start_sign_in(state: &mut AppState) {
     state.settings.account.status = LoginStatus::Starting;
     state.settings.account.notice = None;
+    state.settings.account.error = None;
     let base_url = resolve_sync_server_url(state.config.as_ref());
     let tx = state.sync_tx.clone();
     tokio::spawn(async move {
@@ -320,6 +324,7 @@ async fn finish_login(
 fn start_manual_sync(state: &mut AppState) {
     state.settings.account.syncing = true;
     state.settings.account.notice = None;
+    state.settings.account.error = None;
     spawn_sync(state, SyncKind::Manual);
 }
 
@@ -332,6 +337,7 @@ async fn toggle_sync(state: &mut AppState) -> Result<()> {
     // Enabling: probe the cloud first — the pair may already have a
     // canonical curriculum pushed by another device.
     let lang = crate::ui::labels::native_language_code(state.config.as_ref());
+    state.settings.account.error = None;
     state.settings.account.notice = Some(
         crate::ui::labels::get_settings_labels(lang)
             .account_bind_checking
@@ -559,7 +565,7 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
         }
         SyncMessage::DeviceFlowStarted(Err(e)) => {
             state.settings.account.status = LoginStatus::LoggedOut;
-            state.settings.account.notice = Some(e);
+            state.settings.account.error = Some(e);
         }
         SyncMessage::DeviceFlowExpired => {
             if state.settings.account.status == LoginStatus::WaitingConfirmation {
@@ -576,7 +582,7 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
                     sync.server_url = Some(server_url);
                 }
                 if let Err(e) = write_config(config, &state.data_dir) {
-                    state.settings.account.notice = Some(e.to_string());
+                    state.settings.account.error = Some(e.to_string());
                 }
             }
             let account = &mut state.settings.account;
@@ -590,10 +596,11 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
         }
         SyncMessage::LoginFinished(Err(e)) => {
             state.settings.account.status = LoginStatus::LoggedOut;
-            state.settings.account.notice = Some(e);
+            state.settings.account.error = Some(e);
         }
         SyncMessage::BindScenarioLoaded(Ok(scenario)) => {
             state.settings.account.notice = None;
+            state.settings.account.error = None;
             match scenario {
                 BindScenario::FreshLocal => {
                     enable_and_run(state, SyncKind::AfterSession).await;
@@ -607,7 +614,7 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
             }
         }
         SyncMessage::BindScenarioLoaded(Err(e)) => {
-            state.settings.account.notice = Some(e);
+            state.settings.account.error = Some(e);
         }
         SyncMessage::CurriculumConflict(payload) => {
             open_bind_dialog(state, payload).await;
@@ -664,7 +671,7 @@ fn apply_sync_failure(state: &mut AppState, labels: &SettingsLabels, failure: Sy
         account.notice = Some(labels.account_sync_conflict.to_string());
         state.toast = Some(Toast::info(labels.account_sync_conflict_toast));
     } else {
-        account.notice = Some(format!(
+        account.error = Some(format!(
             "{}: {}",
             labels.account_sync_failed, failure.message
         ));
@@ -773,6 +780,7 @@ fn confirm_bind_dialog(state: &mut AppState, dialog: BindDialog) {
 fn execute_adopt(state: &mut AppState, payload: CurriculumPayload, merge: ProgressMerge) {
     state.settings.account.syncing = true;
     state.settings.account.notice = None;
+    state.settings.account.error = None;
     let data_dir = state.data_dir.clone();
     let base_url = resolve_sync_server_url(state.config.as_ref());
     let pair_id = state
@@ -817,6 +825,7 @@ fn execute_adopt(state: &mut AppState, payload: CurriculumPayload, merge: Progre
 fn execute_replace(state: &mut AppState, _payload: CurriculumPayload) {
     state.settings.account.syncing = true;
     state.settings.account.notice = None;
+    state.settings.account.error = None;
     let data_dir = state.data_dir.clone();
     let base_url = resolve_sync_server_url(state.config.as_ref());
     let pair_id = state
@@ -890,9 +899,11 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
 
     match account.status {
         LoginStatus::LoggedOut => {
-            lines.push(Line::from(labels.account_not_logged_in));
-            lines.push(Line::from(""));
             lines.push(action_line(marker(0), labels.account_sign_in));
+            if account.error.is_none() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(labels.account_not_logged_in));
+            }
         }
         LoginStatus::Starting => {
             lines.push(Line::from(labels.account_starting));
@@ -913,9 +924,11 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
             lines.push(Line::from(labels.account_waiting));
         }
         LoginStatus::Expired => {
-            lines.push(Line::from(labels.account_expired));
-            lines.push(Line::from(""));
             lines.push(action_line(marker(0), labels.account_sign_in_retry));
+            if account.error.is_none() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(labels.account_expired));
+            }
         }
         LoginStatus::LoggingIn => {
             lines.push(Line::from(labels.account_logging_in));
@@ -1007,6 +1020,10 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
 
     if account.syncing && account.status != LoginStatus::LoggedIn {
         lines.push(Line::from(labels.account_syncing));
+    }
+    if let Some(error) = &account.error {
+        lines.push(Line::from(""));
+        lines.extend(error_lines(error));
     }
     if let Some(notice) = &account.notice {
         lines.push(Line::from(""));

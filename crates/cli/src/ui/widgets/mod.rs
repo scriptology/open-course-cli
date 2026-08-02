@@ -18,7 +18,7 @@ pub mod logo;
 
 pub use cards::Card;
 pub use confirmation::draw_confirmation;
-pub use error_box::ErrorBox;
+pub use error_box::{ERROR_COLOR, ErrorBox, error_lines};
 pub use footer::{build_footer, build_footer_wrapped};
 pub use help_overlay::HelpOverlay;
 pub use hint_bar::HintBar;

@@ -591,6 +591,33 @@ async fn settings_account_logged_out_renders_sign_in() {
 }
 
 #[tokio::test]
+async fn settings_account_error_renders_below_sign_in_action() {
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Account;
+    state.settings.account.error = Some("network error: error sending request".to_string());
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    let action_pos = text.find("Войти").expect("sign-in action shown");
+    let error_pos = text.find("network error").expect("error text shown as-is");
+    assert!(
+        action_pos < error_pos,
+        "action row must come before the error text, got:\n{text}"
+    );
+    assert!(
+        !text.contains("Вход не выполнен"),
+        "neutral status is replaced by the error block, got:\n{text}"
+    );
+}
+
+#[tokio::test]
 async fn settings_account_logged_in_renders_status_and_actions() {
     use open_course_cli::ui::views::settings::account;
     use open_course_sync::TokenBackend;
