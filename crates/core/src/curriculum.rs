@@ -149,6 +149,7 @@ pub fn dedupe(topics: Vec<Topic>) -> (Vec<Topic>, Vec<Topic>) {
     (kept, removed)
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Topic {
     pub id: String,
@@ -229,6 +230,7 @@ impl Difficulty {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Curriculum {
     #[serde(default = "default_version")]

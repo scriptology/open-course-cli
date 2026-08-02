@@ -1,6 +1,7 @@
 pub const MAX_HISTORY_ENTRIES: usize = 500;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SessionSummary {
     pub id: String,
     pub date: String,

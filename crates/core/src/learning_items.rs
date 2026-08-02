@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::curriculum::is_abstract_topic_name;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct LearningItem {
     pub id: String,
     pub name: String,

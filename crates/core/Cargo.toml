@@ -4,6 +4,12 @@ version = "0.8.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+[features]
+default = []
+# Optional OpenAPI schema derives for consumers that build an HTTP API
+# (e.g. the sync server) on top of these wire types.
+utoipa = ["dep:utoipa"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -13,3 +19,4 @@ thiserror = { workspace = true }
 unicode-normalization = { workspace = true }
 uuid = { workspace = true }
 regex = { workspace = true }
+utoipa = { workspace = true, optional = true }

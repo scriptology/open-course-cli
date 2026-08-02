@@ -1,4 +1,5 @@
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ProgressTopic {
     pub topic_id: String,
     pub score: f64,
