@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/scriptology/open-course-cli/compare/v0.9.2...v0.10.0) (2026-08-02)
+
+
+### Features
+
+* **cli:** document where the llm prompts/parsers live ([5d301a0](https://github.com/scriptology/open-course-cli/commit/5d301a0010c4fd89cf165f4b9462fd6b0e3555de))
+* **cli:** trigger release 0.10.0 for the core LLM move ([34711be](https://github.com/scriptology/open-course-cli/commit/34711beffab8cda3fb0e4eb24bab6477f89f83e3))
+
 ## [0.9.2](https://github.com/scriptology/open-course-cli/compare/v0.9.1...v0.9.2) (2026-08-02)
 
 
