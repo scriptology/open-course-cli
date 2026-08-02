@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// `POST {base}/auth/device` response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceCodeResponse {
     pub device_code: String,
@@ -23,6 +24,7 @@ pub struct DeviceCodeResponse {
 
 /// `POST {base}/auth/device/poll` success body (HTTP 200).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TokenSet {
     pub access_token: String,
@@ -35,6 +37,7 @@ pub struct TokenSet {
 
 /// Error body used by device poll (and accepted elsewhere).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ErrorBody {
     pub error: String,
 }
@@ -43,6 +46,7 @@ pub struct ErrorBody {
 /// "tombstoneReset"; `entity` is one of "topic" | "progress" | "session" |
 /// "learningItem" | "metadata".
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Change {
     pub seq: i64,
@@ -57,6 +61,7 @@ pub struct Change {
 
 /// `POST {base}/v1/sync/push` request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PushRequest {
     pub pair_id: String,
@@ -71,6 +76,7 @@ pub struct PushRequest {
 
 /// `POST {base}/v1/sync/push` success body (HTTP 2xx).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PushResponse {
     pub revision: i64,
@@ -79,6 +85,7 @@ pub struct PushResponse {
 /// The server's canonical curriculum, returned on a push conflict (409) or
 /// requested when binding a device to a pair that already has one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CurriculumPayload {
     pub revision: i64,
@@ -92,6 +99,7 @@ pub struct CurriculumPayload {
 
 /// Push conflict body (HTTP 409): `{ "canonical": CurriculumPayload }`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ConflictBody {
     pub canonical: CurriculumPayload,
 }
@@ -100,6 +108,7 @@ pub struct ConflictBody {
 /// present when the server wiped the pair's data (all clients must reset
 /// before applying `changes`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PullResponse {
     pub revision: i64,
@@ -111,6 +120,7 @@ pub struct PullResponse {
 
 /// `GET {base}/v1/me` response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MeResponse {
     pub email: String,

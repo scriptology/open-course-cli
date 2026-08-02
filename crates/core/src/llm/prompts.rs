@@ -1,8 +1,8 @@
-use open_course_config::profile::UserProfile;
-use open_course_core::curriculum::{CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty};
-use open_course_core::learning_items::LearningItem;
-use open_course_core::progress::ProgressTopic;
-use open_course_core::session::{Exercise, NewTopicRef};
+use crate::curriculum::{CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty};
+use crate::learning_items::LearningItem;
+use crate::profile::UserProfile;
+use crate::progress::ProgressTopic;
+use crate::session::{Exercise, NewTopicRef};
 
 pub fn build_exercise_prompt(
     profile: &UserProfile,
