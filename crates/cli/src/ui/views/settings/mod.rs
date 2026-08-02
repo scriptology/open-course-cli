@@ -16,7 +16,7 @@ use crate::ui::labels::{
     native_language_code,
 };
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
-use crate::ui::widgets::{build_footer_wrapped, draw_confirmation, model_picker};
+use crate::ui::widgets::{ERROR_COLOR, build_footer_wrapped, draw_confirmation, model_picker};
 use open_course_config::OpenCourseConfig;
 use open_course_config::provider::ProviderId;
 use open_course_config::write_config;
@@ -230,7 +230,7 @@ fn build_body(state: &AppState, labels: ReportLabels, settings: &SettingsLabels)
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
                     labels.invalid_value.to_string(),
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(ERROR_COLOR),
                 ));
             }
             lines.push(Line::from(spans));

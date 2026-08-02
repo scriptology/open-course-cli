@@ -15,6 +15,7 @@ use crate::ui::views::model_check;
 use crate::ui::widgets::Logo;
 use crate::ui::widgets::build_footer;
 use crate::ui::widgets::build_footer_wrapped;
+use crate::ui::widgets::error_lines;
 use crate::ui::widgets::model_picker;
 use open_course_config::profile::UserProfile;
 use open_course_config::provider::ProviderConfig;
@@ -112,9 +113,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     };
     let mut footer_lines: Vec<Line> = footer_text.lines().map(Line::from).collect();
     if !state.onboarding.error.is_empty() {
-        footer_lines.push(
-            Line::from(state.onboarding.error.clone()).style(Style::default().fg(Color::Red)),
-        );
+        footer_lines.extend(error_lines(&state.onboarding.error));
     }
     let footer_height = footer_lines.len() as u16;
 
@@ -245,11 +244,8 @@ fn render_model_step(
     }
 
     if let Some(err) = &state.onboarding.model_picker.error {
-        frame.render_widget(
-            Paragraph::new(labels.failed_load_models.replace("{}", err))
-                .style(Style::default().fg(Color::Red)),
-            area,
-        );
+        let message = labels.failed_load_models.replace("{}", err);
+        frame.render_widget(Paragraph::new(Text::from(error_lines(&message))), area);
         return;
     }
 
