@@ -260,7 +260,8 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
                 // Push the session's changes in the background when sync is
                 // enabled for this pair; failures only surface in the
                 // Account section, the outbox is kept.
-                crate::ui::views::settings::account::spawn_push_after_session(state).await;
+                crate::app::sync::schedule(state, crate::app::sync::SyncTrigger::AfterAnalysis)
+                    .await;
             }
         }
         Err(e) => {
@@ -325,6 +326,8 @@ async fn persist_topics_and_reload(state: &mut AppState, topics: &[Topic], repla
             if in_session && let Err(e) = session::maybe_start_pending_new_topic(state).await {
                 state.toast = Some(Toast::error(e.to_string()));
             }
+            // A freshly (re)generated curriculum is synced data: push it.
+            crate::app::sync::schedule(state, crate::app::sync::SyncTrigger::DataChanged).await;
         }
         Err(e) => {
             state.toast = Some(Toast::error(e.to_string()));

@@ -42,6 +42,7 @@ pub fn groups_for(state: &AppState) -> Vec<HelpGroup> {
         View::Pairs => pairs_groups(labels, common),
         View::Report => report_groups(common),
         View::ModelCheck => model_check_groups(state, common),
+        View::SyncAll => Vec::new(),
         View::Settings => settings_groups(state, common),
         View::Onboarding => onboarding_groups(state, common),
         View::UpdateAvailable => update_groups(common),

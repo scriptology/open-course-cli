@@ -685,10 +685,6 @@ pub struct SettingsLabels {
     pub account_logging_in: &'static str,
     pub account_email_label: &'static str,
     pub account_device_label: &'static str,
-    pub account_token_label: &'static str,
-    pub account_token_keychain: &'static str,
-    pub account_token_file: &'static str,
-    pub account_token_file_warning: &'static str,
     pub account_subscription_label: &'static str,
     pub account_unavailable: &'static str,
     pub account_last_sync_label: &'static str,
@@ -784,10 +780,6 @@ const EN_SETTINGS: SettingsLabels = SettingsLabels {
     account_logging_in: "Signing in...",
     account_email_label: "Account",
     account_device_label: "Device",
-    account_token_label: "Token storage",
-    account_token_keychain: "system keychain",
-    account_token_file: "file",
-    account_token_file_warning: "Warning: the access token is stored in a plain file (system keychain unavailable).",
     account_subscription_label: "Subscription",
     account_unavailable: "unavailable",
     account_last_sync_label: "Last sync",
@@ -883,10 +875,6 @@ const RU_SETTINGS: SettingsLabels = SettingsLabels {
     account_logging_in: "Выполняется вход...",
     account_email_label: "Аккаунт",
     account_device_label: "Устройство",
-    account_token_label: "Хранилище токена",
-    account_token_keychain: "системная связка ключей",
-    account_token_file: "файл",
-    account_token_file_warning: "Внимание: токен доступа хранится в обычном файле (системная связка ключей недоступна).",
     account_subscription_label: "Подписка",
     account_unavailable: "недоступно",
     account_last_sync_label: "Последняя синхронизация",
@@ -988,6 +976,43 @@ const RU_MODEL_CHECK: ModelCheckLabels = ModelCheckLabels {
     reasoning_suffix: ", {:.0}% рассуждений",
 };
 
+#[derive(Debug, Clone, Copy)]
+pub struct SyncAllLabels {
+    pub title: &'static str,
+    pub running: &'static str,
+    pub status_pending: &'static str,
+    pub status_done: &'static str,
+    pub status_merged: &'static str,
+    pub status_unauthorized: &'static str,
+    pub summary_ok: &'static str,
+    pub summary_failed: &'static str,
+    pub continue_hint: &'static str,
+}
+
+const EN_SYNC_ALL: SyncAllLabels = SyncAllLabels {
+    title: "Cloud sync",
+    running: "Syncing all language pairs...",
+    status_pending: "pending",
+    status_done: "synced",
+    status_merged: "merged",
+    status_unauthorized: "sign in again",
+    summary_ok: "All pairs are in sync.",
+    summary_failed: "Done with errors: {failed} pair(s) did not sync.",
+    continue_hint: "Enter — continue",
+};
+
+const RU_SYNC_ALL: SyncAllLabels = SyncAllLabels {
+    title: "Синхронизация с облаком",
+    running: "Синхронизируем все языковые пары...",
+    status_pending: "ожидает",
+    status_done: "готово",
+    status_merged: "объединено",
+    status_unauthorized: "нужен повторный вход",
+    summary_ok: "Все пары синхронизированы.",
+    summary_failed: "Завершено с ошибками: не синхронизировано пар: {failed}.",
+    continue_hint: "Enter — продолжить",
+};
+
 static SUPPORTED_REPORT: [(&str, ReportLabels); 17] = [
     ("en", EN_REPORT),
     ("ru", RU_REPORT),
@@ -1087,6 +1112,13 @@ pub fn get_model_check_labels(lang: &str) -> ModelCheckLabels {
     match normalize_language_code(lang).as_str() {
         "ru" => RU_MODEL_CHECK,
         _ => EN_MODEL_CHECK,
+    }
+}
+
+pub fn get_sync_all_labels(lang: &str) -> SyncAllLabels {
+    match normalize_language_code(lang).as_str() {
+        "ru" => RU_SYNC_ALL,
+        _ => EN_SYNC_ALL,
     }
 }
 
