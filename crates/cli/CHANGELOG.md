@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/scriptology/open-course-cli/compare/v0.10.1...v0.11.0) (2026-08-03)
+
+
+### Features
+
+* **cli:** sync all pairs automatically with a merge-based bind ([32325d0](https://github.com/scriptology/open-course-cli/commit/32325d056c794b2c65a223f747c56323be2746ed))
+* **cli:** автосинк всех пар с merge-bind и токеном в auth.json ([c142df1](https://github.com/scriptology/open-course-cli/commit/c142df19bed064ebbbc396605845f942a34c3945))
+
 ## [0.10.1](https://github.com/scriptology/open-course-cli/compare/v0.10.0...v0.10.1) (2026-08-03)
 
 
