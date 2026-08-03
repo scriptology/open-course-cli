@@ -656,8 +656,8 @@ async fn settings_account_logged_in_renders_status_and_actions() {
         "file backend warning shown"
     );
     assert!(
-        text.contains("Что синхронизируется"),
-        "sync info block shown"
+        !text.contains("Что синхронизируется"),
+        "sync info block removed"
     );
 }
 
@@ -670,7 +670,7 @@ async fn settings_account_toggle_sync_persists_to_metadata() {
     state.settings.in_section = true;
     state.settings.section = Section::Account;
     state.settings.account.status = account::LoginStatus::LoggedIn;
-    state.settings.account.field = 1;
+    state.settings.active_field = 1;
 
     // Sync starts disabled (opt-in).
     assert!(!state.db.metadata().sync_enabled().await.unwrap());
@@ -727,7 +727,7 @@ async fn settings_account_sign_out_clears_config_and_status() {
     state.settings.in_section = true;
     state.settings.section = Section::Account;
     state.settings.account.status = account::LoginStatus::LoggedIn;
-    state.settings.account.field = 2;
+    state.settings.active_field = 2;
 
     settings::handle_key(&mut state, KeyCode::Enter)
         .await
@@ -736,6 +736,10 @@ async fn settings_account_sign_out_clears_config_and_status() {
     assert_eq!(
         state.settings.account.status,
         account::LoginStatus::LoggedOut
+    );
+    assert_eq!(
+        state.settings.active_field, 0,
+        "sign out resets the selector (logged out has a single action)"
     );
     let sync = state.config.as_ref().unwrap().sync.as_ref().unwrap();
     assert_eq!(sync.account_email, None);
@@ -785,6 +789,7 @@ async fn login_finished_stores_account_in_config_and_stays_opt_in() {
     use open_course_sync::TokenBackend;
 
     let mut state = setup_state().await;
+    state.settings.active_field = 2;
     account::apply_sync_message(
         &mut state,
         account::SyncMessage::LoginFinished(Ok(account::LoginInfo {
@@ -799,6 +804,10 @@ async fn login_finished_stores_account_in_config_and_stays_opt_in() {
     assert_eq!(
         state.settings.account.status,
         account::LoginStatus::LoggedIn
+    );
+    assert_eq!(
+        state.settings.active_field, 0,
+        "login resets the selector to the first action row"
     );
     let sync = state.config.as_ref().unwrap().sync.as_ref().unwrap();
     assert_eq!(sync.account_email.as_deref(), Some("user@example.test"));
@@ -1022,4 +1031,63 @@ async fn sync_finished_adopt_report_enables_sync_and_shows_notice() {
         notice.contains('7'),
         "notice mentions the topic count: {notice}"
     );
+}
+
+#[tokio::test]
+async fn settings_account_selector_moves_and_wraps() {
+    use open_course_cli::ui::colors;
+    use open_course_cli::ui::views::settings::account;
+    use ratatui::crossterm::event::KeyCode;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    state.settings.in_section = true;
+    state.settings.section = Section::Account;
+    state.settings.account.status = account::LoginStatus::LoggedIn;
+
+    // Down moves the shared selector and wraps at action_count (3).
+    for expected in [1, 2, 0] {
+        settings::handle_key(&mut state, KeyCode::Down)
+            .await
+            .unwrap();
+        assert_eq!(state.settings.active_field, expected);
+    }
+    // Up wraps back to the last row.
+    settings::handle_key(&mut state, KeyCode::Up).await.unwrap();
+    assert_eq!(state.settings.active_field, 2);
+
+    // The marker follows the shared selector; the selected row is green.
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| settings::draw(f, f.area(), &mut state))
+        .unwrap();
+    let text = buffer_text(&terminal);
+    assert!(
+        text.contains("> Выйти"),
+        "selector sits on the sign-out row, got:\n{text}"
+    );
+    let buffer = terminal.backend().buffer();
+    let area = *buffer.area();
+    let row = (0..area.height)
+        .find(|&y| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+                .contains("> Выйти")
+        })
+        .expect("sign-out row rendered");
+    assert_eq!(
+        buffer[(0, row)].fg,
+        colors::GREEN,
+        "selected action row is green, marker included"
+    );
+
+    // Logged out has a single action: the selector stays on row 0.
+    state.settings.account.status = account::LoginStatus::LoggedOut;
+    state.settings.active_field = 0;
+    settings::handle_key(&mut state, KeyCode::Down)
+        .await
+        .unwrap();
+    assert_eq!(state.settings.active_field, 0);
 }
