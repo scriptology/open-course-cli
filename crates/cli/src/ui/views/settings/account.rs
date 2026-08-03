@@ -16,6 +16,7 @@ use open_course_sync::{
 };
 
 use crate::app::AppState;
+use crate::ui::colors;
 use crate::ui::labels::SettingsLabels;
 use crate::ui::widgets::{Toast, error_lines};
 
@@ -160,8 +161,6 @@ pub struct AccountState {
     /// Error line, shown as-is in the shared error style.
     pub error: Option<String>,
     pub syncing: bool,
-    /// Active action row.
-    pub field: usize,
     /// Modal conflict-resolution dialog, if open.
     pub bind_dialog: Option<BindDialog>,
 }
@@ -178,8 +177,8 @@ pub fn action_count(account: &AccountState) -> usize {
 /// Loads the section state when it opens and probes the token store and
 /// (best-effort) the subscription in the background.
 pub async fn on_enter(state: &mut AppState) {
+    state.settings.active_field = 0;
     let account = &mut state.settings.account;
-    account.field = 0;
     account.notice = None;
     account.error = None;
     if let Some(config) = state.config.as_ref() {
@@ -218,7 +217,7 @@ pub async fn activate(state: &mut AppState) -> Result<()> {
     }
     match state.settings.account.status {
         LoginStatus::LoggedOut | LoginStatus::Expired => start_sign_in(state),
-        LoginStatus::LoggedIn => match state.settings.account.field {
+        LoginStatus::LoggedIn => match state.settings.active_field {
             0 => start_manual_sync(state),
             1 => toggle_sync(state).await?,
             2 => sign_out(state).await?,
@@ -391,7 +390,7 @@ async fn sign_out(state: &mut AppState) -> Result<()> {
     account.subscription = None;
     account.token_backend = None;
     account.relogin_required = false;
-    account.field = 0;
+    state.settings.active_field = 0;
     Ok(())
 }
 
@@ -592,7 +591,7 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
             account.subscription = info.subscription;
             account.token_backend = Some(info.backend);
             account.relogin_required = false;
-            account.field = 0;
+            state.settings.active_field = 0;
         }
         SyncMessage::LoginFinished(Err(e)) => {
             state.settings.account.status = LoginStatus::LoggedOut;
@@ -884,22 +883,22 @@ fn open_browser(url: &str) {
     let _ = url;
 }
 
-/// Body of the Account section: status, action rows, and the "what is
-/// synced" block.
+/// Body of the Account section: status, info rows, and action rows. The
+/// selected action row is the shared `settings.active_field`, styled like
+/// the cursor row of the other sections.
 pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
     let account = &state.settings.account;
+    let active_field = state.settings.active_field;
+    let count = action_count(account);
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let selected = |row: usize| active_field == row && count > 0;
     let marker = |row: usize| {
-        if account.field == row && action_count(account) > 0 {
-            "> "
-        } else {
-            "  "
-        }
+        if selected(row) { "> " } else { "  " }
     };
 
     match account.status {
         LoginStatus::LoggedOut => {
-            lines.push(action_line(marker(0), labels.account_sign_in));
+            lines.push(action_line(marker(0), labels.account_sign_in, selected(0)));
             if account.error.is_none() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(labels.account_not_logged_in));
@@ -910,21 +909,30 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
         }
         LoginStatus::WaitingConfirmation => {
             lines.push(Line::from(vec![
-                Span::raw(format!("{} ", labels.account_code_label)),
+                Span::styled(
+                    format!("{} ", labels.account_code_label),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(
                     account.user_code.clone().unwrap_or_default(),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
             ]));
-            lines.push(Line::from(format!(
-                "{} {}",
-                labels.account_verification_label,
-                account.verification_url.clone().unwrap_or_default()
-            )));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{} ", labels.account_verification_label),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(account.verification_url.clone().unwrap_or_default()),
+            ]));
             lines.push(Line::from(labels.account_waiting));
         }
         LoginStatus::Expired => {
-            lines.push(action_line(marker(0), labels.account_sign_in_retry));
+            lines.push(action_line(
+                marker(0),
+                labels.account_sign_in_retry,
+                selected(0),
+            ));
             if account.error.is_none() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(labels.account_expired));
@@ -934,55 +942,47 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
             lines.push(Line::from(labels.account_logging_in));
         }
         LoginStatus::LoggedIn => {
-            lines.push(Line::from(format!(
-                "{}: {}",
+            lines.push(info_line(
                 labels.account_email_label,
-                account.email.as_deref().unwrap_or("—")
-            )));
-            lines.push(Line::from(format!(
-                "{}: {}",
+                account.email.as_deref().unwrap_or("—"),
+            ));
+            lines.push(info_line(
                 labels.account_device_label,
-                account.device_id.as_deref().unwrap_or("—")
-            )));
+                account.device_id.as_deref().unwrap_or("—"),
+            ));
             let backend = match account.token_backend {
                 Some(TokenBackend::Keychain) => labels.account_token_keychain,
                 Some(TokenBackend::File) => labels.account_token_file,
                 None => "—",
             };
-            lines.push(Line::from(format!(
-                "{}: {}",
-                labels.account_token_label, backend
-            )));
+            lines.push(info_line(labels.account_token_label, backend));
             if account.token_backend == Some(TokenBackend::File) {
                 lines.push(Line::from(Span::styled(
                     labels.account_token_file_warning,
                     Style::default().fg(Color::Yellow),
                 )));
             }
-            lines.push(Line::from(format!(
-                "{}: {}",
+            lines.push(info_line(
                 labels.account_subscription_label,
                 account
                     .subscription
                     .as_deref()
-                    .unwrap_or(labels.account_unavailable)
-            )));
-            lines.push(Line::from(format!(
-                "{}: {}",
+                    .unwrap_or(labels.account_unavailable),
+            ));
+            lines.push(info_line(
                 labels.account_last_sync_label,
                 account
                     .last_sync_at
                     .as_deref()
-                    .unwrap_or(labels.account_never_synced)
-            )));
-            lines.push(Line::from(format!(
-                "{}: {}",
+                    .unwrap_or(labels.account_never_synced),
+            ));
+            lines.push(info_line(
                 labels.account_pending_label,
                 account
                     .outbox_len
                     .map(|n| n.to_string())
-                    .unwrap_or_else(|| "—".to_string())
-            )));
+                    .unwrap_or_else(|| "—".to_string()),
+            ));
             if account.relogin_required {
                 lines.push(Line::from(Span::styled(
                     labels.account_relogin_required,
@@ -995,26 +995,18 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
             } else {
                 labels.account_sync_now
             };
-            lines.push(action_line(marker(0), sync_now));
+            lines.push(action_line(marker(0), sync_now, selected(0)));
             let toggle = if account.sync_enabled {
                 labels.account_sync_on
             } else {
                 labels.account_sync_off
             };
-            lines.push(Line::from(format!(
-                "{}{}: {}",
+            lines.push(action_line(
                 marker(1),
-                labels.account_sync_toggle_label,
-                toggle
-            )));
-            lines.push(action_line(marker(2), labels.account_sign_out));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                labels.account_sync_block_title,
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(labels.account_synced_items));
-            lines.push(Line::from(labels.account_not_synced_items));
+                &format!("{}: {}", labels.account_sync_toggle_label, toggle),
+                selected(1),
+            ));
+            lines.push(action_line(marker(2), labels.account_sign_out, selected(2)));
         }
     }
 
@@ -1036,10 +1028,27 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
     Text::from(lines)
 }
 
-fn action_line<'a>(marker: &'a str, label: &'a str) -> Line<'a> {
+/// One action row: the whole row (marker included) is green and bold when
+/// selected, plain otherwise — like the cursor row in the Session section.
+fn action_line(marker: &str, label: &str, selected: bool) -> Line<'static> {
+    let content = format!("{marker}{label}");
+    if selected {
+        Line::from(Span::styled(
+            content,
+            Style::default()
+                .fg(colors::GREEN)
+                .add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        Line::from(content)
+    }
+}
+
+/// One info row: the label is dimmed, the value is plain.
+fn info_line(label: &'static str, value: impl Into<String>) -> Line<'static> {
     Line::from(vec![
-        Span::raw(marker),
-        Span::styled(label, Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{label}: "), Style::default().fg(Color::DarkGray)),
+        Span::raw(value.into()),
     ])
 }
 
