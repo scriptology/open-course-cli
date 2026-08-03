@@ -40,6 +40,19 @@ pub enum ProgressMerge {
     StartFromCloud,
 }
 
+/// What `merge_bind` did, for UI reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergeReport {
+    /// Topics present on both sides (winner picked by `updated_at`).
+    pub topics_merged: usize,
+    /// Topics only the local device had (kept and pushed).
+    pub topics_local_only: usize,
+    /// Topics only the cloud had (pulled).
+    pub topics_cloud_only: usize,
+    /// The server revision after the merge push.
+    pub revision: i64,
+}
+
 impl SyncClient {
     /// Fetches the pull feed without applying it — a probe for bind
     /// decisions.
@@ -159,6 +172,97 @@ impl SyncClient {
             .await
             .map_err(SyncError::from)?;
         Ok(revision)
+    }
+
+    /// Conflict-free bind for the automatic sync-all flow: merges the local
+    /// and cloud curricula instead of asking the user to adopt or replace.
+    ///
+    /// Per topic id the row with the later `updated_at` wins (ties and
+    /// missing timestamps go to the cloud — it carries the canonical
+    /// revision). Topics present on only one side are kept. Anything
+    /// changed locally since the last sync has a newer `updated_at` by
+    /// construction, so no unpushed local edit is lost. The merged set is
+    /// stamped with `max(cloud, local) + 1` and pushed with
+    /// `forceCurriculum`; a full pull then reconciles progress, sessions
+    /// and learning items by last-writer-wins.
+    pub async fn merge_bind(&self, db: &Database, pair_id: &str) -> Result<MergeReport, PushError> {
+        let cloud = self.preview_pull(pair_id, 0).await?;
+        let cloud_topics = topics_from_changes(&cloud.changes);
+        let cloud_version = cloud_topics.iter().map(|t| t.version).max().unwrap_or(0);
+        let local = db.curriculum().read_all().await.map_err(SyncError::from)?;
+
+        let mut merged: Vec<open_course_core::curriculum::Topic> = Vec::new();
+        let mut topics_merged = 0usize;
+        let mut topics_local_only = 0usize;
+        for cloud_topic in &cloud_topics {
+            match local.topics.iter().find(|t| t.id == cloud_topic.id) {
+                Some(local_topic) => {
+                    topics_merged += 1;
+                    // Cloud wins ties and missing local timestamps.
+                    let local_wins = match (
+                        local_topic.updated_at.as_deref(),
+                        cloud_topic.updated_at.as_deref(),
+                    ) {
+                        (Some(l), Some(c)) => l > c,
+                        _ => false,
+                    };
+                    merged.push(if local_wins {
+                        local_topic.clone()
+                    } else {
+                        cloud_topic.clone()
+                    });
+                }
+                None => {
+                    merged.push(cloud_topic.clone());
+                }
+            }
+        }
+        let topics_cloud_only = merged.len() - topics_merged;
+        for local_topic in &local.topics {
+            if !cloud_topics.iter().any(|t| t.id == local_topic.id) {
+                topics_local_only += 1;
+                merged.push(local_topic.clone());
+            }
+        }
+
+        let new_version = cloud_version.max(local.version).max(0) + 1;
+        let now = chrono::Utc::now().to_rfc3339();
+        for topic in &merged {
+            let mut stamped = topic.clone();
+            stamped.version = new_version;
+            stamped.updated_at = Some(now.clone());
+            db.curriculum()
+                .upsert_with_timestamps(&stamped)
+                .await
+                .map_err(SyncError::from)?;
+            let payload = serde_json::to_string(&stamped).map_err(SyncError::from)?;
+            db.outbox()
+                .append(OP_UPSERT, ENTITY_TOPIC, &stamped.id, &payload)
+                .await
+                .map_err(SyncError::from)?;
+        }
+        // Local topics that lost the merge (not possible by construction —
+        // the merged set is a superset of both sides) need no tombstoning.
+
+        let revision = self.push_inner(db, pair_id, true).await?;
+        db.metadata()
+            .set_cloud_curriculum_version(new_version)
+            .await
+            .map_err(SyncError::from)?;
+        // Full pull: progress, sessions and learning items reconcile by
+        // last-writer-wins; the echo of our own topics no-ops.
+        db.metadata()
+            .set_last_pulled_seq(0)
+            .await
+            .map_err(SyncError::from)?;
+        self.pull(db, pair_id).await?;
+
+        Ok(MergeReport {
+            topics_merged,
+            topics_local_only,
+            topics_cloud_only,
+            revision,
+        })
     }
 }
 

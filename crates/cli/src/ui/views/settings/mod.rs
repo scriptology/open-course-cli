@@ -487,6 +487,8 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 open_course_service::reset::execute_reset(&state.db, action).await?;
                 state.settings.pending_reset = None;
+                // A reset writes tombstones to the outbox: push them.
+                crate::app::sync::schedule(state, crate::app::sync::SyncTrigger::DataChanged).await;
             }
             _ => {
                 state.settings.pending_reset = None;

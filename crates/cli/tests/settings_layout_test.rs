@@ -620,7 +620,6 @@ async fn settings_account_error_renders_below_sign_in_action() {
 #[tokio::test]
 async fn settings_account_logged_in_renders_status_and_actions() {
     use open_course_cli::ui::views::settings::account;
-    use open_course_sync::TokenBackend;
 
     let mut state = setup_state().await;
     state.view = View::Settings;
@@ -631,7 +630,6 @@ async fn settings_account_logged_in_renders_status_and_actions() {
         acc.status = account::LoginStatus::LoggedIn;
         acc.email = Some("user@example.test".to_string());
         acc.device_id = Some("dev-1".to_string());
-        acc.token_backend = Some(TokenBackend::File);
         acc.outbox_len = Some(3);
         acc.subscription = Some("active".to_string());
     }
@@ -652,10 +650,6 @@ async fn settings_account_logged_in_renders_status_and_actions() {
     );
     assert!(text.contains("Выйти"), "sign out action shown");
     assert!(
-        text.contains("хранится в обычном файле"),
-        "file backend warning shown"
-    );
-    assert!(
         !text.contains("Что синхронизируется"),
         "sync info block removed"
     );
@@ -664,6 +658,7 @@ async fn settings_account_logged_in_renders_status_and_actions() {
 #[tokio::test]
 async fn settings_account_toggle_sync_persists_to_metadata() {
     use open_course_cli::ui::views::settings::account;
+    use open_course_sync::{TokenSet, TokenStore};
     use ratatui::crossterm::event::KeyCode;
 
     let mut state = setup_state().await;
@@ -671,6 +666,17 @@ async fn settings_account_toggle_sync_persists_to_metadata() {
     state.settings.section = Section::Account;
     state.settings.account.status = account::LoginStatus::LoggedIn;
     state.settings.active_field = 1;
+
+    // A stored token is required for the bind probe to start.
+    TokenStore::new(state.data_dir.clone())
+        .save(&TokenSet {
+            access_token: "token".to_string(),
+            refresh_token: None,
+            device_id: "dev-1".to_string(),
+            user_email: None,
+        })
+        .await
+        .unwrap();
 
     // Sync starts disabled (opt-in).
     assert!(!state.db.metadata().sync_enabled().await.unwrap());
@@ -749,32 +755,21 @@ async fn settings_account_sign_out_clears_config_and_status() {
 #[tokio::test]
 async fn account_refresh_sets_login_status_from_token_presence() {
     use open_course_cli::ui::views::settings::account;
-    use open_course_sync::TokenBackend;
 
     let mut state = setup_state().await;
     account::apply_sync_message(
         &mut state,
-        account::SyncMessage::AccountRefreshed {
-            has_token: true,
-            backend: TokenBackend::File,
-        },
+        account::SyncMessage::AccountRefreshed { has_token: true },
     )
     .await;
     assert_eq!(
         state.settings.account.status,
         account::LoginStatus::LoggedIn
     );
-    assert_eq!(
-        state.settings.account.token_backend,
-        Some(TokenBackend::File)
-    );
 
     account::apply_sync_message(
         &mut state,
-        account::SyncMessage::AccountRefreshed {
-            has_token: false,
-            backend: TokenBackend::File,
-        },
+        account::SyncMessage::AccountRefreshed { has_token: false },
     )
     .await;
     assert_eq!(
@@ -786,7 +781,6 @@ async fn account_refresh_sets_login_status_from_token_presence() {
 #[tokio::test]
 async fn login_finished_stores_account_in_config_and_stays_opt_in() {
     use open_course_cli::ui::views::settings::account;
-    use open_course_sync::TokenBackend;
 
     let mut state = setup_state().await;
     state.settings.active_field = 2;
@@ -796,7 +790,6 @@ async fn login_finished_stores_account_in_config_and_stays_opt_in() {
             email: Some("user@example.test".to_string()),
             device_id: "dev-1".to_string(),
             subscription: Some("active".to_string()),
-            backend: TokenBackend::File,
         })),
     )
     .await;
@@ -1090,4 +1083,143 @@ async fn settings_account_selector_moves_and_wraps() {
         .await
         .unwrap();
     assert_eq!(state.settings.active_field, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Sync-all after login + token-store UX fixes
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn toggle_sync_without_token_marks_relogin_required() {
+    use open_course_cli::ui::views::settings::account;
+    use ratatui::crossterm::event::KeyCode;
+
+    let mut state = setup_state().await;
+    state.settings.in_section = true;
+    state.settings.section = Section::Account;
+    state.settings.account.status = account::LoginStatus::LoggedIn;
+    state.settings.active_field = 1;
+
+    // No token in the store: the toggle must not surface a raw
+    // "unauthorized" string or start a bind probe.
+    settings::handle_key(&mut state, KeyCode::Enter)
+        .await
+        .unwrap();
+
+    assert!(state.settings.account.relogin_required);
+    let notice = state.settings.account.notice.unwrap_or_default();
+    assert!(!notice.is_empty(), "a friendly notice is shown");
+    assert!(!notice.contains("unauthorized"), "no raw protocol text");
+    assert!(
+        !state.db.metadata().sync_enabled().await.unwrap(),
+        "sync stays disabled"
+    );
+}
+
+#[tokio::test]
+async fn bind_scenario_error_clears_checking_notice() {
+    use open_course_cli::ui::views::settings::account;
+
+    let mut state = setup_state().await;
+    state.settings.account.status = account::LoginStatus::LoggedIn;
+    state.settings.account.notice = Some("Проверяем облако...".to_string());
+
+    account::apply_sync_message(
+        &mut state,
+        account::SyncMessage::BindScenarioLoaded(Err("network error".to_string())),
+    )
+    .await;
+
+    assert_eq!(
+        state.settings.account.notice, None,
+        "stale checking notice is cleared"
+    );
+    assert_eq!(
+        state.settings.account.error.as_deref(),
+        Some("network error")
+    );
+}
+
+#[tokio::test]
+async fn login_finished_opens_sync_all_view() {
+    use open_course_cli::ui::views::settings::account;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    account::apply_sync_message(
+        &mut state,
+        account::SyncMessage::LoginFinished(Ok(account::LoginInfo {
+            email: Some("user@example.test".to_string()),
+            device_id: "dev-1".to_string(),
+            subscription: Some("active".to_string()),
+        })),
+    )
+    .await;
+
+    assert_eq!(state.view, View::SyncAll, "login starts the sync-all run");
+    assert_eq!(state.sync_all.return_to, Some(View::Settings));
+    assert_eq!(state.sync_all.rows.len(), 1);
+    assert_eq!(state.sync_all.rows[0].pair_id, "ru-en");
+    assert_eq!(state.sync_all.rows[0].title, "ru → en");
+    assert!(state.sync_all.rows[0].status.is_none());
+}
+
+#[tokio::test]
+async fn sync_all_view_renders_rows_and_returns_on_enter() {
+    use open_course_cli::ui::views::settings::account;
+    use open_course_cli::ui::views::sync_all;
+    use ratatui::crossterm::event::KeyCode;
+
+    let mut state = setup_state().await;
+    state.view = View::Settings;
+    account::apply_sync_message(
+        &mut state,
+        account::SyncMessage::LoginFinished(Ok(account::LoginInfo {
+            email: Some("user@example.test".to_string()),
+            device_id: "dev-1".to_string(),
+            subscription: None,
+        })),
+    )
+    .await;
+
+    // The run reports progress, then finishes. The real background task
+    // enables sync per pair as it goes; mirror that for the active pair.
+    state.db.metadata().set_sync_enabled(true).await.unwrap();
+    account::apply_sync_message(
+        &mut state,
+        account::SyncMessage::SyncAllProgress {
+            pair_id: "ru-en".to_string(),
+            status: account::PairSyncStatus::Done,
+        },
+    )
+    .await;
+    account::apply_sync_message(
+        &mut state,
+        account::SyncMessage::SyncAllFinished { failed: 0 },
+    )
+    .await;
+    assert!(state.sync_all.done);
+    assert!(
+        state.settings.account.sync_enabled,
+        "finished sync-all refreshes the account toggle"
+    );
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| sync_all::draw(f, f.area(), &mut state))
+        .unwrap();
+    let text = buffer_text(&terminal);
+    assert!(text.contains("ru → en"), "pair row rendered");
+    assert!(text.contains("готово"), "done status rendered");
+    assert!(
+        text.contains("Все пары синхронизированы"),
+        "summary rendered"
+    );
+
+    // Enter returns to the view the login started from.
+    sync_all::handle_key(&mut state, KeyCode::Enter)
+        .await
+        .unwrap();
+    assert_eq!(state.view, View::Settings);
 }

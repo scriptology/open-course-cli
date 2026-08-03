@@ -18,7 +18,7 @@ use open_course_db::Database;
 use open_course_db::outbox::{ENTITY_LEARNING_ITEM, ENTITY_TOPIC, OP_TOMBSTONE_RESET, OP_UPSERT};
 use open_course_sync::{
     Change, CurriculumPayload, DeviceCodeResponse, MeResponse, PollResult, PullResponse,
-    PushRequest, PushResponse, SyncClient, SyncError, TokenBackend, TokenSet, TokenStore,
+    PushRequest, PushResponse, SyncClient, SyncError, TokenSet, TokenStore,
 };
 
 const TEST_TOKEN: &str = "test-token";
@@ -713,8 +713,7 @@ async fn roundtrip_two_clients() {
 #[tokio::test]
 async fn token_store_file_backend_roundtrip() {
     let dir = TempDir::new().unwrap();
-    let store = TokenStore::with_backend(dir.path().to_path_buf(), TokenBackend::File);
-    assert_eq!(store.backend(), TokenBackend::File);
+    let store = TokenStore::new(dir.path().to_path_buf());
 
     assert!(store.load().await.unwrap().is_none());
 
@@ -1071,4 +1070,136 @@ async fn adopt_start_from_cloud_replaces_progress_without_pushing_deletes() {
         pushed.changes.iter().all(|c| c.op != "delete"),
         "server must not receive deletes for the discarded local data"
     );
+}
+
+// ---------------------------------------------------------------------------
+// merge_bind: conflict-free curriculum merge by updated_at
+// ---------------------------------------------------------------------------
+
+/// Pushes the given topics straight into the server's canon (a "cloud
+/// device" with controlled timestamps).
+async fn seed_cloud_topics(state: &Shared, base: &str, pair: &str, topics: &[Topic]) {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("db");
+    std::mem::forget(dir);
+    let db = Database::connect(&path).await.unwrap();
+    for t in topics {
+        db.curriculum().upsert_with_timestamps(t).await.unwrap();
+        outbox_upsert_topic(&db, t).await;
+    }
+    client(base).push(&db, pair).await.unwrap();
+    assert!(state.lock().unwrap().canonical.is_some());
+}
+
+#[tokio::test]
+async fn merge_bind_merges_by_updated_at_and_keeps_one_sided_topics() {
+    let (state, base) = start_mock().await;
+    seed_cloud_topics(
+        &state,
+        &base,
+        "ru-es",
+        &[
+            topic(
+                "both-local-wins",
+                "Cloud name",
+                Some("2025-01-01T00:00:00Z"),
+            ),
+            topic(
+                "both-cloud-wins",
+                "Cloud name",
+                Some("2025-06-01T00:00:00Z"),
+            ),
+            topic("cloud-only", "Cloud only", Some("2025-03-01T00:00:00Z")),
+        ],
+    )
+    .await;
+
+    let (_dir, db) = temp_db().await;
+    for t in [
+        topic(
+            "both-local-wins",
+            "Local name",
+            Some("2025-07-01T00:00:00Z"),
+        ),
+        topic(
+            "both-cloud-wins",
+            "Local name",
+            Some("2025-05-01T00:00:00Z"),
+        ),
+        topic("local-only", "Local only", Some("2025-02-01T00:00:00Z")),
+    ] {
+        db.curriculum().upsert_with_timestamps(&t).await.unwrap();
+    }
+
+    let report = client(&base).merge_bind(&db, "ru-es").await.unwrap();
+    assert_eq!(report.topics_merged, 2);
+    assert_eq!(report.topics_local_only, 1);
+    assert_eq!(report.topics_cloud_only, 1);
+    assert!(report.revision > 0);
+
+    // The canon is the union: LWW winners for shared ids plus one-sided
+    // topics from both sides.
+    let canon = state.lock().unwrap().canonical.clone().unwrap();
+    assert_eq!(canon.topics.len(), 4);
+    let name_of = |id: &str| {
+        canon
+            .topics
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.name.as_str())
+    };
+    assert_eq!(name_of("both-local-wins"), Some("Local name"));
+    assert_eq!(name_of("both-cloud-wins"), Some("Cloud name"));
+    assert!(name_of("cloud-only").is_some());
+    assert!(name_of("local-only").is_some());
+
+    // The local database matches the canon, stamped with the new version.
+    let local = db.curriculum().read_all().await.unwrap();
+    assert_eq!(local.topics.len(), 4);
+    assert!(
+        local
+            .topics
+            .iter()
+            .all(|t| t.version == canon.version && t.updated_at.is_some())
+    );
+    assert_eq!(
+        db.metadata().cloud_curriculum_version().await.unwrap(),
+        Some(canon.version)
+    );
+
+    // Everything was pushed and the pull cursor advanced past the echo.
+    assert_eq!(db.outbox().len().await.unwrap(), 0);
+    assert!(db.metadata().last_pulled_seq().await.unwrap() > 0);
+}
+
+#[tokio::test]
+async fn merge_bind_is_idempotent() {
+    let (state, base) = start_mock().await;
+    seed_cloud_topics(
+        &state,
+        &base,
+        "ru-es",
+        &[topic("t1", "Greetings", Some("2025-01-01T00:00:00Z"))],
+    )
+    .await;
+
+    let (_dir, db) = temp_db().await;
+    db.curriculum()
+        .upsert_with_timestamps(&topic("t2", "Farewells", Some("2025-02-01T00:00:00Z")))
+        .await
+        .unwrap();
+
+    client(&base).merge_bind(&db, "ru-es").await.unwrap();
+    let canon_first = state.lock().unwrap().canonical.clone().unwrap();
+
+    client(&base).merge_bind(&db, "ru-es").await.unwrap();
+    let canon_second = state.lock().unwrap().canonical.clone().unwrap();
+
+    // Same topic set; no duplicates, no drops.
+    assert_eq!(canon_second.topics.len(), 2);
+    let mut ids: Vec<&str> = canon_second.topics.iter().map(|t| t.id.as_str()).collect();
+    ids.sort();
+    assert_eq!(ids, ["t1", "t2"]);
+    assert_eq!(canon_first.topics.len(), canon_second.topics.len());
+    assert_eq!(db.curriculum().read_all().await.unwrap().topics.len(), 2);
 }

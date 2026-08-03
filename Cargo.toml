@@ -49,7 +49,6 @@ time = "0.3"
 unicode-normalization = "0.1"
 regex = "1"
 uuid = { version = "1", features = ["v7"] }
-keyring = "3"
 
 # Dev
 tempfile = "3"

@@ -9,10 +9,9 @@ use ratatui::text::{Line, Span, Text};
 
 use open_course_config::{resolve_sync_server_url, write_config};
 use open_course_core::error::Result;
-use open_course_db::Database;
 use open_course_sync::{
     BindScenario, CurriculumPayload, DeviceCodeResponse, MeResponse, PollResult, ProgressMerge,
-    PushError, SyncClient, SyncError, TokenBackend, TokenSet, TokenStore,
+    SyncClient, TokenSet, TokenStore,
 };
 
 use crate::app::AppState;
@@ -23,10 +22,9 @@ use crate::ui::widgets::{Toast, error_lines};
 /// Messages from background sync tasks to the event loop.
 #[derive(Debug)]
 pub enum SyncMessage {
-    /// Token presence + storage backend, probed when the section opens.
+    /// Token presence, probed when the section opens.
     AccountRefreshed {
         has_token: bool,
-        backend: TokenBackend,
     },
     DeviceFlowStarted(std::result::Result<DeviceCodeResponse, String>),
     DeviceFlowExpired,
@@ -42,6 +40,30 @@ pub enum SyncMessage {
     CurriculumConflict(CurriculumPayload),
     /// Best-effort `/v1/me` result (`None` when unavailable).
     MeFetched(Option<MeResponse>),
+    /// Per-pair progress of the sync-all run after login.
+    SyncAllProgress {
+        pair_id: String,
+        status: PairSyncStatus,
+    },
+    /// The sync-all run finished; `failed` counts pairs that did not sync.
+    SyncAllFinished {
+        failed: usize,
+    },
+    /// A background task skipped silently (signed out / toggle off); only
+    /// releases the sync scheduler.
+    SchedulerIdle,
+}
+
+/// Outcome of one pair in the sync-all run, shown as a status row.
+#[derive(Debug)]
+pub enum PairSyncStatus {
+    Running,
+    /// Synced (fresh push or pull).
+    Done,
+    /// A curriculum conflict was merged by `merge_bind`.
+    Merged(open_course_sync::MergeReport),
+    Failed(String),
+    Unauthorized,
 }
 
 #[derive(Debug)]
@@ -49,7 +71,6 @@ pub struct LoginInfo {
     pub email: Option<String>,
     pub device_id: String,
     pub subscription: Option<String>,
-    pub backend: TokenBackend,
 }
 
 /// What a finished sync operation did, for the status message.
@@ -68,7 +89,7 @@ pub struct SyncReport {
 }
 
 impl SyncReport {
-    fn sync(revision: i64) -> Self {
+    pub(crate) fn sync(revision: i64) -> Self {
         Self {
             revision,
             action: ReportAction::Sync,
@@ -85,7 +106,7 @@ pub struct SyncFailure {
 }
 
 impl SyncFailure {
-    fn unauthorized() -> Self {
+    pub(crate) fn unauthorized() -> Self {
         Self {
             message: String::new(),
             unauthorized: true,
@@ -93,7 +114,7 @@ impl SyncFailure {
         }
     }
 
-    fn conflict() -> Self {
+    pub(crate) fn conflict() -> Self {
         Self {
             message: String::new(),
             unauthorized: false,
@@ -101,7 +122,7 @@ impl SyncFailure {
         }
     }
 
-    fn other(message: String) -> Self {
+    pub(crate) fn other(message: String) -> Self {
         Self {
             message,
             unauthorized: false,
@@ -150,7 +171,6 @@ pub struct AccountState {
     pub verification_url: Option<String>,
     pub email: Option<String>,
     pub device_id: Option<String>,
-    pub token_backend: Option<TokenBackend>,
     pub sync_enabled: bool,
     pub last_sync_at: Option<String>,
     pub outbox_len: Option<usize>,
@@ -195,12 +215,9 @@ pub async fn on_enter(state: &mut AppState) {
     let tx = state.sync_tx.clone();
     tokio::spawn(async move {
         let store = TokenStore::new(data_dir);
-        let backend = store.backend();
         let token = store.load().await.ok().flatten();
         let has_token = token.is_some();
-        let _ = tx
-            .send(SyncMessage::AccountRefreshed { has_token, backend })
-            .await;
+        let _ = tx.send(SyncMessage::AccountRefreshed { has_token }).await;
         if let Some(token) = token
             && let Ok(client) = SyncClient::new(base_url)
         {
@@ -302,7 +319,6 @@ async fn finish_login(
     tokens: TokenSet,
 ) -> std::result::Result<LoginInfo, String> {
     let store = TokenStore::new(data_dir.to_path_buf());
-    let backend = store.backend();
     store.save(&tokens).await.map_err(|e| e.to_string())?;
     let client = SyncClient::new(base_url)
         .map_err(|e| e.to_string())?
@@ -316,7 +332,6 @@ async fn finish_login(
         email,
         device_id: tokens.device_id.clone(),
         subscription: me.map(|m| m.subscription_status),
-        backend,
     })
 }
 
@@ -324,7 +339,7 @@ fn start_manual_sync(state: &mut AppState) {
     state.settings.account.syncing = true;
     state.settings.account.notice = None;
     state.settings.account.error = None;
-    spawn_sync(state, SyncKind::Manual);
+    crate::app::sync::spawn_sync(state, crate::app::sync::SyncKind::Manual);
 }
 
 async fn toggle_sync(state: &mut AppState) -> Result<()> {
@@ -336,13 +351,24 @@ async fn toggle_sync(state: &mut AppState) -> Result<()> {
     // Enabling: probe the cloud first — the pair may already have a
     // canonical curriculum pushed by another device.
     let lang = crate::ui::labels::native_language_code(state.config.as_ref());
+    let labels = crate::ui::labels::get_settings_labels(lang);
+    // No stored token means the login is gone (e.g. the auth file was
+    // removed): ask for a fresh sign-in instead of a raw "unauthorized".
+    let store = TokenStore::new(state.data_dir.clone());
+    let token = match store.load().await {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            state.settings.account.relogin_required = true;
+            state.settings.account.notice = Some(labels.account_relogin_required.to_string());
+            return Ok(());
+        }
+        Err(e) => {
+            state.settings.account.error = Some(e.to_string());
+            return Ok(());
+        }
+    };
     state.settings.account.error = None;
-    state.settings.account.notice = Some(
-        crate::ui::labels::get_settings_labels(lang)
-            .account_bind_checking
-            .to_string(),
-    );
-    let data_dir = state.data_dir.clone();
+    state.settings.account.notice = Some(labels.account_bind_checking.to_string());
     let base_url = resolve_sync_server_url(state.config.as_ref());
     let pair_id = state
         .config
@@ -353,12 +379,6 @@ async fn toggle_sync(state: &mut AppState) -> Result<()> {
     let tx = state.sync_tx.clone();
     tokio::spawn(async move {
         let result = async {
-            let store = TokenStore::new(data_dir);
-            let token = store
-                .load()
-                .await
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "unauthorized".to_string())?;
             let client = SyncClient::new(base_url)
                 .map_err(|e| e.to_string())?
                 .with_access_token(token.access_token);
@@ -388,156 +408,9 @@ async fn sign_out(state: &mut AppState) -> Result<()> {
     account.email = None;
     account.device_id = None;
     account.subscription = None;
-    account.token_backend = None;
     account.relogin_required = false;
     state.settings.active_field = 0;
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SyncKind {
-    /// Explicit "Sync now": pull, then push (even when the per-pair toggle
-    /// is off — the user asked explicitly).
-    Manual,
-    /// Push after a finished session (only when the toggle is on).
-    AfterSession,
-    /// Pull on application start (only when the toggle is on, short
-    /// timeout, quiet failures).
-    OnStart,
-    /// Pull only (bind of an empty local database to a cloud pair).
-    PullOnly,
-}
-
-/// Background pull on application start: never blocks, silently skips when
-/// signed out or sync is disabled for the pair.
-pub fn spawn_pull_on_start(state: &AppState) {
-    spawn_sync(state, SyncKind::OnStart);
-}
-
-/// Background push after a session's analysis was applied.
-pub async fn spawn_push_after_session(state: &AppState) {
-    if state.db.metadata().sync_enabled().await.unwrap_or(false) {
-        spawn_sync(state, SyncKind::AfterSession);
-    }
-}
-
-/// What a background sync task produced.
-enum SyncOutcome {
-    Done(std::result::Result<SyncReport, SyncFailure>),
-    Conflict(CurriculumPayload),
-}
-
-fn spawn_sync(state: &AppState, kind: SyncKind) {
-    let data_dir = state.data_dir.clone();
-    let base_url = resolve_sync_server_url(state.config.as_ref());
-    let pair_id = state
-        .config
-        .as_ref()
-        .map(|c| c.active_pair.clone())
-        .unwrap_or_default();
-    let db = state.db.as_ref().clone();
-    let tx = state.sync_tx.clone();
-    tokio::spawn(async move {
-        let Some(outcome) = run_sync(&data_dir, &base_url, db, pair_id, kind).await else {
-            return;
-        };
-        match outcome {
-            SyncOutcome::Done(report) => {
-                let msg = match kind {
-                    SyncKind::OnStart => SyncMessage::PullOnStartFinished(report),
-                    _ => SyncMessage::SyncFinished(report),
-                };
-                let _ = tx.send(msg).await;
-            }
-            SyncOutcome::Conflict(payload) => {
-                let _ = tx.send(SyncMessage::CurriculumConflict(payload)).await;
-            }
-        }
-    });
-}
-
-/// `None` means "skip silently" (signed out, or disabled for OnStart /
-/// AfterSession).
-async fn run_sync(
-    data_dir: &std::path::Path,
-    base_url: &str,
-    db: Database,
-    pair_id: String,
-    kind: SyncKind,
-) -> Option<SyncOutcome> {
-    let store = TokenStore::new(data_dir.to_path_buf());
-    let token = match store.load().await {
-        Ok(Some(token)) => token,
-        Ok(None) if kind == SyncKind::Manual => {
-            return Some(SyncOutcome::Done(Err(SyncFailure::unauthorized())));
-        }
-        Ok(None) => return None,
-        Err(e) => return Some(SyncOutcome::Done(Err(SyncFailure::other(e.to_string())))),
-    };
-    if kind != SyncKind::Manual && !db.metadata().sync_enabled().await.unwrap_or(false) {
-        return None;
-    }
-    let client = match SyncClient::new(base_url) {
-        Ok(client) => client.with_access_token(token.access_token),
-        Err(e) => return Some(SyncOutcome::Done(Err(SyncFailure::other(e.to_string())))),
-    };
-
-    let result = match kind {
-        SyncKind::OnStart => client
-            .pull_with_timeout(&db, &pair_id)
-            .await
-            .map(SyncReport::sync)
-            .map_err(map_sync_err),
-        SyncKind::PullOnly => client
-            .pull(&db, &pair_id)
-            .await
-            .map(SyncReport::sync)
-            .map_err(map_sync_err),
-        SyncKind::AfterSession => match client.push(&db, &pair_id).await {
-            Ok(revision) => Ok(SyncReport::sync(revision)),
-            Err(PushError::CurriculumConflict(payload)) => {
-                return Some(SyncOutcome::Conflict(payload));
-            }
-            Err(e) => Err(map_push_err(e)),
-        },
-        SyncKind::Manual => {
-            if let Err(e) = client.pull(&db, &pair_id).await {
-                Err(map_sync_err(e))
-            } else {
-                match client.push(&db, &pair_id).await {
-                    Ok(revision) => Ok(SyncReport::sync(revision)),
-                    Err(PushError::CurriculumConflict(payload)) => {
-                        return Some(SyncOutcome::Conflict(payload));
-                    }
-                    Err(e) => Err(map_push_err(e)),
-                }
-            }
-        }
-    };
-    if result.is_ok() {
-        let _ = db
-            .metadata()
-            .set_last_sync_at(&chrono::Utc::now().to_rfc3339())
-            .await;
-    }
-    Some(SyncOutcome::Done(result))
-}
-
-fn map_push_err(e: PushError) -> SyncFailure {
-    match e {
-        // The conflict body is handled in a future version; the outbox and
-        // all local data stay intact.
-        PushError::CurriculumConflict(_) => SyncFailure::conflict(),
-        PushError::Sync(SyncError::Unauthorized) => SyncFailure::unauthorized(),
-        PushError::Sync(e) => SyncFailure::other(e.to_string()),
-    }
-}
-
-fn map_sync_err(e: SyncError) -> SyncFailure {
-    match e {
-        SyncError::Unauthorized => SyncFailure::unauthorized(),
-        other => SyncFailure::other(other.to_string()),
-    }
 }
 
 /// Applies a background sync message to the UI state. Called from the event
@@ -546,9 +419,8 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
     let lang = crate::ui::labels::native_language_code(state.config.as_ref());
     let labels = crate::ui::labels::get_settings_labels(lang);
     match message {
-        SyncMessage::AccountRefreshed { has_token, backend } => {
+        SyncMessage::AccountRefreshed { has_token } => {
             let account = &mut state.settings.account;
-            account.token_backend = Some(backend);
             match account.status {
                 LoginStatus::LoggedOut if has_token => account.status = LoginStatus::LoggedIn,
                 LoginStatus::LoggedIn if !has_token => account.status = LoginStatus::LoggedOut,
@@ -589,9 +461,14 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
             account.email = info.email;
             account.device_id = Some(info.device_id);
             account.subscription = info.subscription;
-            account.token_backend = Some(info.backend);
             account.relogin_required = false;
             state.settings.active_field = 0;
+            // Bind and sync every pair right away, with the progress view.
+            let has_pairs = state.config.as_ref().is_some_and(|c| !c.pairs.is_empty());
+            if has_pairs {
+                crate::ui::views::sync_all::start(state);
+                crate::app::sync::schedule(state, crate::app::sync::SyncTrigger::AfterLogin).await;
+            }
         }
         SyncMessage::LoginFinished(Err(e)) => {
             state.settings.account.status = LoginStatus::LoggedOut;
@@ -602,10 +479,10 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
             state.settings.account.error = None;
             match scenario {
                 BindScenario::FreshLocal => {
-                    enable_and_run(state, SyncKind::AfterSession).await;
+                    enable_and_run(state, crate::app::sync::SyncKind::AfterSession).await;
                 }
                 BindScenario::FreshCloud => {
-                    enable_and_run(state, SyncKind::PullOnly).await;
+                    enable_and_run(state, crate::app::sync::SyncKind::PullOnly).await;
                 }
                 BindScenario::Conflict(payload) => {
                     open_bind_dialog(state, payload).await;
@@ -613,11 +490,13 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
             }
         }
         SyncMessage::BindScenarioLoaded(Err(e)) => {
+            state.settings.account.notice = None;
             state.settings.account.error = Some(e);
         }
         SyncMessage::CurriculumConflict(payload) => {
             open_bind_dialog(state, payload).await;
             state.toast = Some(Toast::info(labels.account_sync_conflict_toast));
+            crate::app::sync::finish(state).await;
         }
         SyncMessage::SyncFinished(Ok(report)) => {
             let notice = match report.action {
@@ -641,22 +520,36 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
                 // Adopt/replace enable sync for the pair as the final step.
                 state.settings.account.sync_enabled = true;
             }
+            crate::app::sync::finish(state).await;
         }
         SyncMessage::SyncFinished(Err(failure)) => {
             state.settings.account.syncing = false;
             apply_sync_failure(state, &labels, failure);
+            crate::app::sync::finish(state).await;
         }
         SyncMessage::PullOnStartFinished(Ok(_report)) => {
             refresh_sync_status(state).await;
+            crate::app::sync::finish(state).await;
         }
         SyncMessage::PullOnStartFinished(Err(failure)) => {
             // Offline-first: only a rejected token is surfaced.
             if failure.unauthorized {
                 state.settings.account.relogin_required = true;
             }
+            crate::app::sync::finish(state).await;
         }
         SyncMessage::MeFetched(me) => {
             state.settings.account.subscription = me.map(|m| m.subscription_status);
+        }
+        SyncMessage::SyncAllProgress { pair_id, status } => {
+            crate::ui::views::sync_all::apply_progress(state, &pair_id, status);
+        }
+        SyncMessage::SyncAllFinished { failed } => {
+            crate::ui::views::sync_all::apply_finished(state, failed).await;
+            crate::app::sync::finish(state).await;
+        }
+        SyncMessage::SchedulerIdle => {
+            crate::app::sync::finish(state).await;
         }
     }
 }
@@ -685,11 +578,11 @@ async fn refresh_sync_status(state: &mut AppState) {
 
 /// Enables sync for the pair and starts the given background operation
 /// (push for a cloud-empty pair, pull for a locally-empty one).
-async fn enable_and_run(state: &mut AppState, kind: SyncKind) {
+async fn enable_and_run(state: &mut AppState, kind: crate::app::sync::SyncKind) {
     let _ = state.db.metadata().set_sync_enabled(true).await;
     state.settings.account.sync_enabled = true;
     state.settings.account.syncing = true;
-    spawn_sync(state, kind);
+    crate::app::sync::spawn_sync(state, kind);
 }
 
 /// Opens the conflict-resolution dialog, asking about progress only when
@@ -803,7 +696,7 @@ fn execute_adopt(state: &mut AppState, payload: CurriculumPayload, merge: Progre
             client
                 .adopt_cloud_curriculum(&db, &pair_id, &payload, merge)
                 .await
-                .map_err(map_sync_err)?;
+                .map_err(crate::app::sync::map_sync_err)?;
             let _ = db.metadata().set_sync_enabled(true).await;
             let _ = db
                 .metadata()
@@ -855,7 +748,7 @@ fn execute_replace(state: &mut AppState, _payload: CurriculumPayload) {
             let revision = client
                 .replace_cloud_curriculum(&db, &pair_id)
                 .await
-                .map_err(map_push_err)?;
+                .map_err(crate::app::sync::map_push_err)?;
             let _ = db.metadata().set_sync_enabled(true).await;
             let _ = db
                 .metadata()
@@ -950,18 +843,6 @@ pub fn build_body(state: &AppState, labels: &SettingsLabels) -> Text<'static> {
                 labels.account_device_label,
                 account.device_id.as_deref().unwrap_or("—"),
             ));
-            let backend = match account.token_backend {
-                Some(TokenBackend::Keychain) => labels.account_token_keychain,
-                Some(TokenBackend::File) => labels.account_token_file,
-                None => "—",
-            };
-            lines.push(info_line(labels.account_token_label, backend));
-            if account.token_backend == Some(TokenBackend::File) {
-                lines.push(Line::from(Span::styled(
-                    labels.account_token_file_warning,
-                    Style::default().fg(Color::Yellow),
-                )));
-            }
             lines.push(info_line(
                 labels.account_subscription_label,
                 account

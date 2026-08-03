@@ -1,4 +1,5 @@
 mod llm_results;
+pub mod sync;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,8 +20,8 @@ use crate::ui::views::settings::account::{self, SyncMessage};
 use crate::ui::views::utils::{select_next_wrapping, select_previous_wrapping};
 use crate::ui::views::{
     CurriculumState, DashboardState, DocsState, ModelCheckState, OnboardingState, PairsState,
-    ReportState, SessionState, SettingsState, UpdateState, curriculum, dashboard, docs,
-    model_check, onboarding, pairs, report, session, settings, update,
+    ReportState, SessionState, SettingsState, SyncAllState, UpdateState, curriculum, dashboard,
+    docs, model_check, onboarding, pairs, report, session, settings, sync_all, update,
 };
 use crate::ui::widgets::{ErrorBox, HelpOverlay, Spinner, Toast, ToastWidget};
 use open_course_config::{OpenCourseConfig, pair_db_path, write_config};
@@ -42,6 +43,7 @@ pub enum View {
     Settings,
     ModelCheck,
     Pairs,
+    SyncAll,
     UpdateAvailable,
     Quitting,
 }
@@ -60,6 +62,8 @@ pub struct AppState {
     pub report: ReportState,
     pub model_check: ModelCheckState,
     pub pairs: PairsState,
+    pub sync_all: SyncAllState,
+    pub sync: sync::SyncSchedulerState,
     pub update: UpdateState,
     pub quit_requested: Arc<AtomicBool>,
     pub llm_tx: mpsc::Sender<LlmResult>,
@@ -102,6 +106,8 @@ impl AppState {
             report: ReportState::new(),
             model_check: ModelCheckState::new(),
             pairs: PairsState::new(),
+            sync_all: SyncAllState::default(),
+            sync: sync::SyncSchedulerState::default(),
             update: UpdateState::new(),
             quit_requested,
             llm_tx,
@@ -160,8 +166,8 @@ pub async fn run_app(
     }
 
     // Background pull on start: never blocks the UI and silently skips when
-    // signed out or sync is disabled for the pair.
-    account::spawn_pull_on_start(&state);
+    // signed out; pulls every pair with sync enabled.
+    sync::schedule(&mut state, sync::SyncTrigger::AppStart).await;
 
     let mut sync_rx = state.sync_rx.take().expect("sync receiver taken once");
 
@@ -456,6 +462,7 @@ fn redraw_on_tick(state: &AppState) -> bool {
         || state.docs.loading
         || state.curriculum.loading
         || state.model_check.running
+        || (state.view == View::SyncAll && !state.sync_all.done)
         || state.toast.is_some()
 }
 
@@ -501,6 +508,7 @@ async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         View::Settings => settings::handle_key(state, code).await,
         View::ModelCheck => model_check::handle_key(state, code).await,
         View::Pairs => pairs::handle_key(state, code).await,
+        View::SyncAll => sync_all::handle_key(state, code).await,
         View::UpdateAvailable => handle_update_key(state, code).await,
         View::Quitting => Ok(()),
     }
@@ -637,6 +645,7 @@ fn draw(frame: &mut ratatui::Frame, state: &mut AppState) {
         View::Settings => settings::draw(frame, area, state),
         View::ModelCheck => model_check::draw(frame, area, state),
         View::Pairs => pairs::draw(frame, area, state),
+        View::SyncAll => sync_all::draw(frame, area, state),
         View::UpdateAvailable => update::draw(frame, area, state),
         View::Quitting => {}
     }

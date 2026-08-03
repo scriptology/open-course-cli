@@ -7,6 +7,7 @@ pub mod pairs;
 pub mod report;
 pub mod session;
 pub mod settings;
+pub mod sync_all;
 pub mod update;
 pub mod utils;
 
@@ -19,4 +20,5 @@ pub use pairs::PairsState;
 pub use report::ReportState;
 pub use session::SessionState;
 pub use settings::SettingsState;
+pub use sync_all::SyncAllState;
 pub use update::UpdateState;
