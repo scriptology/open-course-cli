@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/scriptology/open-course-cli/compare/v0.10.0...v0.10.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **cli:** make the Account section selector move and tidy the screen ([752cfa5](https://github.com/scriptology/open-course-cli/commit/752cfa5bf8f0df489a567611ef8d1a368afb2130))
+* **cli:** make the Account section selector move and tidy the screen ([30e5f23](https://github.com/scriptology/open-course-cli/commit/30e5f237fe981631cff24e06706072801c2e5590))
+
 ## [0.10.0](https://github.com/scriptology/open-course-cli/compare/v0.9.2...v0.10.0) (2026-08-02)
 
 
