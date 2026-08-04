@@ -8,7 +8,43 @@
 use std::collections::HashSet;
 
 use open_course_db::Database;
-use open_course_db::outbox::{ENTITY_TOPIC, OP_UPSERT};
+use open_course_db::outbox::{
+    ENTITY_LEARNING_ITEM, ENTITY_PROGRESS, ENTITY_SESSION, ENTITY_TOPIC, OP_UPSERT,
+};
+
+/// Enqueues every local row as an upsert: the first upload of a pair whose
+/// data predates sync. The outbox only carries mutations made after sync
+/// was introduced, so without this backfill a "fresh local" bind pushes
+/// nothing. Re-pushing is safe: the server applies rows last-writer-wins.
+pub async fn backfill_outbox(db: &Database, include_topics: bool) -> Result<(), SyncError> {
+    if include_topics {
+        for topic in &db.curriculum().read_all().await?.topics {
+            let payload = serde_json::to_string(topic)?;
+            db.outbox()
+                .append(OP_UPSERT, ENTITY_TOPIC, &topic.id, &payload)
+                .await?;
+        }
+    }
+    for progress in &db.progress().read_all().await?.topics {
+        let payload = serde_json::to_string(progress)?;
+        db.outbox()
+            .append(OP_UPSERT, ENTITY_PROGRESS, &progress.topic_id, &payload)
+            .await?;
+    }
+    for session in &db.history().read_all().await? {
+        let payload = serde_json::to_string(session)?;
+        db.outbox()
+            .append(OP_UPSERT, ENTITY_SESSION, &session.id, &payload)
+            .await?;
+    }
+    for item in &db.learning_items().read_all().await? {
+        let payload = serde_json::to_string(item)?;
+        db.outbox()
+            .append(OP_UPSERT, ENTITY_LEARNING_ITEM, &item.id, &payload)
+            .await?;
+    }
+    Ok(())
+}
 
 use crate::client::{SyncClient, check_status};
 use crate::error::{PushError, SyncError};
@@ -129,6 +165,21 @@ impl SyncClient {
         // reconciles by last-writer-wins.
         db.metadata().set_last_pulled_seq(0).await?;
         self.pull(db, pair_id).await?;
+        if merge == ProgressMerge::Merge {
+            // Rows the cloud lacks were kept locally; upload them so the
+            // other devices see them (the outbox only had post-sync
+            // mutations until now).
+            backfill_outbox(db, false).await?;
+            self.push(db, pair_id).await.map_err(|e| match e {
+                PushError::Sync(e) => e,
+                // We just adopted this canon; a conflict here would be a
+                // race with another device replacing it mid-bind.
+                PushError::CurriculumConflict(payload) => SyncError::Protocol(format!(
+                    "curriculum conflict right after adopt (revision {})",
+                    payload.revision
+                )),
+            })?;
+        }
         Ok(())
     }
 
@@ -165,6 +216,10 @@ impl SyncClient {
                 .await
                 .map_err(SyncError::from)?;
         }
+
+        // Replace means "my local state becomes the cloud's": progress,
+        // sessions and learning items go along with the curriculum.
+        backfill_outbox(db, false).await?;
 
         let revision = self.push_inner(db, pair_id, true).await?;
         db.metadata()
@@ -243,6 +298,10 @@ impl SyncClient {
         }
         // Local topics that lost the merge (not possible by construction —
         // the merged set is a superset of both sides) need no tombstoning.
+
+        // Upload the rest of the local state (progress, sessions, learning
+        // items): pre-sync rows were never in the outbox.
+        backfill_outbox(db, false).await?;
 
         let revision = self.push_inner(db, pair_id, true).await?;
         db.metadata()

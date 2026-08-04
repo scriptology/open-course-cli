@@ -1203,3 +1203,151 @@ async fn merge_bind_is_idempotent() {
     assert_eq!(canon_first.topics.len(), canon_second.topics.len());
     assert_eq!(db.curriculum().read_all().await.unwrap().topics.len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// backfill: first upload of pre-sync data (empty outbox, full tables)
+// ---------------------------------------------------------------------------
+
+use open_course_core::history::SessionSummary;
+use open_course_core::learning_items::LearningItem;
+use open_course_sync::backfill_outbox;
+
+#[tokio::test]
+async fn backfill_uploads_pre_sync_data_on_fresh_bind() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+
+    // Data written before sync existed: straight to the tables, the outbox
+    // stays empty.
+    db.curriculum()
+        .upsert_with_timestamps(&topic("t1", "Greetings", Some("2025-01-01T00:00:00Z")))
+        .await
+        .unwrap();
+    db.progress()
+        .upsert_with_timestamps(&ProgressTopic {
+            topic_id: "t1".to_string(),
+            score: 66.0,
+            mastery: 66.0,
+            updated_at: Some("2025-01-02T00:00:00Z".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    db.history()
+        .append_with_timestamps(&SessionSummary {
+            id: "s1".to_string(),
+            date: "2025-01-02".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    db.learning_items()
+        .upsert(&LearningItem {
+            id: "i1".to_string(),
+            name: "Caro vs Rico".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(db.outbox().len().await.unwrap(), 0, "pre-sync data only");
+
+    backfill_outbox(&db, true).await.unwrap();
+    client(&base).push(&db, "ru-fr").await.unwrap();
+
+    {
+        let st = state.lock().unwrap();
+        let canon = st.canonical.as_ref().expect("canon set by the backfill");
+        assert!(canon.topics.iter().any(|t| t.id == "t1"));
+        for entity in ["progress", "session", "learningItem"] {
+            assert!(
+                st.changes.iter().any(|c| c.entity == entity),
+                "backfilled {entity} reached the server"
+            );
+        }
+    }
+    assert_eq!(db.outbox().len().await.unwrap(), 0, "outbox drained");
+}
+
+#[tokio::test]
+async fn merge_bind_uploads_local_only_progress_and_sessions() {
+    let (state, base) = start_mock().await;
+    seed_cloud_topics(
+        &state,
+        &base,
+        "ru-de",
+        &[topic("t1", "Greetings", Some("2025-06-01T00:00:00Z"))],
+    )
+    .await;
+
+    let (_dir, db) = temp_db().await;
+    db.curriculum()
+        .upsert_with_timestamps(&topic("t1", "Greetings", Some("2025-01-01T00:00:00Z")))
+        .await
+        .unwrap();
+    db.progress()
+        .upsert_with_timestamps(&ProgressTopic {
+            topic_id: "t1".to_string(),
+            score: 42.0,
+            mastery: 42.0,
+            updated_at: Some("2025-02-01T00:00:00Z".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    db.history()
+        .append_with_timestamps(&SessionSummary {
+            id: "local-session".to_string(),
+            date: "2025-02-01".to_string(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(db.outbox().len().await.unwrap(), 0);
+
+    client(&base).merge_bind(&db, "ru-de").await.unwrap();
+
+    {
+        let st = state.lock().unwrap();
+        assert!(
+            st.changes
+                .iter()
+                .any(|c| c.entity == "progress" && c.entity_id == "t1"),
+            "local progress uploaded by the merge"
+        );
+        assert!(
+            st.changes
+                .iter()
+                .any(|c| c.entity == "session" && c.entity_id == "local-session"),
+            "local session uploaded by the merge"
+        );
+    }
+    assert_eq!(db.outbox().len().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn backfill_is_safe_to_repeat() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+    db.curriculum()
+        .upsert_with_timestamps(&topic("t1", "Greetings", Some("2025-01-01T00:00:00Z")))
+        .await
+        .unwrap();
+
+    backfill_outbox(&db, true).await.unwrap();
+    client(&base).push(&db, "ru-it").await.unwrap();
+    // A repeated full upload (e.g. the manual-sync heal running again)
+    // re-pushes the same rows; the server applies them last-writer-wins.
+    // The pull first mirrors the real flow (pull → backfill → push) and
+    // advances the cursor past our own echo.
+    client(&base).pull(&db, "ru-it").await.unwrap();
+    backfill_outbox(&db, true).await.unwrap();
+    client(&base).push(&db, "ru-it").await.unwrap();
+
+    let st = state.lock().unwrap();
+    let canon = st.canonical.as_ref().unwrap();
+    assert_eq!(
+        canon.topics.iter().filter(|t| t.id == "t1").count(),
+        1,
+        "no duplicate topics after a repeated backfill"
+    );
+}
