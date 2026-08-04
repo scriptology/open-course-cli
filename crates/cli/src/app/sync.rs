@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use open_course_config::{pair_db_path, resolve_sync_server_url};
 use open_course_db::Database;
-use open_course_sync::{BindScenario, PushError, SyncClient, SyncError, TokenStore};
+use open_course_sync::{
+    BindScenario, PushError, SyncClient, SyncError, TokenStore, backfill_outbox,
+};
 
 use crate::app::AppState;
 use crate::ui::views::settings::account::{PairSyncStatus, SyncFailure, SyncMessage, SyncReport};
@@ -167,8 +169,34 @@ async fn run_sync(
             if let Err(e) = client.pull(&db, &pair_id).await {
                 Err(map_sync_err(e))
             } else {
+                // Heal pairs whose pre-sync data never reached the cloud
+                // (the outbox only carries post-sync mutations): upload
+                // everything once, marked by `cloud_curriculum_version`.
+                let needs_backfill = db
+                    .metadata()
+                    .cloud_curriculum_version()
+                    .await
+                    .unwrap_or(None)
+                    .is_none()
+                    && !db
+                        .curriculum()
+                        .read_all()
+                        .await
+                        .map(|c| c.topics.is_empty())
+                        .unwrap_or(true);
+                if needs_backfill && let Err(e) = backfill_outbox(&db, true).await {
+                    return Some(SyncOutcome::Done(Err(map_sync_err(e))));
+                }
                 match client.push(&db, &pair_id).await {
-                    Ok(revision) => Ok(SyncReport::sync(revision)),
+                    Ok(revision) => {
+                        if needs_backfill && let Ok(curriculum) = db.curriculum().read_all().await {
+                            let _ = db
+                                .metadata()
+                                .set_cloud_curriculum_version(curriculum.version)
+                                .await;
+                        }
+                        Ok(SyncReport::sync(revision))
+                    }
                     Err(PushError::CurriculumConflict(payload)) => {
                         return Some(SyncOutcome::Conflict(payload));
                     }
@@ -378,11 +406,27 @@ async fn bind_and_sync(client: &SyncClient, db: &Database, pair_id: &str) -> Pai
         Err(e) => return PairSyncStatus::Failed(e.to_string()),
     };
     let result = match scenario {
-        BindScenario::FreshLocal => client
-            .push(db, pair_id)
-            .await
-            .map(|_| PairSyncStatus::Done)
-            .map_err(push_err_status),
+        BindScenario::FreshLocal => {
+            // Pre-sync data never entered the outbox: enqueue it first,
+            // otherwise the "fresh local" push is a no-op.
+            let version = db.curriculum().read_all().await.ok().map(|c| c.version);
+            match backfill_outbox(db, true).await.map_err(sync_err_status) {
+                Err(status) => Err(status),
+                Ok(()) => {
+                    let pushed = client
+                        .push(db, pair_id)
+                        .await
+                        .map(|_| PairSyncStatus::Done)
+                        .map_err(push_err_status);
+                    if pushed.is_ok()
+                        && let Some(version) = version
+                    {
+                        let _ = db.metadata().set_cloud_curriculum_version(version).await;
+                    }
+                    pushed
+                }
+            }
+        }
         BindScenario::FreshCloud => client
             .pull(db, pair_id)
             .await

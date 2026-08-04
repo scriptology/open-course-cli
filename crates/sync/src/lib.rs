@@ -12,7 +12,7 @@ pub mod error;
 pub mod protocol;
 mod tokens;
 
-pub use bind::{BindScenario, MergeReport, ProgressMerge};
+pub use bind::{BindScenario, MergeReport, ProgressMerge, backfill_outbox};
 pub use client::{PollResult, SyncClient};
 pub use error::{PushError, SyncError};
 pub use protocol::{
