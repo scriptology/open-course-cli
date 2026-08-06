@@ -1109,3 +1109,74 @@ fn pick_next_extends_curriculum_when_nothing_to_do() {
         other => panic!("expected ExtendCurriculum, got {other:?}"),
     }
 }
+
+fn make_level_topic(id: &str, level: &str) -> Topic {
+    Topic {
+        level: Some(level.to_string()),
+        ..make_topic(id, Difficulty::Beginner)
+    }
+}
+
+#[test]
+fn pick_next_does_not_jump_levels_for_new_topics() {
+    // Weak practiced A2 topic plus an untouched C1 topic: the fresh C1
+    // topic is more than one level above the A2 frontier, so it must not be
+    // offered — the A2 review wins even on a non-review session.
+    let topics = vec![make_level_topic("a2", "A2"), make_level_topic("c1", "C1")];
+    let progress = progress_with(vec![practiced("a2", 30.0, 0)], 0);
+
+    match pick_next_session_topic(&topics, &progress, Utc::now()) {
+        NextSessionTopic::Review(t) => assert_eq!(t.id, "a2"),
+        other => panic!("expected Review(a2), got {other:?}"),
+    }
+}
+
+#[test]
+fn pick_next_allows_new_topic_one_level_above_frontier() {
+    // Unfinished A1 work does not block a fresh A2 topic.
+    let topics = vec![make_level_topic("a1", "A1"), make_level_topic("a2", "A2")];
+    let progress = progress_with(vec![practiced("a1", 30.0, 0)], 0);
+
+    match pick_next_session_topic(&topics, &progress, Utc::now()) {
+        NextSessionTopic::New(t) => assert_eq!(t.id, "a2"),
+        other => panic!("expected New(a2), got {other:?}"),
+    }
+}
+
+#[test]
+fn pick_next_due_orders_by_level_then_mastery() {
+    // A crushed C1 topic (mastery 10) must not outrank a weak A2 topic
+    // (mastery 40): lower-level gaps close first.
+    let topics = vec![make_level_topic("c1", "C1"), make_level_topic("a2", "A2")];
+    let progress = progress_with(vec![practiced("c1", 10.0, 0), practiced("a2", 40.0, 0)], 0);
+
+    match pick_next_session_topic(&topics, &progress, Utc::now()) {
+        NextSessionTopic::Review(t) => assert_eq!(t.id, "a2"),
+        other => panic!("expected Review(a2), got {other:?}"),
+    }
+}
+
+#[test]
+fn side_topics_capped_one_level_above_target() {
+    let topics = vec![
+        make_level_topic("target", "A2"),
+        make_level_topic("a1", "A1"),
+        make_level_topic("b1", "B1"),
+        make_level_topic("c1", "C1"),
+    ];
+    let progress = progress_with(
+        vec![
+            practiced("target", 30.0, 0),
+            practiced("a1", 20.0, 0),
+            practiced("b1", 25.0, 0),
+            practiced("c1", 5.0, 0),
+        ],
+        0,
+    );
+
+    let target = topics[0].clone();
+    let sides = select_side_topics(&topics, &[target], 3, &progress, Utc::now());
+    let ids: Vec<&str> = sides.iter().map(|t| t.id.as_str()).collect();
+    // c1 is the weakest but two levels above the A2 target — excluded.
+    assert_eq!(ids, ["a1", "b1"]);
+}

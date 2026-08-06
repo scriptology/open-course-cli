@@ -11,6 +11,22 @@ use crate::progress::{ProgressData, ProgressTopic};
 use super::MASTERY_THRESHOLD;
 use super::scoring::clamp_score;
 
+/// Numeric CEFR level of a topic (A1=1..C2=6), falling back to the coarse
+/// difficulty bucket when the level is missing. 0 means "unknown" — such
+/// topics are exempt from level gating.
+fn topic_level_numeric(topic: &Topic) -> i32 {
+    let n = topic.cefr_numeric();
+    if n > 0 {
+        return n;
+    }
+    match topic.difficulty.as_str() {
+        "beginner" => 1,
+        "intermediate" => 3,
+        "advanced" => 5,
+        _ => 0,
+    }
+}
+
 pub fn select_target_topics(
     topics: &[Topic],
     progress: &ProgressData,
@@ -31,6 +47,11 @@ pub fn select_target_topics(
 /// (never-practiced first). Returns fewer than `count` topics when not
 /// enough qualify — the list is never padded, which keeps the side-topic
 /// context rotating instead of repeating the first curriculum topics.
+///
+/// Candidates are capped at one CEFR level above the target topic (the
+/// first entry of `exclude`): practicing much harder material on the side
+/// produces errors that pollute the topic's progress record and later
+/// surface it as a suggested topic far above the user's level.
 pub fn select_side_topics(
     topics: &[Topic],
     exclude: &[Topic],
@@ -42,6 +63,12 @@ pub fn select_side_topics(
     let progress_map: HashMap<&String, &ProgressTopic> =
         progress.topics.iter().map(|t| (&t.topic_id, t)).collect();
 
+    let level_cap = exclude
+        .first()
+        .map(|t| topic_level_numeric(t))
+        .filter(|n| *n > 0)
+        .map(|n| n + 1);
+
     let mastery_of = |id: &String| -> f64 {
         progress_map
             .get(id)
@@ -52,6 +79,13 @@ pub fn select_side_topics(
     let mut candidates: Vec<&Topic> = topics
         .iter()
         .filter(|t| !exclude_ids.contains(&t.id) && mastery_of(&t.id) < MASTERY_THRESHOLD)
+        .filter(|t| match level_cap {
+            Some(cap) => {
+                let level = topic_level_numeric(t);
+                level == 0 || level <= cap
+            }
+            None => true,
+        })
         .collect();
 
     candidates.sort_by(|a, b| {
@@ -191,9 +225,17 @@ const REVIEW_BACKLOG_THRESHOLD: usize = 5;
 
 /// Balances new material against spaced review. Due topics are practiced
 /// topics whose effective mastery decayed below the mastery threshold,
-/// weakest first. When both candidates exist, every third session is a
-/// review (every second when the backlog is large), so new topics keep
-/// flowing at a predictable pace.
+/// lowest CEFR level first (weakest inside the level), so lower-level
+/// weaknesses are closed before higher-level ones. When both candidates
+/// exist, every third session is a review (every second when the backlog
+/// is large), so new topics keep flowing at a predictable pace.
+///
+/// New topics follow a level ladder: the candidate is the first
+/// never-practiced topic in level order, and it is rejected when its level
+/// is more than one step above the lowest level that still has unfinished
+/// work (the frontier). This keeps the course from jumping to fresh C-level
+/// material while A-level topics are still unmastered; topics without level
+/// information are exempt from the gate.
 pub fn pick_next_session_topic(
     topics: &[Topic],
     progress: &ProgressData,
@@ -202,7 +244,30 @@ pub fn pick_next_session_topic(
     let progress_map: HashMap<&String, &ProgressTopic> =
         progress.topics.iter().map(|t| (&t.topic_id, t)).collect();
 
-    let new_topic = topics
+    let is_unfinished = |t: &Topic| -> bool {
+        match progress_map.get(&t.id) {
+            Some(p) => match p.last_practiced.as_ref() {
+                None => true,
+                Some(_) => effective_mastery(p, now) < MASTERY_THRESHOLD,
+            },
+            None => true,
+        }
+    };
+
+    // Lowest level with unfinished work; 0 when it cannot be determined.
+    let frontier = topics
+        .iter()
+        .filter(|t| is_unfinished(t))
+        .map(topic_level_numeric)
+        .filter(|n| *n > 0)
+        .min()
+        .unwrap_or(0);
+
+    // First never-practiced topic in level order (stable sort keeps the
+    // original order within a level).
+    let mut by_level: Vec<&Topic> = topics.iter().collect();
+    by_level.sort_by_key(|t| topic_level_numeric(t));
+    let new_topic = by_level
         .iter()
         .find(|t| {
             progress_map
@@ -210,7 +275,11 @@ pub fn pick_next_session_topic(
                 .map(|p| p.last_practiced.is_none())
                 .unwrap_or(true)
         })
-        .cloned();
+        .filter(|t| {
+            let level = topic_level_numeric(t);
+            level == 0 || frontier == 0 || level <= frontier + 1
+        })
+        .map(|t| (*t).clone());
 
     let mut due: Vec<(Topic, f64)> = topics
         .iter()
@@ -221,7 +290,11 @@ pub fn pick_next_session_topic(
             (mastery < MASTERY_THRESHOLD).then(|| (t.clone(), mastery))
         })
         .collect();
-    due.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    due.sort_by(|a, b| {
+        topic_level_numeric(&a.0)
+            .cmp(&topic_level_numeric(&b.0))
+            .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
 
     match (due.first(), new_topic) {
         (None, Some(new)) => NextSessionTopic::New(new),
