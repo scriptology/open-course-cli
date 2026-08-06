@@ -65,7 +65,7 @@ pub fn select_side_topics(
 
     let level_cap = exclude
         .first()
-        .map(|t| topic_level_numeric(t))
+        .map(topic_level_numeric)
         .filter(|n| *n > 0)
         .map(|n| n + 1);
 
