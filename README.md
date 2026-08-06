@@ -91,6 +91,14 @@ flowchart TD
     Report --> |d| Docs[Topic docs]
 ```
 
+## Cloud sync
+
+The CLI can sync your data with the Open Course cloud: curriculum, progress, history, and learning items are backed up and shared across devices, and the same account is used by the web app at [app.open-course.eu](https://app.open-course.eu/).
+
+To enable sync, open Settings → Account and choose **Sign in**. The CLI starts a device authorization flow: open the shown URL in a browser, authorize the device, and all language pairs are bound and synced. After that, changes are pushed in the background and remote changes are pulled on startup. Sync is offline-first — a network or server error never blocks the app.
+
+The default server is `https://api.open-course.eu`; override it with the `OPEN_COURSE_SYNC_URL` environment variable or `sync.serverUrl` in `config.json`. Access tokens are stored in the OS keychain (or a `0600` file), never in the config file.
+
 ## Providers
 
 Supported out of the box: OpenAI, Anthropic, Google Gemini, DeepSeek, Mistral, OpenRouter, and Ollama. Any other OpenAI-compatible endpoint can be used via the **Custom** provider.
