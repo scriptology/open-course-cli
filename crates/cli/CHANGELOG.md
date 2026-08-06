@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.3](https://github.com/scriptology/open-course-cli/compare/v0.11.2...v0.11.3) (2026-08-06)
+
+
+### Bug Fixes
+
+* render low-activity calendar days like quiet days ([69a55cd](https://github.com/scriptology/open-course-cli/commit/69a55cdb593494470ce47ce08e73756a91f81765))
+* render low-activity calendar days like quiet days ([d834fd5](https://github.com/scriptology/open-course-cli/commit/d834fd5849f18e96d39cb1483b9f66adb2da47c7))
+
 ## [0.11.2](https://github.com/scriptology/open-course-cli/compare/v0.11.1...v0.11.2) (2026-08-06)
 
 
