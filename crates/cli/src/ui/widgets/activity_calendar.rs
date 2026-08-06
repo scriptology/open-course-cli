@@ -5,14 +5,11 @@ use ratatui::widgets::calendar::CalendarEventStore;
 use crate::ui::colors;
 use open_course_core::dashboard::DailyActivity;
 
-/// Background shades for activity levels 1-4: GitHub-dark semantics built on
-/// our design green (level 4 is the base color).
-const ACTIVITY_BG: [Color; 4] = [
-    Color::from_u32(0x1a433b),
-    Color::from_u32(0x237664),
-    Color::from_u32(0x2ba88d),
-    colors::GREEN,
-];
+/// Background shades for activity levels 3-4: GitHub-dark semantics built on
+/// our design green (level 4 is the base color). Levels 1-2 get no background:
+/// the barely visible green shades made the default gray date text blend into
+/// the cell, so low-activity days render exactly like quiet days.
+const ACTIVITY_BG: [Color; 2] = [Color::from_u32(0x2ba88d), colors::GREEN];
 
 /// Points that make up a day's activity.
 pub fn activity_total(day: &DailyActivity) -> usize {
@@ -65,12 +62,10 @@ pub fn block_height(date: NaiveDate) -> u16 {
 
 fn level_style(level: usize) -> Style {
     debug_assert!((1..=4).contains(&level));
-    let style = Style::default().bg(ACTIVITY_BG[level - 1]);
-    if level >= 3 {
-        style.fg(Color::Black)
-    } else {
-        style
+    if level < 3 {
+        return Style::default();
     }
+    Style::default().bg(ACTIVITY_BG[level - 3]).fg(Color::Black)
 }
 
 fn parse_day(date: &str) -> Option<time::Date> {
@@ -80,9 +75,10 @@ fn parse_day(date: &str) -> Option<time::Date> {
 }
 
 /// Builds per-day styles for the calendar: green background shades on a
-/// relative p90 scale (GitHub-style), no background on quiet days, and a light
-/// marker on today (bold underline on its activity shade, or green text when
-/// the day is quiet).
+/// relative p90 scale (GitHub-style) for activity levels 3-4, no background on
+/// quiet or low-activity (levels 1-2) days, and a light marker on today (bold
+/// underline, plus its activity shade when it has one, or green text when the
+/// day is quiet).
 pub fn build_event_store(activity: &[DailyActivity], today: NaiveDate) -> CalendarEventStore {
     let totals: Vec<usize> = activity.iter().map(activity_total).collect();
     let max = robust_max(&totals);
@@ -178,7 +174,7 @@ mod tests {
             ))
             .copied()
             .unwrap();
-        assert_eq!(active.bg, Some(ACTIVITY_BG[3]));
+        assert_eq!(active.bg, Some(ACTIVITY_BG[1]));
         assert_eq!(active.fg, Some(Color::Black));
 
         let today_style = store.0.get(&chrono_to_time(today)).copied().unwrap();
@@ -188,13 +184,72 @@ mod tests {
     }
 
     #[test]
+    fn event_store_low_activity_renders_like_quiet_day() {
+        let today = NaiveDate::from_ymd_opt(2024, 5, 10).unwrap();
+        // Busy days around it push the p90 max to 10, so the single-session
+        // day is level 1 and the busy days are level 4.
+        let mut activity: Vec<DailyActivity> = (1..=9)
+            .filter(|d| *d != 8)
+            .map(|d| day(&format!("2024-05-0{d}"), 10, 0, 0))
+            .collect();
+        activity.push(day("2024-05-08", 1, 0, 0));
+        let store = build_event_store(&activity, today);
+
+        let low = store
+            .0
+            .get(&chrono_to_time(
+                NaiveDate::from_ymd_opt(2024, 5, 8).unwrap(),
+            ))
+            .copied()
+            .unwrap();
+        assert_eq!(low.bg, None);
+        assert_eq!(low.fg, None);
+
+        let high = store
+            .0
+            .get(&chrono_to_time(
+                NaiveDate::from_ymd_opt(2024, 5, 9).unwrap(),
+            ))
+            .copied()
+            .unwrap();
+        assert_eq!(high.bg, Some(ACTIVITY_BG[1]));
+        assert_eq!(high.fg, Some(Color::Black));
+    }
+
+    #[test]
     fn event_store_today_with_activity_keeps_marker() {
         let today = NaiveDate::from_ymd_opt(2024, 5, 10).unwrap();
         let activity = vec![day("2024-05-10", 2, 0, 0)];
-        let store = build_event_store(&activity, today);
 
-        let style = store.0.get(&chrono_to_time(today)).copied().unwrap();
-        assert_eq!(style.bg, Some(ACTIVITY_BG[3]));
+        let style = build_event_store(&activity, today)
+            .0
+            .get(&chrono_to_time(today))
+            .copied()
+            .unwrap();
+        assert_eq!(style.bg, Some(ACTIVITY_BG[1]));
         assert!(style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn event_store_today_with_low_activity_keeps_marker_without_shade() {
+        let today = NaiveDate::from_ymd_opt(2024, 5, 10).unwrap();
+        // Busy days push the p90 max to 10, so today's total of 1 is level 1:
+        // no background shade, but the today marker stays.
+        let mut activity: Vec<DailyActivity> = (1..=9)
+            .map(|d| day(&format!("2024-05-0{d}"), 10, 0, 0))
+            .collect();
+        activity.push(day("2024-05-10", 1, 0, 0));
+
+        let style = build_event_store(&activity, today)
+            .0
+            .get(&chrono_to_time(today))
+            .copied()
+            .unwrap();
+        assert_eq!(style.bg, None);
+        assert!(
+            style
+                .add_modifier
+                .contains(Modifier::BOLD | Modifier::UNDERLINED)
+        );
     }
 }
