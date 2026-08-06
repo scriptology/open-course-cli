@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.2](https://github.com/scriptology/open-course-cli/compare/v0.11.1...v0.11.2) (2026-08-06)
+
+
+### Bug Fixes
+
+* gate next-topic and side-topic selection by CEFR level ladder ([f209f52](https://github.com/scriptology/open-course-cli/commit/f209f52ecbf71061389bb9588a79f91ecf82ff42))
+* подбор следующей темы и сайд-тем с учётом CEFR-лесенки ([e7c1ceb](https://github.com/scriptology/open-course-cli/commit/e7c1cebe0f00bbaf0eeb64b99ff97d5ea3d40d65))
+
 ## [0.11.1](https://github.com/scriptology/open-course-cli/compare/v0.11.0...v0.11.1) (2026-08-04)
 
 
