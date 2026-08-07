@@ -4550,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "open-course-cli"
-version = "0.11.2"
+version = "0.11.5"
 dependencies = [
  "anyhow",
  "chrono",

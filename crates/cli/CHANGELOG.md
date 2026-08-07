@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.5](https://github.com/scriptology/open-course-cli/compare/v0.11.4...v0.11.5) (2026-08-08)
+
+
+### Bug Fixes
+
+* **llm:** anchor exercise complexity to the topic's CEFR level ([a246cd1](https://github.com/scriptology/open-course-cli/commit/a246cd16e1ae1a8f4518f02437979e7abba84803))
+
 ## [0.11.4](https://github.com/scriptology/open-course-cli/compare/v0.11.3...v0.11.4) (2026-08-07)
 
 
