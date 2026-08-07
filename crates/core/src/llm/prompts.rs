@@ -1,8 +1,23 @@
-use crate::curriculum::{CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty};
+use crate::curriculum::{
+    CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty, cefr_to_numeric,
+    difficulty_to_cefr,
+};
 use crate::learning_items::LearningItem;
 use crate::profile::UserProfile;
 use crate::progress::ProgressTopic;
 use crate::session::{Exercise, NewTopicRef};
+
+/// Per-CEFR-level sentence shape limits for generated exercises, so that
+/// "coherent mini-story" does not turn into long multi-clause sentences.
+fn sentence_shape_guidance(level: &str) -> &'static str {
+    match level.to_uppercase().as_str() {
+        "A1" => "3-7 words per sentence, a single clause, present tense only, very common vocabulary.",
+        "A2" => "6-12 words per sentence, one clause preferred, at most one simple subordinate clause (because/when/that), common everyday vocabulary.",
+        "B1" => "8-15 words per sentence, up to two clauses, common connectors.",
+        "B2" => "up to about 20 words per sentence, subordinate clauses and some idiomatic vocabulary allowed.",
+        _ => "no length limit, natural sophisticated prose.",
+    }
+}
 
 pub fn build_exercise_prompt(
     profile: &UserProfile,
@@ -35,6 +50,21 @@ pub fn build_exercise_prompt(
         side_names
     };
 
+    let topic_level = |t: &Topic| -> Option<String> {
+        t.level
+            .as_deref()
+            .filter(|l| cefr_to_numeric(l).is_some())
+            .map(|l| l.to_uppercase())
+            .or_else(|| difficulty_to_cefr(&t.difficulty))
+    };
+    // The exercise complexity is anchored to the target topics' CEFR level
+    // (the highest one when a session mixes topics), not to the student's
+    // self-assessed level.
+    let effective_level = target_topics
+        .iter()
+        .filter_map(|t| topic_level(t))
+        .max_by_key(|l| cefr_to_numeric(l).unwrap_or(0));
+
     let cefr_hint = profile
         .self_assessed_cefr
         .as_ref()
@@ -46,20 +76,40 @@ pub fn build_exercise_prompt(
         "Student age: {age}. Use contexts and examples that fit the life experience of a typical {age}-year-old."
     );
 
+    let complexity_anchor = effective_level
+        .as_deref()
+        .unwrap_or("the student's CEFR level");
     let recent_rate_pct = (recent_success_rate * 100.0).round() as i32;
     let adaptive_hint = format!(
         "Recent session success rate: {recent_rate_pct}%. Target success rate: 80%. \
          If recent rate is below 75%, make sentences slightly easier. \
          If recent rate is above 85%, make sentences slightly more challenging. \
-         Keep the overall complexity appropriate to the student's CEFR level."
+         In both cases stay within the sentence-shape limits for {complexity_anchor}."
     );
+
+    let complexity_hint = match &effective_level {
+        Some(level) => format!(
+            "Exercise complexity level: {level} (from the target topics). \
+             Sentence complexity MUST match CEFR level {level}. This overrides the student's \
+             self-assessed level: the self-assessed level describes the student overall, but \
+             these exercises practice {level} material.\n\
+             Sentence shape for {level}: {}",
+            sentence_shape_guidance(level)
+        ),
+        None => {
+            "Adjust the overall complexity to the student's CEFR level if provided.".to_string()
+        }
+    };
 
     let difficulty_hint = if target_topics.is_empty() {
         "general".to_string()
     } else {
         target_topics
             .iter()
-            .map(|t| format!("{} ({})", t.name, t.difficulty))
+            .map(|t| {
+                let level = topic_level(t).unwrap_or_else(|| "unknown".to_string());
+                format!("{} (difficulty: {}, CEFR: {})", t.name, t.difficulty, level)
+            })
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -93,11 +143,12 @@ Native language: {native}
 {cefr_hint}
 {age_hint}
 {adaptive_hint}
+{complexity_hint}
 
 Use ONLY the following topic IDs when tagging exercises. Do not invent new IDs.
 {topic_list}{learning_items_hint}
 
-The {count} sentences should form a short coherent dialogue or mini-story. Keep each sentence natural and focused on the target topics (or general vocabulary if no topics are specified). Adjust the overall complexity to the student's CEFR level if provided.
+The {count} sentences should form a short coherent dialogue or mini-story while respecting the sentence-shape limits stated above. Keep each sentence natural and focused on the target topics (or general vocabulary if no topics are specified).
 
 For each exercise output a JSON object with these fields:
 - id: unique string

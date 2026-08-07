@@ -21,7 +21,7 @@ fn topic(id: &str) -> Topic {
         name: format!("Topic {id}"),
         description: "desc".to_string(),
         difficulty: Difficulty::Beginner.as_str().to_string(),
-        level: None,
+        level: Some("A2".to_string()),
         order: None,
         tags: vec![],
         target_lang: "en".to_string(),
@@ -51,6 +51,10 @@ fn exercise_prompt_includes_profile() {
     assert!(prompt.contains("topicId: \"t1\""));
     assert!(prompt.contains("JSON object"));
     assert!(prompt.contains("exercises"));
+    // The topic's CEFR level anchors complexity, overriding the profile's B1.
+    assert!(prompt.contains("Topic t1 (difficulty: beginner, CEFR: A2)"));
+    assert!(prompt.contains("complexity MUST match CEFR level A2"));
+    assert!(prompt.contains("6-12 words per sentence"));
 }
 
 #[test]
