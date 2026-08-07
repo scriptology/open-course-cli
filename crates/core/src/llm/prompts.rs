@@ -67,7 +67,7 @@ pub fn build_exercise_prompt(
     // self-assessed level.
     let effective_level = target_topics
         .iter()
-        .filter_map(|t| topic_level(t))
+        .filter_map(topic_level)
         .max_by_key(|l| cefr_to_numeric(l).unwrap_or(0));
 
     let cefr_hint = profile
