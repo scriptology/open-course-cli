@@ -1,6 +1,5 @@
 use crate::curriculum::{
-    CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty, cefr_to_numeric,
-    difficulty_to_cefr,
+    CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty, cefr_to_numeric, difficulty_to_cefr,
 };
 use crate::learning_items::LearningItem;
 use crate::profile::UserProfile;
@@ -11,10 +10,16 @@ use crate::session::{Exercise, NewTopicRef};
 /// "coherent mini-story" does not turn into long multi-clause sentences.
 fn sentence_shape_guidance(level: &str) -> &'static str {
     match level.to_uppercase().as_str() {
-        "A1" => "3-7 words per sentence, a single clause, present tense only, very common vocabulary.",
-        "A2" => "6-12 words per sentence, one clause preferred, at most one simple subordinate clause (because/when/that), common everyday vocabulary.",
+        "A1" => {
+            "3-7 words per sentence, a single clause, present tense only, very common vocabulary."
+        }
+        "A2" => {
+            "6-12 words per sentence, one clause preferred, at most one simple subordinate clause (because/when/that), common everyday vocabulary."
+        }
         "B1" => "8-15 words per sentence, up to two clauses, common connectors.",
-        "B2" => "up to about 20 words per sentence, subordinate clauses and some idiomatic vocabulary allowed.",
+        "B2" => {
+            "up to about 20 words per sentence, subordinate clauses and some idiomatic vocabulary allowed."
+        }
         _ => "no length limit, natural sophisticated prose.",
     }
 }
