@@ -29,6 +29,10 @@ pub enum SyncTrigger {
     /// Local synced data changed outside a session (curriculum generation,
     /// data reset): push the active pair.
     DataChanged,
+    /// Explicit "Sync now": bind and sync every pair (with the SyncAll
+    /// progress view), even pairs whose per-pair toggle is off — the user
+    /// asked explicitly.
+    Manual,
 }
 
 /// Coalescing state for the orchestrator: one run at a time, a repeated
@@ -39,13 +43,11 @@ pub struct SyncSchedulerState {
     pub pending: Option<SyncTrigger>,
 }
 
-/// One-off operations shared by the account view (manual sync, bind
-/// follow-ups). Moved here so every spawned sync task lives in one module.
+/// One-off operations shared by the account view (the FreshLocal/FreshCloud
+/// bind follow-ups). Moved here so every spawned sync task lives in one
+/// module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SyncKind {
-    /// Explicit "Sync now": pull, then push (even when the per-pair toggle
-    /// is off — the user asked explicitly).
-    Manual,
     /// Push after a finished session (only when the toggle is on).
     AfterSession,
     /// Pull only (bind of an empty local database to a cloud pair).
@@ -74,7 +76,11 @@ pub async fn schedule(state: &mut AppState, trigger: SyncTrigger) {
         }
         SyncTrigger::AfterLogin => {
             state.sync.active = true;
-            spawn_sync_all(state);
+            spawn_sync_all(state, SyncAllMode::AfterLogin);
+        }
+        SyncTrigger::Manual => {
+            state.sync.active = true;
+            spawn_sync_all(state, SyncAllMode::Manual);
         }
     }
 }
@@ -91,7 +97,7 @@ pub async fn finish(state: &mut AppState) {
 }
 
 /// Spawns a one-off operation for the active pair (used by the account
-/// view: manual sync and the FreshLocal/FreshCloud bind follow-ups).
+/// view: the FreshLocal/FreshCloud bind follow-ups).
 pub(crate) fn spawn_sync(state: &AppState, kind: SyncKind) {
     let data_dir = state.data_dir.clone();
     let base_url = resolve_sync_server_url(state.config.as_ref());
@@ -126,8 +132,7 @@ enum SyncOutcome {
     Conflict(open_course_sync::CurriculumPayload),
 }
 
-/// `None` means "skip silently" (signed out, or disabled for OnStart /
-/// AfterSession).
+/// `None` means "skip silently" (signed out, or the toggle is off).
 async fn run_sync(
     data_dir: &std::path::Path,
     base_url: &str,
@@ -138,13 +143,10 @@ async fn run_sync(
     let store = TokenStore::new(data_dir.to_path_buf());
     let token = match store.load().await {
         Ok(Some(token)) => token,
-        Ok(None) if kind == SyncKind::Manual => {
-            return Some(SyncOutcome::Done(Err(SyncFailure::unauthorized())));
-        }
         Ok(None) => return None,
         Err(e) => return Some(SyncOutcome::Done(Err(SyncFailure::other(e.to_string())))),
     };
-    if kind != SyncKind::Manual && !db.metadata().sync_enabled().await.unwrap_or(false) {
+    if !db.metadata().sync_enabled().await.unwrap_or(false) {
         return None;
     }
     let client = match SyncClient::new(base_url) {
@@ -165,45 +167,6 @@ async fn run_sync(
             }
             Err(e) => Err(map_push_err(e)),
         },
-        SyncKind::Manual => {
-            if let Err(e) = client.pull(&db, &pair_id).await {
-                Err(map_sync_err(e))
-            } else {
-                // Heal pairs whose pre-sync data never reached the cloud
-                // (the outbox only carries post-sync mutations): upload
-                // everything once, marked by `cloud_curriculum_version`.
-                let needs_backfill = db
-                    .metadata()
-                    .cloud_curriculum_version()
-                    .await
-                    .unwrap_or(None)
-                    .is_none()
-                    && !db
-                        .curriculum()
-                        .read_all()
-                        .await
-                        .map(|c| c.topics.is_empty())
-                        .unwrap_or(true);
-                if needs_backfill && let Err(e) = backfill_outbox(&db, true).await {
-                    return Some(SyncOutcome::Done(Err(map_sync_err(e))));
-                }
-                match client.push(&db, &pair_id).await {
-                    Ok(revision) => {
-                        if needs_backfill && let Ok(curriculum) = db.curriculum().read_all().await {
-                            let _ = db
-                                .metadata()
-                                .set_cloud_curriculum_version(curriculum.version)
-                                .await;
-                        }
-                        Ok(SyncReport::sync(revision))
-                    }
-                    Err(PushError::CurriculumConflict(payload)) => {
-                        return Some(SyncOutcome::Conflict(payload));
-                    }
-                    Err(e) => Err(map_push_err(e)),
-                }
-            }
-        }
     };
     if result.is_ok() {
         let _ = db
@@ -295,10 +258,20 @@ fn spawn_pull_all(state: &AppState) {
     });
 }
 
-/// After login: bind and sync EVERY pair, reporting per-pair progress to
-/// the SyncAll view. Conflicts are resolved by `merge_bind` (last-writer-
-/// wins by `updated_at`), no dialogs.
-fn spawn_sync_all(state: &AppState) {
+/// Which per-pair operation a sync-all run performs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncAllMode {
+    /// Right after login: every pair goes through the first bind.
+    AfterLogin,
+    /// Explicit "Sync now": bound pairs pull and push; never-bound pairs
+    /// (created after the login) go through the first bind.
+    Manual,
+}
+
+/// Binds and syncs EVERY pair, reporting per-pair progress to the SyncAll
+/// view. Conflicts are resolved by `merge_bind` (last-writer-wins by
+/// `updated_at`), no dialogs.
+fn spawn_sync_all(state: &AppState, mode: SyncAllMode) {
     let data_dir = state.data_dir.clone();
     let base_url = resolve_sync_server_url(state.config.as_ref());
     let pair_ids = pair_ids(state);
@@ -376,7 +349,10 @@ fn spawn_sync_all(state: &AppState) {
                 })
                 .await;
             let status = match open_pair_db(&data_dir, &active_db, &active_pair, pair_id).await {
-                Some(db) => bind_and_sync(&client, &db, pair_id).await,
+                Some(db) => match mode {
+                    SyncAllMode::AfterLogin => bind_and_sync(&client, &db, pair_id).await,
+                    SyncAllMode::Manual => manual_sync_pair(&client, &db, pair_id).await,
+                },
                 None => PairSyncStatus::Failed("database unavailable".to_string()),
             };
             if matches!(
@@ -394,6 +370,46 @@ fn spawn_sync_all(state: &AppState) {
         }
         let _ = tx.send(SyncMessage::SyncAllFinished { failed }).await;
     });
+}
+
+/// Manual "Sync now" for one pair. A never-bound pair (created after the
+/// login, so no bind ever ran for it) goes through `bind_and_sync`: this is
+/// what uploads pairs that never reached the cloud. A bound pair pulls,
+/// then pushes; a 409 curriculum conflict is auto-merged by `merge_bind`
+/// (last-writer-wins), like the after-login run. Runs even when the
+/// per-pair toggle is off — the user asked explicitly.
+async fn manual_sync_pair(client: &SyncClient, db: &Database, pair_id: &str) -> PairSyncStatus {
+    // "Bound" marker: a canonical curriculum version is stamped by every
+    // bind that pushed or merged topics; a pair bound by a pure pull (an
+    // empty local database) has `last_pulled_seq` advanced instead.
+    let bound = db
+        .metadata()
+        .cloud_curriculum_version()
+        .await
+        .unwrap_or(None)
+        .is_some()
+        || db.metadata().last_pulled_seq().await.unwrap_or(0) > 0;
+    if !bound {
+        return bind_and_sync(client, db, pair_id).await;
+    }
+    if let Err(e) = client.pull(db, pair_id).await {
+        return sync_err_status(e);
+    }
+    let status = match client.push(db, pair_id).await {
+        Ok(_) => PairSyncStatus::Done,
+        Err(PushError::CurriculumConflict(_)) => match client.merge_bind(db, pair_id).await {
+            Ok(report) => PairSyncStatus::Merged(report),
+            Err(e) => push_err_status(e),
+        },
+        Err(e) => push_err_status(e),
+    };
+    if matches!(status, PairSyncStatus::Done | PairSyncStatus::Merged(_)) {
+        let _ = db
+            .metadata()
+            .set_last_sync_at(&chrono::Utc::now().to_rfc3339())
+            .await;
+    }
+    status
 }
 
 /// Binds one pair and runs the first sync: push for a cloud-empty pair,

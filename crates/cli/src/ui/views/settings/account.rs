@@ -31,7 +31,8 @@ pub enum SyncMessage {
     LoginFinished(std::result::Result<LoginInfo, String>),
     /// Result of the bind-scenario probe when sync is being enabled.
     BindScenarioLoaded(std::result::Result<BindScenario, String>),
-    /// Manual sync or push-after-session completed.
+    /// Push-after-session or a bind follow-up (adopt/replace/pull)
+    /// completed.
     SyncFinished(std::result::Result<SyncReport, SyncFailure>),
     /// Background pull-on-start completed.
     PullOnStartFinished(std::result::Result<SyncReport, SyncFailure>),
@@ -235,7 +236,7 @@ pub async fn activate(state: &mut AppState) -> Result<()> {
     match state.settings.account.status {
         LoginStatus::LoggedOut | LoginStatus::Expired => start_sign_in(state),
         LoginStatus::LoggedIn => match state.settings.active_field {
-            0 => start_manual_sync(state),
+            0 => start_manual_sync(state).await,
             1 => toggle_sync(state).await?,
             2 => sign_out(state).await?,
             _ => {}
@@ -335,11 +336,15 @@ async fn finish_login(
     })
 }
 
-fn start_manual_sync(state: &mut AppState) {
+/// "Sync now": bind and sync EVERY pair, not just the active one — pairs
+/// created after the login would otherwise never reach the cloud. Progress
+/// is shown in the SyncAll view, like after a login.
+async fn start_manual_sync(state: &mut AppState) {
     state.settings.account.syncing = true;
     state.settings.account.notice = None;
     state.settings.account.error = None;
-    crate::app::sync::spawn_sync(state, crate::app::sync::SyncKind::Manual);
+    crate::ui::views::sync_all::start(state);
+    crate::app::sync::schedule(state, crate::app::sync::SyncTrigger::Manual).await;
 }
 
 async fn toggle_sync(state: &mut AppState) -> Result<()> {
@@ -545,6 +550,19 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
             crate::ui::views::sync_all::apply_progress(state, &pair_id, status);
         }
         SyncMessage::SyncAllFinished { failed } => {
+            // The rows are still populated here (cleared when the view is
+            // dismissed): an all-around "unauthorized" means the login is
+            // gone — surface it like the old single-pair manual sync did.
+            let unauthorized = state
+                .sync_all
+                .rows
+                .iter()
+                .any(|r| matches!(r.status, Some(PairSyncStatus::Unauthorized)));
+            let account = &mut state.settings.account;
+            account.syncing = false;
+            if unauthorized {
+                account.relogin_required = true;
+            }
             crate::ui::views::sync_all::apply_finished(state, failed).await;
             crate::app::sync::finish(state).await;
         }
