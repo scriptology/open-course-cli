@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/scriptology/open-course-cli/compare/v0.11.3...v0.11.4) (2026-08-07)
+
+
+### Bug Fixes
+
+* **cli:** sync every pair on manual "Sync now", not just the active one ([6601c7c](https://github.com/scriptology/open-course-cli/commit/6601c7c725fd7c393c7d45fd4a766c976f9ea93d))
+
 ## [0.11.3](https://github.com/scriptology/open-course-cli/compare/v0.11.2...v0.11.3) (2026-08-06)
 
 
