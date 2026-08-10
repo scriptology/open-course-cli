@@ -63,7 +63,7 @@ fn course_progress() {
     assert_eq!(result.in_progress, 1);
     assert_eq!(result.not_started, 1);
     assert_eq!(result.total, 3);
-    assert_eq!(result.percent, 50.0);
+    assert_eq!(result.percent, 33.0); // 1 of 3 topics completed
 }
 
 #[test]
