@@ -134,13 +134,11 @@ pub fn get_course_progress(curriculum: &Curriculum, progress: &ProgressData) -> 
     let mut completed = 0;
     let mut in_progress = 0;
     let mut not_started = 0;
-    let mut total_score = 0.0;
 
     for topic in &curriculum.topics {
         match progress_map.get(&topic.id) {
             None => not_started += 1,
             Some(pt) => {
-                total_score += pt.score;
                 if pt.score >= COMPLETED_THRESHOLD {
                     completed += 1;
                 } else if pt.last_practiced.is_some() {
@@ -152,8 +150,10 @@ pub fn get_course_progress(curriculum: &Curriculum, progress: &ProgressData) -> 
         }
     }
 
+    // Share of completed topics in the whole curriculum, not average score:
+    // the headline number must read as "how much of the course is done".
     let percent = if total > 0 {
-        (total_score / total as f64).round()
+        (completed as f64 / total as f64 * 100.0).round()
     } else {
         0.0
     };
