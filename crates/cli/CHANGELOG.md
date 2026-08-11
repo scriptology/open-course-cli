@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.11.1](https://github.com/scriptology/open-course-cli/compare/v0.11.0...v0.11.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **cli:** sync every pair on manual "Sync now", not just the active one ([6601c7c](https://github.com/scriptology/open-course-cli/commit/6601c7c725fd7c393c7d45fd4a766c976f9ea93d))
+* **cli:** sync every pair on manual "Sync now", not just the active one ([e51373f](https://github.com/scriptology/open-course-cli/commit/e51373f8b93d9d8976d3d42f904ac49a6f00d8de))
+* **cli:** upload pre-sync data on first bind (backfill) ([afa13e3](https://github.com/scriptology/open-course-cli/commit/afa13e35c8897b2aaebdf64f39dd2ed7ec3f8c99))
+* **cli:** upload pre-sync data on first bind (backfill) ([fec8153](https://github.com/scriptology/open-course-cli/commit/fec81536ec1f20c5b082134f24d1b88210580129))
+* course progress percent is the share of completed topics ([0e14d75](https://github.com/scriptology/open-course-cli/commit/0e14d75e09daeea256d3b518768118bef55a367a))
+* course progress percent is the share of completed topics ([2ff3073](https://github.com/scriptology/open-course-cli/commit/2ff30732d4189451c6c9c8bc83b882846da60483))
+* gate next-topic and side-topic selection by CEFR level ladder ([f209f52](https://github.com/scriptology/open-course-cli/commit/f209f52ecbf71061389bb9588a79f91ecf82ff42))
+* **llm:** anchor exercise complexity to the topic's CEFR level ([29d1aff](https://github.com/scriptology/open-course-cli/commit/29d1affaa6e5fcf8a7fe5f90a5553a4d8495b7f1))
+* render low-activity calendar days like quiet days ([69a55cd](https://github.com/scriptology/open-course-cli/commit/69a55cdb593494470ce47ce08e73756a91f81765))
+* render low-activity calendar days like quiet days ([d834fd5](https://github.com/scriptology/open-course-cli/commit/d834fd5849f18e96d39cb1483b9f66adb2da47c7))
+* подбор следующей темы и сайд-тем с учётом CEFR-лесенки ([e7c1ceb](https://github.com/scriptology/open-course-cli/commit/e7c1cebe0f00bbaf0eeb64b99ff97d5ea3d40d65))
+
 ## [0.11.0](https://github.com/scriptology/open-course-cli/compare/v0.10.0...v0.11.0) (2026-08-10)
 
 
