@@ -183,7 +183,7 @@ pub fn build_batch_analysis_prompt(
             format!(
                 "Exercise {}:\nOriginal ({}): {}\nExpected translation: {}\nStudent translation: {}",
                 i + 1,
-                profile.target_language,
+                profile.native_language,
                 exercise.target_sentence,
                 exercise.expected_translation,
                 answer
@@ -199,7 +199,7 @@ pub fn build_batch_analysis_prompt(
         .join("\n");
 
     format!(
-        r#"You are a strict grammar tutor. The student translated {n} sentence(s). Evaluate each one for semantic equivalence and correctness, not for matching a single wording.
+        r#"You are a strict grammar tutor. The student is a {native} speaker learning {target}. The student translated {n} sentence(s). Evaluate each one for semantic equivalence and correctness, not for matching a single wording.
 
 {blocks}
 
@@ -229,6 +229,8 @@ New topic rules (CRITICAL):
 - Bad topic examples: "Common Spelling Errors", "Grammar mistakes", "Basic vocabulary", "Adjective: Caro vs Rico".
 - The name should be 2-6 words and describe a concrete rule or pattern.
 - Do NOT create newTopics for spelling-only errors.
+- Every newTopic must be a {target} grammar or usage topic. NEVER create newTopics about any other language.
+- If the student answered in the wrong language (e.g. a language other than {target}), mark the affected words as errors, give the correct {target} translation in the explanation, and do NOT create newTopics for that other language.
 
 Return a JSON object exactly in this shape:
 {{
@@ -252,7 +254,8 @@ CRITICAL: the top-level object MUST contain the key "sentences" with exactly {n}
 CRITICAL: explanations and comments must be in {native}.
 CRITICAL: do not include any markdown code fences."#,
         n = pairs.len(),
-        native = profile.native_language
+        native = profile.native_language,
+        target = profile.target_language
     )
 }
 
@@ -341,7 +344,9 @@ pub fn build_curriculum_extension_prompt(
         - tags: relevant grammar/vocabulary tags\n\
         - targetLang: \"{target}\"\n\
         - nativeLang: \"{native}\"\n\
-        - version: 1",
+        - version: 1\n\
+        \n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.",
         target = profile.target_language,
         native = profile.native_language,
         cefr = cefr,
@@ -372,6 +377,8 @@ pub fn build_topic_metadata_prompt(topic_id: &str, profile: &UserProfile) -> Str
         - nativeLang: \"{}\"\n\
         - version: 1\n\
         \n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\
+        \n\
         Respond ONLY with the JSON object. No extra commentary.",
         topic_id,
         profile.target_language,
@@ -379,7 +386,9 @@ pub fn build_topic_metadata_prompt(topic_id: &str, profile: &UserProfile) -> Str
         profile.self_assessed_cefr.as_deref().unwrap_or("beginner"),
         topic_id,
         profile.target_language,
-        profile.native_language
+        profile.native_language,
+        native = profile.native_language,
+        target = profile.target_language
     )
 }
 
@@ -429,6 +438,8 @@ pub fn build_curriculum_level_prompt(
         - nativeLang: \"{native}\"\n\
         - version: 1\n\
         \n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\
+        \n\
         Return a JSON object:\n\
         {{\n\
           \"version\": 1,\n\
@@ -459,6 +470,8 @@ pub fn build_curriculum_gap_prompt(
         "You are a senior professor of linguistics and language pedagogy. The {target} curriculum for CEFR level {level} is missing topics in the following domains: {domains}.\n\
         \n\
         Generate exactly the topics needed to cover these domains. Each topic must be translatable in written form (no listening/speaking-only topics). Do not duplicate topics the learner already has at this level.\n\
+        \n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\
         \n\
         Return a JSON object:\n\
         {{\n\
@@ -515,6 +528,7 @@ pub fn build_curriculum_domain_prompt(
         - targetLang: \"{target}\"\n\
         - nativeLang: \"{native}\"\n\
         - version: 1\n\n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\n\
         Return a JSON object:\n\
         {{\n\
           \"version\": 1,\n\
@@ -550,6 +564,7 @@ pub fn build_new_topic_metadata_prompt(profile: &UserProfile, new_topic: &NewTop
         Return a JSON object:\n\
         {{ \"id\": \"kebab-case-id\", \"name\": \"...\", \"description\": \"...\", \"difficulty\": \"beginner\" | \"intermediate\" | \"advanced\", \"level\": \"A1\" | \"A2\" | \"B1\" | \"B2\" | \"C1\" | \"C2\", \"tags\": string[], \"targetLang\": \"{target}\", \"nativeLang\": \"{native}\", \"version\": 1 }}\n\n\
         The id must be unique kebab-case. The name should be 2-6 words. The description should be 1-2 sentences. The difficulty must match the CEFR level.\n\n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\n\
         Respond ONLY with the JSON object. No markdown code fences.",
         target = profile.target_language,
         native = profile.native_language,
