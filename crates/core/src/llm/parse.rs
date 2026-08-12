@@ -596,7 +596,10 @@ mod tests {
         let cleaned = r#"{"topics": [{"id": "My Topic!", "name": "x",}"#;
         let err = parse_curriculum_level(cleaned, "C1", cleaned.len(), 0).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Failed to parse C1 curriculum response"), "{msg}");
+        assert!(
+            msg.contains("Failed to parse C1 curriculum response"),
+            "{msg}"
+        );
         assert!(msg.contains("sanitized retry:"), "{msg}");
         assert!(msg.contains("<<PARSE ERROR HERE>>"), "{msg}");
         assert!(msg.contains(r#""name": "x","#), "{msg}");
