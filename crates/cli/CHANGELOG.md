@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.6](https://github.com/scriptology/open-course-cli/compare/v0.11.5...v0.11.6) (2026-08-12)
+
+
+### Bug Fixes
+
+* course progress percent is the share of completed topics ([0e14d75](https://github.com/scriptology/open-course-cli/commit/0e14d75e09daeea256d3b518768118bef55a367a))
+* course progress percent is the share of completed topics ([2ff3073](https://github.com/scriptology/open-course-cli/commit/2ff30732d4189451c6c9c8bc83b882846da60483))
+
 ## [0.11.5](https://github.com/scriptology/open-course-cli/compare/v0.11.4...v0.11.5) (2026-08-08)
 
 
