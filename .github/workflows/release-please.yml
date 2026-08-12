@@ -13,12 +13,10 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      # release-please-action v4 with a manifest config namespaces outputs per
-      # package path: `<path>--release_created`, `<path>--tag_name`. The plain
-      # `release_created`/`tag_name` outputs only exist for single-package
-      # mode — without the namespace the build-release job never starts.
-      release_created: ${{ steps.release.outputs['crates/cli--release_created'] }}
-      tag_name: ${{ steps.release.outputs['crates/cli--tag_name'] }}
+      # The single release-please package lives at the repo root ("."), so the
+      # action exposes plain root-component outputs — no path namespace.
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
