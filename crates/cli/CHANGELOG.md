@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.0](https://github.com/scriptology/open-course-cli/compare/v0.11.6...v0.12.0) (2026-08-12)
+
+
+### Features
+
+* **core:** include response excerpt in curriculum parse errors ([5000e34](https://github.com/scriptology/open-course-cli/commit/5000e34cfc981d88f8f98486f91e7104b9aa10fa))
+* **core:** include response excerpt in curriculum parse errors ([4a1fd54](https://github.com/scriptology/open-course-cli/commit/4a1fd54383637161c85cf77637f583ee51a453e3))
+
 ## [0.11.6](https://github.com/scriptology/open-course-cli/compare/v0.11.5...v0.11.6) (2026-08-12)
 
 
