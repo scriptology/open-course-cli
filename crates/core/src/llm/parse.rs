@@ -163,9 +163,11 @@ pub fn parse_curriculum_level(
         Ok(v) => v,
         Err(parse_err) => {
             let repaired = sanitize_curriculum_ids(cleaned);
-            from_str::<LevelCurriculum>(&repaired).map_err(|_| {
+            from_str::<LevelCurriculum>(&repaired).map_err(|retry_err| {
                 AppError::Llm(format!(
-                    "Failed to parse {level} curriculum response: {parse_err}"
+                    "Failed to parse {level} curriculum response: {parse_err} (sanitized retry: {retry_err}); response excerpt ({} chars total): {}",
+                    cleaned.len(),
+                    error_excerpt(cleaned, &parse_err),
                 ))
             })?
         }
@@ -185,6 +187,37 @@ pub fn curriculum_parse_errors(cleaned: &str, level: &str) -> String {
         .err()
         .map(|e| format!("{level} curriculum parse: {e}"))
         .unwrap_or_default()
+}
+
+/// Bounded excerpt of `text` around the position serde_json reported in
+/// `err` (1-based column; curriculum input is single-line after cleaning),
+/// with an inline marker at the failure point. Char-boundary safe.
+fn error_excerpt(text: &str, err: &serde_json::Error) -> String {
+    const RADIUS: usize = 120;
+    let mut pos = err.column().saturating_sub(1).min(text.len());
+    while pos > 0 && !text.is_char_boundary(pos) {
+        pos -= 1;
+    }
+    let start = text[..pos]
+        .char_indices()
+        .rev()
+        .take(RADIUS)
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let end = text[pos..]
+        .char_indices()
+        .take(RADIUS)
+        .last()
+        .map(|(i, c)| pos + i + c.len_utf8())
+        .unwrap_or(text.len());
+    let left_ellipsis = if start > 0 { "…" } else { "" };
+    let right_ellipsis = if end < text.len() { "…" } else { "" };
+    format!(
+        "{left_ellipsis}{} <<PARSE ERROR HERE>> {}{right_ellipsis}",
+        &text[start..pos],
+        &text[pos..end]
+    )
 }
 
 pub fn build_parse_error(
@@ -553,5 +586,34 @@ mod tests {
             err.to_string(),
             "LLM error: analysis has no sentences (content 4 chars, reasoning 6 chars)"
         );
+    }
+
+    // --- parse_curriculum_level / error_excerpt ---
+
+    #[test]
+    fn parse_curriculum_error_includes_excerpt_around_failure() {
+        // Trailing comma makes serde_json report "key must be a string".
+        let cleaned = r#"{"topics": [{"id": "My Topic!", "name": "x",}"#;
+        let err = parse_curriculum_level(cleaned, "C1", cleaned.len(), 0).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Failed to parse C1 curriculum response"), "{msg}");
+        assert!(msg.contains("sanitized retry:"), "{msg}");
+        assert!(msg.contains("<<PARSE ERROR HERE>>"), "{msg}");
+        assert!(msg.contains(r#""name": "x","#), "{msg}");
+    }
+
+    #[test]
+    fn error_excerpt_handles_multibyte_chars_and_edges() {
+        // Failure right after a run of multibyte chars, near the end of input.
+        let text = format!("{{\"topics\": \"{}\",}}", "п".repeat(300));
+        let err = from_str::<LevelCurriculum>(&text).unwrap_err();
+        let excerpt = error_excerpt(&text, &err);
+        assert!(excerpt.contains("<<PARSE ERROR HERE>>"), "{excerpt}");
+        assert!(excerpt.starts_with('…'), "{excerpt}");
+
+        // Failure at the very start of a short input: no ellipses.
+        let err = from_str::<LevelCurriculum>("}").unwrap_err();
+        let excerpt = error_excerpt("}", &err);
+        assert_eq!(excerpt, " <<PARSE ERROR HERE>> }");
     }
 }
