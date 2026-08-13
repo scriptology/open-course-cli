@@ -7,11 +7,11 @@ use crate::client::{LlmClient, extract_typed};
 use crate::debug_log::{log_debug_event, log_failed_response, log_raw_response};
 use crate::parse::{
     Exercises, analysis_parse_errors, build_parse_error, clean_json_response,
-    exercise_parse_errors, parse_analysis, parse_exercises, validate_analysis_sentences,
+    exercise_parse_errors, parse_analysis, parse_session_exercises, validate_analysis_sentences,
 };
 use crate::transport::{LlmResponse, stream_or_prompt, with_timeout_secs};
 use open_course_core::error::Result;
-use open_course_core::session::{AnalysisResult, Exercise};
+use open_course_core::session::AnalysisResult;
 
 const MAX_TOKENS_EXERCISES: u32 = 8192;
 const MAX_TOKENS_ANALYSIS: u32 = 16384;
@@ -178,7 +178,7 @@ pub async fn generate_exercises(
     prompt: &str,
     stream_tx: Option<&mpsc::Sender<LlmResult>>,
     data_dir: Option<&Path>,
-) -> Result<Vec<Exercise>> {
+) -> Result<Exercises> {
     let config = RetryConfig {
         system: "You are a language tutor. Return ONLY valid JSON matching the requested schema. Do not wrap in markdown, do not add explanations, do not add commentary.",
         stricter_system: "You are a language tutor. Your response must be a single valid JSON object and nothing else. No markdown code fences, no explanations, no commentary.",
@@ -196,13 +196,13 @@ pub async fn generate_exercises(
         client,
         prompt,
         config,
-        parse_exercises,
+        parse_session_exercises,
         || async move {
             let wrapper = extract_typed::<Exercises>(client, prompt, MAX_TOKENS_EXERCISES).await?;
             Ok(if wrapper.exercises.is_empty() {
                 None
             } else {
-                Some(wrapper.exercises)
+                Some(wrapper)
             })
         },
         exercise_parse_errors,

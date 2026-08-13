@@ -53,6 +53,32 @@ where
     deserializer.deserialize_any(StringOrVec)
 }
 
+/// One warm-up card shown before the session's exercises: a forced
+/// vocabulary lemma with its translation and an optional example sentence.
+/// Filled by matching the LLM's `warmup` output against the session's
+/// forced lemmas (see `vocabulary::match_warmup_items`); never persisted.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct WarmupItem {
+    /// Id of the lemma this card was built from.
+    #[serde(default)]
+    pub lemma_id: Option<String>,
+    pub lemma: String,
+    /// Universal Dependencies part-of-speech tag ("NOUN", "VERB", ...).
+    #[serde(default)]
+    pub pos: Option<String>,
+    /// Approximate CEFR level ("A1"–"C2").
+    #[serde(default)]
+    pub cefr_level: Option<String>,
+    /// Translation in the learner's native language.
+    #[serde(default)]
+    pub translation: String,
+    /// Short example sentence in the target language.
+    #[serde(default)]
+    pub example: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]

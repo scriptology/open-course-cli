@@ -156,7 +156,15 @@ pub fn build_exercise_prompt(
             .collect::<Vec<_>>()
             .join("\n");
         format!(
-            "\nThe following words need extra practice. Include each of these words if it fits naturally, distributing them across different exercises and without distorting the target topics; skip a word rather than distort the sentence:\n{words}\n"
+            "\nThe following words need extra practice. Include each of these words if it fits naturally, distributing them across different exercises and without distorting the target topics; skip a word rather than distort the sentence:\n{words}\n\
+            \nIn addition to the exercises, return a top-level \"warmup\" array with one entry per word listed above, in the same order, each with these fields:\n\
+            - lemma: the word exactly as listed above\n\
+            - pos: part of speech (Universal Dependencies tag)\n\
+            - cefrLevel: approximate CEFR level (\"A1\"–\"C2\")\n\
+            - translation: the translation in {native}\n\
+            - example: one short example sentence in {target} using the word; it must NOT appear in any exercise\n",
+            native = profile.native_language,
+            target = profile.target_language,
         )
     };
 
@@ -187,9 +195,14 @@ For each exercise output a JSON object with these fields:
 - expectedPatterns: grammar patterns the student should use
 - hint: optional short hint
 
-Output a JSON object with a single key \"exercises\" containing an array of the exercise objects.",
+Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}",
         native = profile.native_language,
-        target = profile.target_language
+        target = profile.target_language,
+        warmup_output_note = if forced_vocabulary.is_empty() {
+            ""
+        } else {
+            " Also include the requested \"warmup\" array."
+        }
     )
 }
 
@@ -645,12 +658,21 @@ mod tests {
         // Forced words are included only when they fit naturally.
         assert!(prompt.contains("if it fits naturally"));
         assert!(prompt.contains("skip a word rather than distort the sentence"));
+        // The warm-up contract is requested per forced word.
+        assert!(prompt.contains("\"warmup\""));
+        assert!(prompt.contains("one entry per word listed above"));
+        assert!(prompt.contains("the word exactly as listed above"));
+        assert!(prompt.contains("cefrLevel"));
+        assert!(prompt.contains("the translation in Russian"));
+        assert!(prompt.contains("example sentence in Spanish"));
+        assert!(prompt.contains("must NOT appear in any exercise"));
     }
 
     #[test]
     fn exercise_prompt_omits_forced_vocabulary_block_when_empty() {
         let prompt = build_exercise_prompt(&profile(), &[], &[], &[], &[], &[], 3, 0.8);
         assert!(!prompt.contains("need extra practice"));
+        assert!(!prompt.contains("\"warmup\""));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::ui::views::{ReportState, session};
 use crate::ui::widgets::Toast;
 use open_course_core::error::Result;
 use open_course_core::session::{
-    AnalysisResult, EvaluatedTopic, Exercise, MASTERY_THRESHOLD, create_session,
+    AnalysisResult, EvaluatedTopic, GeneratedSession, MASTERY_THRESHOLD, create_session,
 };
 use open_course_db::curriculum::{Curriculum, Topic};
 use open_course_llm::diagnostics::CheckResult;
@@ -151,17 +151,24 @@ fn handle_diagnostic_update(state: &mut AppState, check: CheckResult) {
     }
 }
 
-fn handle_exercises(state: &mut AppState, res: Result<Vec<Exercise>>) {
+fn handle_exercises(state: &mut AppState, res: Result<GeneratedSession>) {
     clear_loading(state);
     match res {
-        Ok(exercises) => {
+        Ok(generated) => {
             let batch_size = state
                 .config
                 .as_ref()
                 .map(|c| c.preferences.batch_size as usize)
-                .unwrap_or(exercises.len());
-            state.session.mentor_session = Some(create_session(exercises, batch_size));
-            state.session.mode = session::Mode::Practicing;
+                .unwrap_or(generated.exercises.len());
+            state.session.mentor_session = Some(create_session(generated.exercises, batch_size));
+            state.session.warmup_items = generated.warmup;
+            state.session.warmup_index = 0;
+            state.session.warmup_revealed = false;
+            state.session.mode = if state.session.warmup_items.is_empty() {
+                session::Mode::Practicing
+            } else {
+                session::Mode::WarmUp
+            };
             state.session.input.clear();
             state.session.cursor = 0;
         }

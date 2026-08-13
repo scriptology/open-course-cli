@@ -63,11 +63,12 @@ async fn debug_generate_exercises() {
     println!("\n========== PROMPT ==========\n{prompt}\n===========================\n");
 
     match generate_exercises(model.as_ref(), &prompt, None, Some(&data_dir)).await {
-        Ok(exercises) => {
-            println!("Generated {} exercises:", exercises.len());
-            for ex in exercises {
+        Ok(parsed) => {
+            println!("Generated {} exercises:", parsed.exercises.len());
+            for ex in &parsed.exercises {
                 println!("{ex:?}");
             }
+            println!("Warm-up items: {}", parsed.warmup.len());
         }
         Err(e) => {
             eprintln!("ERROR: {e}");

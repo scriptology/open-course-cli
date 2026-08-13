@@ -2,14 +2,14 @@
 
 use open_course_core::curriculum::{Curriculum, Topic};
 use open_course_core::error::Result;
-use open_course_core::session::{AnalysisResult, Exercise};
+use open_course_core::session::{AnalysisResult, GeneratedSession};
 
 use crate::diagnostics::CheckResult;
 use crate::model_listing::ModelInfo;
 
 #[derive(Debug)]
 pub enum LlmResult {
-    Exercises(Result<Vec<Exercise>>),
+    Exercises(Result<GeneratedSession>),
     Analysis(Result<AnalysisResult>),
     Curriculum(Result<Curriculum>),
     CurriculumExtension(Result<Vec<Topic>>),

@@ -3,6 +3,9 @@ use open_course_core::language::normalize_language_code;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReportLabels {
     pub translate: &'static str,
+    pub warmup_title: &'static str,
+    pub show_translation: &'static str,
+    pub skip_warmup: &'static str,
     pub loading_exercises: &'static str,
     pub loading_analysis: &'static str,
     pub loading_curriculum: &'static str,
@@ -111,6 +114,9 @@ pub struct DocsLabels {
 
 const EN_REPORT: ReportLabels = ReportLabels {
     translate: "Translate",
+    warmup_title: "Warm-up",
+    show_translation: "show translation",
+    skip_warmup: "skip warm-up",
     loading_exercises: "Generating exercises...",
     loading_analysis: "Analyzing answers...",
     loading_curriculum: "Generating curriculum...",
@@ -206,6 +212,9 @@ const EN_REPORT: ReportLabels = ReportLabels {
 
 const RU_REPORT: ReportLabels = ReportLabels {
     translate: "Перевод",
+    warmup_title: "Разминка",
+    show_translation: "показать перевод",
+    skip_warmup: "пропустить разминку",
     loading_exercises: "Генерация упражнений...",
     loading_analysis: "Анализ ответов...",
     loading_curriculum: "Генерация программы...",
