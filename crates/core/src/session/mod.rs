@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 pub use models::{
     AnalysisResult, EvaluatedTopic, Exercise, FeedbackComment, GrammarError, GrammarErrorType,
-    NewTopicRef, SemanticVerdict, SentenceAnalysis, VocabularyUse,
+    NewTopicRef, SemanticVerdict, SentenceAnalysis, VocabularyUse, WarmupItem,
 };
 pub use scoring::{
     average, clamp_score, collect_topic_errors, count_topic_occurrences, error_based_score,
@@ -23,6 +23,15 @@ pub const MASTERY_THRESHOLD: f64 = 50.0;
 pub const COMPLETED_THRESHOLD: f64 = 80.0;
 /// Average target score below which a session raises a low-score alert.
 pub const LOW_SESSION_SCORE_THRESHOLD: f64 = 60.0;
+
+/// The exercises and warm-up cards generated for one study session. The
+/// warm-up is derived from the session's forced vocabulary and is shown
+/// before the exercises; neither part is persisted as-is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeneratedSession {
+    pub exercises: Vec<Exercise>,
+    pub warmup: Vec<WarmupItem>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MentorSession {

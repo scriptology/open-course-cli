@@ -177,6 +177,16 @@ fn session_groups(state: &AppState, labels: ReportLabels, common: CommonLabels) 
             ),
             group(common.group_exit, vec![entry("Esc", labels.back)]),
         ],
+        SessionMode::WarmUp => vec![
+            group(
+                common.group_actions,
+                vec![
+                    entry("Enter", labels.show_translation),
+                    entry("s", labels.skip_warmup),
+                ],
+            ),
+            group(common.group_exit, vec![entry("Esc", labels.back)]),
+        ],
         SessionMode::Practicing => vec![
             group(
                 common.group_actions,

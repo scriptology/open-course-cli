@@ -11,10 +11,11 @@ use tokio::sync::mpsc;
 use open_course_config::OpenCourseConfig;
 use open_course_core::error::{AppError, Result};
 use open_course_core::session::{
-    AnalysisResult, COMPLETED_THRESHOLD, Exercise, MentorSession, NextSessionTopic,
-    pick_next_session_topic, recent_success_rate, select_side_topics, unique_topic_ids,
+    AnalysisResult, COMPLETED_THRESHOLD, Exercise, GeneratedSession, MentorSession,
+    NextSessionTopic, pick_next_session_topic, recent_success_rate, select_side_topics,
+    unique_topic_ids,
 };
-use open_course_core::vocabulary::Lemma;
+use open_course_core::vocabulary::{Lemma, match_warmup_items};
 use open_course_db::Database;
 use open_course_db::apply::apply_analysis_to_db;
 use open_course_db::curriculum::{Topic, cefr_to_numeric};
@@ -37,6 +38,9 @@ pub struct ExercisePreparation {
     pub prompt: String,
     pub forced_learning_item_ids: Vec<String>,
     pub forced_lemma_ids: Vec<String>,
+    /// The full forced-vocabulary lemmas behind `forced_lemma_ids`, kept for
+    /// the warm-up phase shown before the exercises.
+    pub forced_lemmas: Vec<Lemma>,
 }
 
 /// Reads progress, learning items and history from the database, picks side
@@ -122,18 +126,26 @@ pub async fn prepare_exercises(
         prompt,
         forced_learning_item_ids,
         forced_lemma_ids,
+        forced_lemmas: forced_vocabulary,
     })
 }
 
-/// Runs the exercise-generation LLM call for a prepared prompt.
+/// Runs the exercise-generation LLM call for a prepared prompt and matches
+/// the returned warm-up entries against the session's forced lemmas.
 pub async fn generate_session_exercises(
     config: &OpenCourseConfig,
     prompt: &str,
+    forced_lemmas: &[Lemma],
     tx: &mpsc::Sender<LlmResult>,
     data_dir: Option<&Path>,
-) -> Result<Vec<Exercise>> {
+) -> Result<GeneratedSession> {
     let model = create_llm_model(config)?;
-    generate_exercises(model.as_ref(), prompt, Some(tx), data_dir).await
+    let parsed = generate_exercises(model.as_ref(), prompt, Some(tx), data_dir).await?;
+    let warmup = match_warmup_items(forced_lemmas, parsed.warmup);
+    Ok(GeneratedSession {
+        exercises: parsed.exercises,
+        warmup,
+    })
 }
 
 /// Picks what to practice next: a due review topic, a fresh topic, or a

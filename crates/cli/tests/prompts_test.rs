@@ -112,6 +112,9 @@ fn exercise_prompt_includes_forced_vocabulary() {
     assert!(prompt.contains("words need extra practice"));
     assert!(prompt.contains("- colleague (коллега)"));
     assert!(prompt.contains("- resilient"));
+    // Forced vocabulary also triggers the warm-up contract.
+    assert!(prompt.contains("\"warmup\""));
+    assert!(prompt.contains("one entry per word listed above"));
 }
 
 #[test]

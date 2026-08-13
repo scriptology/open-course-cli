@@ -10,6 +10,28 @@ use crate::session::{AnalysisResult, Exercise, SentenceAnalysis};
 #[serde(rename_all = "camelCase")]
 pub struct Exercises {
     pub exercises: Vec<Exercise>,
+    /// Warm-up cards for the session's forced vocabulary, one per forced
+    /// lemma. Optional: older prompts and bare-array responses have none.
+    #[serde(default)]
+    pub warmup: Vec<RawWarmupItem>,
+}
+
+/// Warm-up entry as returned by the LLM, before it is matched against the
+/// session's forced lemmas. Every field is optional so a partial entry never
+/// breaks parsing of the whole response.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawWarmupItem {
+    #[serde(default)]
+    pub lemma: String,
+    #[serde(default)]
+    pub pos: Option<String>,
+    #[serde(default)]
+    pub cefr_level: Option<String>,
+    #[serde(default)]
+    pub translation: Option<String>,
+    #[serde(default)]
+    pub example: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -23,6 +45,16 @@ pub fn parse_exercises(
     content_chars: usize,
     reasoning_chars: usize,
 ) -> Result<Vec<Exercise>> {
+    parse_session_exercises(cleaned, content_chars, reasoning_chars).map(|w| w.exercises)
+}
+
+/// Same as `parse_exercises`, but keeps the whole wrapper object so the
+/// caller can use the optional `warmup` array alongside the exercises.
+pub fn parse_session_exercises(
+    cleaned: &str,
+    content_chars: usize,
+    reasoning_chars: usize,
+) -> Result<Exercises> {
     if cleaned.trim().is_empty() {
         return Err(AppError::Llm(format!(
             "empty response (content {content_chars} chars, reasoning {reasoning_chars} chars)"
@@ -35,13 +67,16 @@ pub fn parse_exercises(
                 "parsed JSON contains no exercises".to_string(),
             ));
         }
-        return Ok(wrapper.exercises);
+        return Ok(wrapper);
     }
     if let Ok(vec) = from_str::<Vec<Exercise>>(cleaned) {
         if vec.is_empty() {
             return Err(AppError::Llm("parsed JSON array is empty".to_string()));
         }
-        return Ok(vec);
+        return Ok(Exercises {
+            exercises: vec,
+            warmup: vec![],
+        });
     }
 
     Err(AppError::Llm(
@@ -489,6 +524,46 @@ mod tests {
     fn parse_exercises_rejects_empty_array() {
         let err = parse_exercises("[]", 0, 0).unwrap_err();
         assert_eq!(err.to_string(), "LLM error: parsed JSON array is empty");
+    }
+
+    // --- warmup parsing ---
+
+    #[test]
+    fn parse_session_exercises_defaults_warmup_when_absent() {
+        let cleaned = format!(r#"{{"exercises": [{}]}}"#, exercise_json("ex1"));
+        let result = parse_session_exercises(&cleaned, 0, 0).unwrap();
+        assert_eq!(result.exercises.len(), 1);
+        assert!(result.warmup.is_empty());
+    }
+
+    #[test]
+    fn parse_session_exercises_parses_warmup() {
+        let cleaned = format!(
+            r#"{{"exercises": [{}], "warmup": [
+                {{"lemma": "comer", "pos": "VERB", "cefrLevel": "A1", "translation": "есть", "example": "Como pan."}},
+                {{"lemma": "pequeño"}}
+            ]}}"#,
+            exercise_json("ex1")
+        );
+        let result = parse_session_exercises(&cleaned, 0, 0).unwrap();
+        assert_eq!(result.warmup.len(), 2);
+        assert_eq!(result.warmup[0].lemma, "comer");
+        assert_eq!(result.warmup[0].pos.as_deref(), Some("VERB"));
+        assert_eq!(result.warmup[0].cefr_level.as_deref(), Some("A1"));
+        assert_eq!(result.warmup[0].translation.as_deref(), Some("есть"));
+        assert_eq!(result.warmup[0].example.as_deref(), Some("Como pan."));
+        // Partial entries parse too: missing fields fall back to defaults.
+        assert_eq!(result.warmup[1].lemma, "pequeño");
+        assert_eq!(result.warmup[1].translation, None);
+        assert_eq!(result.warmup[1].example, None);
+    }
+
+    #[test]
+    fn parse_session_exercises_bare_array_has_empty_warmup() {
+        let cleaned = format!("[{}]", exercise_json("ex1"));
+        let result = parse_session_exercises(&cleaned, 0, 0).unwrap();
+        assert_eq!(result.exercises.len(), 1);
+        assert!(result.warmup.is_empty());
     }
 
     // --- parse_analysis ---

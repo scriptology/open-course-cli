@@ -164,6 +164,82 @@ pub fn normalize_key(s: &str) -> String {
     s.nfkc().collect::<String>().to_lowercase()
 }
 
+/// Maximum number of warm-up cards shown before a session's exercises.
+pub const MAX_WARMUP_ITEMS: usize = 8;
+
+/// `Some(value)` trimmed when non-empty, `None` otherwise. The LLM sometimes
+/// emits empty strings instead of omitting an optional field.
+fn non_empty(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+/// Builds warm-up cards for a session's forced lemmas from the LLM's raw
+/// `warmup` output. Cards follow the forced-lemma order and are capped at
+/// `MAX_WARMUP_ITEMS`. A raw entry whose lemma matches (via `normalize_key`)
+/// supplies the translation and example; unmatched forced lemmas fall back
+/// to the stored translation with no example. Lemmas without any translation
+/// are skipped (there is nothing to teach), and raw entries matching no
+/// forced lemma are dropped.
+pub fn match_warmup_items(
+    forced: &[Lemma],
+    raw: Vec<crate::llm::parse::RawWarmupItem>,
+) -> Vec<crate::session::WarmupItem> {
+    use std::collections::HashMap;
+
+    let mut by_key: HashMap<String, crate::llm::parse::RawWarmupItem> = HashMap::new();
+    for item in raw {
+        let key = normalize_key(item.lemma.trim());
+        if key.is_empty() {
+            continue;
+        }
+        by_key.entry(key).or_insert(item);
+    }
+
+    forced
+        .iter()
+        .take(MAX_WARMUP_ITEMS)
+        .filter_map(|lemma| {
+            let key = normalize_key(&lemma.lemma);
+            let item = match by_key.get(&key) {
+                Some(raw) => {
+                    let translation = non_empty(raw.translation.clone())
+                        .unwrap_or_else(|| lemma.translation.clone());
+                    crate::session::WarmupItem {
+                        lemma_id: Some(lemma.id.clone()),
+                        lemma: lemma.lemma.clone(),
+                        pos: non_empty(raw.pos.clone())
+                            .or_else(|| non_empty(Some(lemma.pos.clone()))),
+                        cefr_level: non_empty(raw.cefr_level.clone())
+                            .or_else(|| lemma.cefr_level.clone()),
+                        translation,
+                        example: non_empty(raw.example.clone()),
+                    }
+                }
+                None => crate::session::WarmupItem {
+                    lemma_id: Some(lemma.id.clone()),
+                    lemma: lemma.lemma.clone(),
+                    pos: non_empty(Some(lemma.pos.clone())),
+                    cefr_level: lemma.cefr_level.clone(),
+                    translation: lemma.translation.clone(),
+                    example: None,
+                },
+            };
+            if item.translation.is_empty() {
+                None
+            } else {
+                Some(item)
+            }
+        })
+        .collect()
+}
+
 /// Priority rank of a CEFR source: user-curated data ("manual"/"list") is 4,
 /// curriculum topics ("topic") 3, LLM estimates ("llm") 2, and anything else
 /// or `None` is 0.
@@ -681,5 +757,118 @@ mod tests {
             ..Default::default()
         };
         assert!(!vocabulary_owns_error(&sentence, &error));
+    }
+
+    // --- match_warmup_items ---
+
+    fn forced_lemma(id: &str, lemma: &str, translation: &str) -> Lemma {
+        Lemma {
+            id: id.to_string(),
+            lemma: lemma.to_string(),
+            pos: "VERB".to_string(),
+            translation: translation.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn raw_warmup(
+        lemma: &str,
+        translation: Option<&str>,
+        example: Option<&str>,
+    ) -> crate::llm::parse::RawWarmupItem {
+        crate::llm::parse::RawWarmupItem {
+            lemma: lemma.to_string(),
+            pos: None,
+            cefr_level: None,
+            translation: translation.map(|s| s.to_string()),
+            example: example.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn warmup_match_uses_llm_translation_and_example() {
+        let forced = vec![forced_lemma("es-comer", "comer", "есть")];
+        let raw = vec![raw_warmup("Comer", Some("кушать"), Some("Como pan."))];
+        let items = match_warmup_items(&forced, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma_id.as_deref(), Some("es-comer"));
+        // The display form comes from the stored lemma, not the LLM casing.
+        assert_eq!(items[0].lemma, "comer");
+        assert_eq!(items[0].translation, "кушать");
+        assert_eq!(items[0].example.as_deref(), Some("Como pan."));
+        assert_eq!(items[0].pos.as_deref(), Some("VERB"));
+    }
+
+    #[test]
+    fn warmup_match_falls_back_to_stored_translation() {
+        let forced = vec![forced_lemma("es-comer", "comer", "есть")];
+        let raw = vec![raw_warmup("comer", None, None)];
+        let items = match_warmup_items(&forced, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].translation, "есть");
+        assert_eq!(items[0].example, None);
+    }
+
+    #[test]
+    fn warmup_unmatched_lemma_uses_stored_data() {
+        let forced = vec![{
+            let mut l = forced_lemma("es-comer", "comer", "есть");
+            l.cefr_level = Some("A2".to_string());
+            l
+        }];
+        let items = match_warmup_items(&forced, vec![]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].translation, "есть");
+        assert_eq!(items[0].cefr_level.as_deref(), Some("A2"));
+        assert_eq!(items[0].example, None);
+    }
+
+    #[test]
+    fn warmup_skips_lemmas_without_translation() {
+        // Unmatched and no stored translation: nothing to teach.
+        let forced = vec![
+            forced_lemma("es-comer", "comer", "есть"),
+            forced_lemma("es-ser", "ser", ""),
+        ];
+        let items = match_warmup_items(&forced, vec![]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "comer");
+
+        // Matched but the LLM returned an empty translation and the stored
+        // one is empty too: skipped as well.
+        let forced = vec![forced_lemma("es-ser", "ser", "")];
+        let raw = vec![raw_warmup("ser", Some(""), Some("Soy yo."))];
+        assert!(match_warmup_items(&forced, raw).is_empty());
+    }
+
+    #[test]
+    fn warmup_drops_raw_items_matching_no_forced_lemma() {
+        let forced = vec![forced_lemma("es-comer", "comer", "есть")];
+        let raw = vec![
+            raw_warmup("comer", None, None),
+            raw_warmup("unrelated", Some("x"), None),
+            // Empty lemmas never match anything.
+            raw_warmup("", Some("y"), None),
+        ];
+        let items = match_warmup_items(&forced, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "comer");
+    }
+
+    #[test]
+    fn warmup_preserves_forced_order_and_caps_at_eight() {
+        let forced: Vec<Lemma> = (0..10)
+            .map(|i| forced_lemma(&format!("es-w{i}"), &format!("w{i}"), "t"))
+            .collect();
+        // Raw order is the reverse of the forced order; output must still
+        // follow the forced order.
+        let raw: Vec<_> = (0..10)
+            .rev()
+            .map(|i| raw_warmup(&format!("w{i}"), None, None))
+            .collect();
+        let items = match_warmup_items(&forced, raw);
+        assert_eq!(items.len(), MAX_WARMUP_ITEMS);
+        let lemmas: Vec<&str> = items.iter().map(|i| i.lemma.as_str()).collect();
+        assert_eq!(lemmas, ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]);
     }
 }

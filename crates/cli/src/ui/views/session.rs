@@ -13,7 +13,7 @@ use crate::ui::views::utils::{
 };
 use crate::ui::widgets::{Card, build_footer_wrapped};
 use open_course_core::error::{AppError, Result};
-use open_course_core::session::{MentorSession, NextSessionTopic};
+use open_course_core::session::{MentorSession, NextSessionTopic, WarmupItem};
 use open_course_db::curriculum::Topic;
 use open_course_llm::pipeline::log_debug_event;
 
@@ -21,6 +21,7 @@ use open_course_llm::pipeline::log_debug_event;
 pub enum Mode {
     #[default]
     TopicSelection,
+    WarmUp,
     Practicing,
 }
 
@@ -38,6 +39,12 @@ pub struct SessionState {
     pub target_topic_id: Option<String>,
     pub learning_item_ids: Vec<String>,
     pub lemma_ids: Vec<String>,
+    /// Warm-up cards shown before the exercises; empty when the session has
+    /// no teachable forced vocabulary.
+    pub warmup_items: Vec<WarmupItem>,
+    pub warmup_index: usize,
+    /// Whether the current warm-up card's translation is visible.
+    pub warmup_revealed: bool,
 }
 
 impl SessionState {
@@ -107,6 +114,21 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             ],
             width,
         ),
+        Mode::WarmUp => {
+            let enter_action = if state.session.warmup_revealed {
+                common.next
+            } else {
+                labels.show_translation
+            };
+            build_footer_wrapped(
+                &[
+                    ("Enter", enter_action),
+                    ("s", labels.skip_warmup),
+                    ("Esc", labels.back),
+                ],
+                width,
+            )
+        }
         Mode::Practicing => {
             build_footer_wrapped(&[("Enter", labels.submit), ("Esc", labels.back)], width)
         }
@@ -156,6 +178,51 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 chunks[2],
             );
         }
+        Mode::WarmUp => {
+            let total = state.session.warmup_items.len();
+            let idx = state.session.warmup_index.min(total.saturating_sub(1));
+            let title = format!("{} {}/{}", labels.warmup_title, idx + 1, total);
+
+            let mut card = Card::new(title);
+            if let Some(item) = state.session.warmup_items.get(idx) {
+                let mut word_spans = vec![Span::styled(
+                    item.lemma.clone(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )];
+                let badges: Vec<&str> = [item.pos.as_deref(), item.cefr_level.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                if !badges.is_empty() {
+                    word_spans.push(Span::styled(
+                        format!("  {}", badges.join(" · ")),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                }
+                card = card.line(Line::from(word_spans));
+
+                if state.session.warmup_revealed {
+                    card = card.line(Line::from(item.translation.clone()));
+                    if let Some(example) = item.example.as_ref() {
+                        card = card.line(Line::from(Span::styled(
+                            example.clone(),
+                            Style::default().fg(colors::YELLOW),
+                        )));
+                    }
+                } else {
+                    card = card.line(Line::from(Span::styled(
+                        format!("Enter: {}", labels.show_translation),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+            }
+            frame.render_widget(card, chunks[0]);
+
+            frame.render_widget(
+                Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
+                chunks[2],
+            );
+        }
         Mode::Practicing => {
             let title;
             let prompt = if let Some(session) = state.session.mentor_session.as_ref() {
@@ -196,8 +263,40 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
 pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     match state.session.mode {
         Mode::TopicSelection => handle_topic_selection(state, code).await,
+        Mode::WarmUp => handle_warmup(state, code).await,
         Mode::Practicing => handle_practicing(state, code).await,
     }
+}
+
+/// Warm-up phase: forward-only flashcards. Enter (or Space) reveals the
+/// translation, then advances to the next card; after the last card the
+/// session moves on to the exercises. `s` skips the rest of the warm-up.
+async fn handle_warmup(state: &mut AppState, code: KeyCode) -> Result<()> {
+    match code {
+        KeyCode::Esc => {
+            if state.session.loading {
+                state.cancelled = true;
+            }
+            reset_session(&mut state.session);
+            state.view = View::Dashboard;
+        }
+        KeyCode::Char('s') => {
+            state.session.mode = Mode::Practicing;
+        }
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            if !state.session.warmup_revealed {
+                state.session.warmup_revealed = true;
+            } else {
+                state.session.warmup_index += 1;
+                state.session.warmup_revealed = false;
+                if state.session.warmup_index >= state.session.warmup_items.len() {
+                    state.session.mode = Mode::Practicing;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 async fn handle_topic_selection(state: &mut AppState, code: KeyCode) -> Result<()> {
@@ -430,10 +529,12 @@ pub(crate) async fn start_exercises_for_topic(
     let data_dir = state.data_dir.clone();
     let tx = state.llm_tx.clone();
     let prompt = preparation.prompt;
+    let forced_lemmas = preparation.forced_lemmas;
     tokio::spawn(async move {
         let result = open_course_service::session::generate_session_exercises(
             &config,
             &prompt,
+            &forced_lemmas,
             &tx,
             Some(data_dir.as_path()),
         )
@@ -529,6 +630,9 @@ pub(crate) fn reset_session(session: &mut SessionState) {
     session.loading_title = None;
     session.pending_new_topic = false;
     session.target_topic_id = None;
+    session.warmup_items.clear();
+    session.warmup_index = 0;
+    session.warmup_revealed = false;
 }
 
 #[cfg(test)]

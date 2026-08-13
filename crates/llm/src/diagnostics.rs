@@ -310,11 +310,14 @@ async fn run_exercises_check(client: Arc<dyn LlmClient>, profile: &UserProfile) 
     )
     .await
     {
-        Ok(Ok(exercises)) => {
-            if !exercises.is_empty() {
+        Ok(Ok(parsed)) => {
+            if !parsed.exercises.is_empty() {
                 CheckStatus::Passed
             } else {
-                CheckStatus::Failed(format!("expected 1 exercise, got {}", exercises.len()))
+                CheckStatus::Failed(format!(
+                    "expected 1 exercise, got {}",
+                    parsed.exercises.len()
+                ))
             }
         }
         Ok(Err(e)) => CheckStatus::Failed(e.to_string()),
