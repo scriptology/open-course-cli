@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/scriptology/open-course-cli/compare/v0.13.0...v0.14.0) (2026-08-13)
+
+
+### Features
+
+* session word warm-up before exercises ([0c951e2](https://github.com/scriptology/open-course-cli/commit/0c951e2ac324c40e368d736bd7ea68ba7d55b81d))
+* session word warm-up before exercises ([484b2a9](https://github.com/scriptology/open-course-cli/commit/484b2a9bc9dc5979ab88e380efb2601ee9c0c8d6))
+
 ## [0.13.0](https://github.com/scriptology/open-course-cli/compare/v0.12.0...v0.13.0) (2026-08-13)
 
 
