@@ -70,6 +70,15 @@ pub struct AnalysisResult {
     #[serde(skip, default)]
     #[schemars(skip)]
     pub new_learning_items: Vec<crate::learning_items::LearningItem>,
+    /// Vocabulary entries created or updated while applying the analysis.
+    /// Filled by the pipeline, never by the LLM, so they are excluded from
+    /// serde and the JSON schema.
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub new_lemmas: Vec<crate::vocabulary::Lemma>,
+    #[serde(skip, default)]
+    #[schemars(skip)]
+    pub new_forms: Vec<crate::vocabulary::Form>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
@@ -87,6 +96,48 @@ pub struct SentenceAnalysis {
     pub semantic_verdict: SemanticVerdict,
     pub errors: Vec<GrammarError>,
     pub per_sentence_feedback: Vec<FeedbackComment>,
+    /// Content words extracted from the expected translation (side "target")
+    /// and from the student's translation (side "student", with per-use
+    /// assessments). Defaults to empty for older LLM responses.
+    #[serde(default)]
+    pub used_vocabulary: Vec<VocabularyUse>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct VocabularyUse {
+    /// The surface form as it appeared in the sentence.
+    #[serde(default)]
+    pub surface: String,
+    /// Dictionary headword (lemma) of the surface form.
+    #[serde(default)]
+    pub lemma: String,
+    /// Universal Dependencies part-of-speech tag ("NOUN", "VERB", ...).
+    #[serde(default)]
+    pub pos: String,
+    /// UD features in "Attr=Val|..." format, as returned by the LLM.
+    #[serde(default)]
+    pub feats: String,
+    /// "target" — from the expected translation; "student" — from the
+    /// student's translation.
+    #[serde(default)]
+    pub side: String,
+    /// Student-side only: whether the surface is spelled acceptably
+    /// (missing diacritics/punctuation do NOT count as misspellings).
+    #[serde(default)]
+    pub spelling_ok: Option<bool>,
+    /// Student-side only: whether the word/form is used correctly.
+    #[serde(default)]
+    pub usage_ok: Option<bool>,
+    /// Whether the surface matches a form used in the expected (or an
+    /// acceptable) translation. Target-side uses are always expected.
+    #[serde(default)]
+    pub expected_form: bool,
+    /// LLM estimate of the lemma's approximate CEFR level ("A1"–"C2");
+    /// `None` when the model omits it.
+    #[serde(default)]
+    pub cefr_level: Option<String>,
 }
 
 #[derive(

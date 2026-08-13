@@ -44,7 +44,7 @@ pub struct ErrorBody {
 
 /// A single change entry. `op` is one of "upsert" | "delete" |
 /// "tombstoneReset"; `entity` is one of "topic" | "progress" | "session" |
-/// "learningItem" | "metadata".
+/// "learningItem" | "lemma" | "form" | "metadata".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
@@ -161,4 +161,16 @@ pub fn op_is_tombstone_reset(op: &str) -> bool {
 /// Whether a wire `entity` names learning items (accepts both styles).
 pub fn entity_is_learning_item(entity: &str) -> bool {
     entity == "learningItem" || entity == "learning_item"
+}
+
+/// Whether a wire `entity` names vocabulary lemmas (single-word entity,
+/// passes through `entity_to_wire` unchanged).
+pub fn entity_is_lemma(entity: &str) -> bool {
+    entity == "lemma"
+}
+
+/// Whether a wire `entity` names vocabulary forms (single-word entity,
+/// passes through `entity_to_wire` unchanged).
+pub fn entity_is_form(entity: &str) -> bool {
+    entity == "form"
 }

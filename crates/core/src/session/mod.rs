@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 pub use models::{
     AnalysisResult, EvaluatedTopic, Exercise, FeedbackComment, GrammarError, GrammarErrorType,
-    NewTopicRef, SemanticVerdict, SentenceAnalysis,
+    NewTopicRef, SemanticVerdict, SentenceAnalysis, VocabularyUse,
 };
 pub use scoring::{
     average, clamp_score, collect_topic_errors, count_topic_occurrences, error_based_score,

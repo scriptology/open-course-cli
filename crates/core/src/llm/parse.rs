@@ -82,6 +82,8 @@ pub fn parse_analysis(
             evaluated_topics: vec![],
             new_topics: vec![],
             new_learning_items: vec![],
+            new_lemmas: vec![],
+            new_forms: vec![],
         }
     } else if let Ok(value) = from_str::<serde_json::Value>(cleaned)
         && let Some(sentences_value) = value.get("sentences")
@@ -94,6 +96,8 @@ pub fn parse_analysis(
             evaluated_topics: vec![],
             new_topics: vec![],
             new_learning_items: vec![],
+            new_lemmas: vec![],
+            new_forms: vec![],
         }
     } else {
         return Err(AppError::Llm(
@@ -539,6 +543,54 @@ mod tests {
         );
     }
 
+    // --- usedVocabulary ---
+
+    fn used_vocabulary_json() -> String {
+        r#""usedVocabulary": [
+            {"surface": "manzana", "lemma": "manzana", "pos": "NOUN", "feats": "Gender=Fem|Number=Sing", "side": "target", "expectedForm": true, "cefrLevel": "A1"},
+            {"surface": "komo", "lemma": "comer", "pos": "VERB", "feats": "Mood=Ind|Number=Sing|Person=1|Tense=Pres", "side": "student", "spellingOk": false, "usageOk": true, "expectedForm": true}
+        ]"#
+        .to_string()
+    }
+
+    #[test]
+    fn parse_analysis_parses_used_vocabulary() {
+        let cleaned = format!(
+            r#"{{"sentences": [{{"sentenceNumber": 1, "errors": [], "perSentenceFeedback": [], {}}}]}}"#,
+            used_vocabulary_json()
+        );
+        let result = parse_analysis(&cleaned, 1, 0, 0).unwrap();
+        let used = &result.sentences[0].used_vocabulary;
+        assert_eq!(used.len(), 2);
+        assert_eq!(used[0].side, "target");
+        assert_eq!(used[0].spelling_ok, None);
+        assert!(used[0].expected_form);
+        assert_eq!(used[0].cefr_level.as_deref(), Some("A1"));
+        assert_eq!(used[1].lemma, "comer");
+        assert_eq!(used[1].spelling_ok, Some(false));
+        assert_eq!(used[1].usage_ok, Some(true));
+        assert_eq!(used[1].cefr_level, None);
+    }
+
+    #[test]
+    fn parse_analysis_defaults_used_vocabulary_when_absent() {
+        let cleaned = format!("[{}]", sentence_json(1));
+        let result = parse_analysis(&cleaned, 1, 0, 0).unwrap();
+        assert!(result.sentences[0].used_vocabulary.is_empty());
+    }
+
+    #[test]
+    fn parse_analysis_keeps_used_vocabulary_through_value_fallback() {
+        // A malformed top-level field ("sessionScore" as a string) forces the
+        // `Value.get("sentences")` fallback; usedVocabulary must survive it.
+        let cleaned = format!(
+            r#"{{"sessionScore": "high", "sentences": [{{"sentenceNumber": 1, "errors": [], "perSentenceFeedback": [], {}}}]}}"#,
+            used_vocabulary_json()
+        );
+        let result = parse_analysis(&cleaned, 1, 0, 0).unwrap();
+        assert_eq!(result.sentences[0].used_vocabulary.len(), 2);
+    }
+
     // --- validate_analysis_sentences ---
 
     fn sentence(number: i32) -> SentenceAnalysis {
@@ -550,6 +602,7 @@ mod tests {
             semantic_verdict: SemanticVerdict::Correct,
             errors: vec![],
             per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
         }
     }
 
@@ -560,6 +613,8 @@ mod tests {
             evaluated_topics: vec![],
             new_topics: vec![],
             new_learning_items: vec![],
+            new_lemmas: vec![],
+            new_forms: vec![],
         }
     }
 

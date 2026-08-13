@@ -37,7 +37,7 @@ fn exercise_prompt_includes_profile() {
     let all = vec![topic("t1"), topic("t2")];
     let target = vec![topic("t1")];
     let side = vec![topic("t2")];
-    let prompt = build_exercise_prompt(&p, &target, &side, &all, &[], 3, 0.75);
+    let prompt = build_exercise_prompt(&p, &target, &side, &all, &[], &[], 3, 0.75);
 
     assert!(prompt.contains("ru to en"));
     assert!(prompt.contains("Target topics: Topic t1"));
@@ -74,11 +74,44 @@ fn exercise_prompt_includes_forced_learning_items() {
         practice_count: 0,
         ..Default::default()
     }];
-    let prompt = build_exercise_prompt(&p, &target, &[], &all, &items, 3, 0.75);
+    let prompt = build_exercise_prompt(&p, &target, &[], &all, &items, &[], 3, 0.75);
 
     assert!(prompt.contains("learning items"));
     assert!(prompt.contains("a/an"));
     assert!(prompt.contains("articles"));
+}
+
+#[test]
+fn exercise_prompt_includes_forced_vocabulary() {
+    use open_course_cli::core::vocabulary::Lemma;
+
+    let p = profile();
+    let all = vec![topic("t1")];
+    let target = vec![topic("t1")];
+    let lemmas = vec![
+        Lemma {
+            id: "en-colleague".to_string(),
+            lemma: "colleague".to_string(),
+            pos: "NOUN".to_string(),
+            target_lang: "en".to_string(),
+            native_lang: "ru".to_string(),
+            translation: "коллега".to_string(),
+            ..Default::default()
+        },
+        Lemma {
+            id: "en-resilient".to_string(),
+            lemma: "resilient".to_string(),
+            pos: "ADJ".to_string(),
+            target_lang: "en".to_string(),
+            native_lang: "ru".to_string(),
+            ..Default::default()
+        },
+    ];
+    let prompt = build_exercise_prompt(&p, &target, &[], &all, &[], &lemmas, 3, 0.75);
+
+    assert!(prompt.contains("words need extra practice"));
+    assert!(prompt.contains("- colleague (коллега)"));
+    assert!(prompt.contains("- resilient"));
 }
 
 #[test]

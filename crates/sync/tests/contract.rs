@@ -1351,3 +1351,268 @@ async fn backfill_is_safe_to_repeat() {
         "no duplicate topics after a repeated backfill"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Vocabulary: lemma and form sync (single-word entities, no wire mapping)
+// ---------------------------------------------------------------------------
+
+use open_course_core::vocabulary::{Form, Lemma};
+use open_course_db::outbox::ENTITY_LEMMA;
+
+fn lemma(id: &str, mastery: f64, updated_at: Option<&str>) -> Lemma {
+    Lemma {
+        id: id.to_string(),
+        lemma: "hablar".to_string(),
+        pos: "VERB".to_string(),
+        target_lang: "es".to_string(),
+        native_lang: "ru".to_string(),
+        mastery,
+        updated_at: updated_at.map(|s| s.to_string()),
+        ..Default::default()
+    }
+}
+
+fn form(id: &str, lemma_id: &str, updated_at: Option<&str>) -> Form {
+    Form {
+        id: id.to_string(),
+        lemma_id: lemma_id.to_string(),
+        surface: "hablo".to_string(),
+        feats: "Mood=Ind|Number=Sing|Person=1".to_string(),
+        feats_key: "Mood=Ind|Number=Sing|Person=1".to_string(),
+        updated_at: updated_at.map(|s| s.to_string()),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn pull_applies_lemma_and_form_upserts_with_lww() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+    // A newer local lemma must survive a stale incoming upsert.
+    db.lemmas()
+        .upsert_with_timestamps(&lemma("es-hablar", 66.0, Some("2025-06-01T00:00:00Z")))
+        .await
+        .unwrap();
+    let stale_lemma = lemma("es-hablar", 10.0, Some("2025-01-01T00:00:00Z"));
+    let new_form = form(
+        "es-hablar--hablo",
+        "es-hablar",
+        Some("2025-01-01T00:00:00Z"),
+    );
+    seed_changes(
+        &state,
+        vec![
+            Change {
+                seq: 1,
+                op: "upsert".to_string(),
+                entity: "lemma".to_string(),
+                entity_id: stale_lemma.id.clone(),
+                payload: Some(serde_json::to_value(&stale_lemma).unwrap()),
+                updated_at: stale_lemma.updated_at.clone(),
+            },
+            Change {
+                seq: 2,
+                op: "upsert".to_string(),
+                entity: "form".to_string(),
+                entity_id: new_form.id.clone(),
+                payload: Some(serde_json::to_value(&new_form).unwrap()),
+                updated_at: new_form.updated_at.clone(),
+            },
+        ],
+    );
+
+    let revision = client(&base).pull(&db, "ru-es").await.unwrap();
+    assert_eq!(revision, 2);
+    assert_eq!(db.metadata().last_pulled_seq().await.unwrap(), 2);
+
+    // LWW: the newer local lemma wins; the incoming form is inserted with
+    // the server's timestamps preserved.
+    let lemmas = db.lemmas().read_all().await.unwrap();
+    assert_eq!(lemmas.len(), 1);
+    assert_eq!(lemmas[0].mastery, 66.0);
+    let forms = db.forms().read_all().await.unwrap();
+    assert_eq!(forms.len(), 1);
+    assert_eq!(forms[0].surface, "hablo");
+    assert_eq!(forms[0].updated_at.as_deref(), Some("2025-01-01T00:00:00Z"));
+}
+
+#[tokio::test]
+async fn pull_applies_lemma_and_form_delete_and_tombstone_reset() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+    db.lemmas()
+        .upsert_with_timestamps(&lemma("es-hablar", 0.0, Some("2025-01-01T00:00:00Z")))
+        .await
+        .unwrap();
+    db.lemmas()
+        .upsert_with_timestamps(&lemma("es-comer", 0.0, Some("2025-01-01T00:00:00Z")))
+        .await
+        .unwrap();
+    db.forms()
+        .upsert_with_timestamps(&form(
+            "es-hablar--hablo",
+            "es-hablar",
+            Some("2025-01-01T00:00:00Z"),
+        ))
+        .await
+        .unwrap();
+
+    seed_changes(
+        &state,
+        vec![
+            Change {
+                seq: 1,
+                op: "delete".to_string(),
+                entity: "lemma".to_string(),
+                entity_id: "es-hablar".to_string(),
+                payload: None,
+                updated_at: Some("2025-02-01T00:00:00Z".to_string()),
+            },
+            Change {
+                seq: 2,
+                op: "tombstoneReset".to_string(),
+                entity: "form".to_string(),
+                entity_id: "*".to_string(),
+                payload: None,
+                updated_at: Some("2025-02-02T00:00:00Z".to_string()),
+            },
+        ],
+    );
+
+    client(&base).pull(&db, "ru-es").await.unwrap();
+    let lemmas = db.lemmas().read_all().await.unwrap();
+    assert_eq!(lemmas.len(), 1);
+    assert_eq!(lemmas[0].id, "es-comer");
+    assert!(db.forms().read_all().await.unwrap().is_empty());
+    assert_eq!(
+        db.metadata()
+            .get(open_course_db::metadata::KEY_RESET_AT)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("2025-02-02T00:00:00Z")
+    );
+}
+
+#[tokio::test]
+async fn pull_unknown_entity_is_skipped_and_cursor_advances() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+    db.curriculum()
+        .upsert_with_timestamps(&topic("t1", "Greetings", Some("2025-01-01T00:00:00Z")))
+        .await
+        .unwrap();
+
+    // An entity from a future client version: the upsert is skipped (not a
+    // protocol error) and its tombstone reset must NOT wipe local tables.
+    seed_changes(
+        &state,
+        vec![
+            Change {
+                seq: 1,
+                op: "upsert".to_string(),
+                entity: "futureEntity".to_string(),
+                entity_id: "f1".to_string(),
+                payload: Some(serde_json::json!({ "id": "f1" })),
+                updated_at: Some("2025-02-01T00:00:00Z".to_string()),
+            },
+            Change {
+                seq: 2,
+                op: "tombstoneReset".to_string(),
+                entity: "futureEntity".to_string(),
+                entity_id: "*".to_string(),
+                payload: None,
+                updated_at: Some("2025-02-02T00:00:00Z".to_string()),
+            },
+        ],
+    );
+
+    let revision = client(&base).pull(&db, "ru-es").await.unwrap();
+    assert_eq!(revision, 2);
+    assert_eq!(db.metadata().last_pulled_seq().await.unwrap(), 2);
+    assert_eq!(
+        db.curriculum().read_all().await.unwrap().topics.len(),
+        1,
+        "an unknown tombstone reset must not wipe synced tables"
+    );
+    assert!(
+        db.metadata()
+            .get(open_course_db::metadata::KEY_RESET_AT)
+            .await
+            .unwrap()
+            .is_none(),
+        "no reset marker is recorded for a no-op reset"
+    );
+}
+
+#[tokio::test]
+async fn backfill_uploads_pre_sync_vocabulary_on_fresh_bind() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+
+    db.lemmas()
+        .upsert_with_timestamps(&lemma("es-hablar", 30.0, Some("2025-01-01T00:00:00Z")))
+        .await
+        .unwrap();
+    db.forms()
+        .upsert_with_timestamps(&form(
+            "es-hablar--hablo",
+            "es-hablar",
+            Some("2025-01-01T00:00:00Z"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(db.outbox().len().await.unwrap(), 0, "pre-sync data only");
+
+    backfill_outbox(&db, false).await.unwrap();
+    client(&base).push(&db, "ru-es").await.unwrap();
+
+    {
+        let st = state.lock().unwrap();
+        for entity in ["lemma", "form"] {
+            assert!(
+                st.changes.iter().any(|c| c.entity == entity),
+                "backfilled {entity} reached the server"
+            );
+        }
+    }
+    assert_eq!(db.outbox().len().await.unwrap(), 0, "outbox drained");
+}
+
+#[tokio::test]
+async fn roundtrip_lemma_between_two_clients() {
+    let (_state, base) = start_mock().await;
+    let (_dir_a, db_a) = temp_db().await;
+    let (_dir_b, db_b) = temp_db().await;
+
+    // A upserts a lemma and pushes it through the outbox.
+    db_a.lemmas()
+        .upsert(&lemma("es-hablar", 42.0, None))
+        .await
+        .unwrap();
+    let stamped = db_a
+        .lemmas()
+        .read_all()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|l| l.id == "es-hablar")
+        .unwrap();
+    db_a.outbox()
+        .append(
+            OP_UPSERT,
+            ENTITY_LEMMA,
+            &stamped.id,
+            &serde_json::to_string(&stamped).unwrap(),
+        )
+        .await
+        .unwrap();
+    client(&base).push(&db_a, "ru-es").await.unwrap();
+
+    // B pulls it verbatim (single-word entity: no wire mapping).
+    client(&base).pull(&db_b, "ru-es").await.unwrap();
+    let b_lemmas = db_b.lemmas().read_all().await.unwrap();
+    assert_eq!(b_lemmas.len(), 1);
+    assert_eq!(b_lemmas[0].mastery, 42.0);
+    assert_eq!(b_lemmas[0].updated_at, stamped.updated_at);
+}

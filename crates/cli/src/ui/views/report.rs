@@ -37,6 +37,8 @@ impl Default for ReportState {
                 evaluated_topics: Vec::new(),
                 new_topics: Vec::new(),
                 new_learning_items: Vec::new(),
+                new_lemmas: Vec::new(),
+                new_forms: Vec::new(),
             },
             session: MentorSession {
                 id: String::new(),

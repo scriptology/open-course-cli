@@ -37,6 +37,7 @@ pub struct SessionState {
     pub pending_new_topic: bool,
     pub target_topic_id: Option<String>,
     pub learning_item_ids: Vec<String>,
+    pub lemma_ids: Vec<String>,
 }
 
 impl SessionState {
@@ -408,6 +409,7 @@ pub(crate) async fn start_exercises_for_topic(
     .await?;
 
     state.session.learning_item_ids = preparation.forced_learning_item_ids;
+    state.session.lemma_ids = preparation.forced_lemma_ids;
 
     let labels = get_report_labels(native_language_code(state.config.as_ref()));
     state.session.loading = true;

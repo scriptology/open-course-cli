@@ -55,6 +55,7 @@ async fn debug_generate_exercises() {
         &[side_topic],
         &candidate_topics,
         &[],
+        &[],
         3,
         0.75,
     );

@@ -5,6 +5,7 @@ use crate::learning_items::LearningItem;
 use crate::profile::UserProfile;
 use crate::progress::ProgressTopic;
 use crate::session::{Exercise, NewTopicRef};
+use crate::vocabulary::Lemma;
 
 /// Per-CEFR-level sentence shape limits for generated exercises, so that
 /// "coherent mini-story" does not turn into long multi-clause sentences.
@@ -24,12 +25,14 @@ fn sentence_shape_guidance(level: &str) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_exercise_prompt(
     profile: &UserProfile,
     target_topics: &[Topic],
     side_topics: &[Topic],
     candidate_topics: &[Topic],
     forced_learning_items: &[LearningItem],
+    forced_vocabulary: &[Lemma],
     count: u32,
     recent_success_rate: f64,
 ) -> String {
@@ -138,6 +141,25 @@ pub fn build_exercise_prompt(
         )
     };
 
+    let vocabulary_hint = if forced_vocabulary.is_empty() {
+        String::new()
+    } else {
+        let words = forced_vocabulary
+            .iter()
+            .map(|l| {
+                if l.translation.is_empty() {
+                    format!("- {}", l.lemma)
+                } else {
+                    format!("- {} ({})", l.lemma, l.translation)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\nThe following words need extra practice. Include each of these words if it fits naturally, distributing them across different exercises and without distorting the target topics; skip a word rather than distort the sentence:\n{words}\n"
+        )
+    };
+
     format!(
         "You are a language tutor. Generate {count} connected translation exercises from {native} to {target}.
 
@@ -151,7 +173,7 @@ Native language: {native}
 {complexity_hint}
 
 Use ONLY the following topic IDs when tagging exercises. Do not invent new IDs.
-{topic_list}{learning_items_hint}
+{topic_list}{learning_items_hint}{vocabulary_hint}
 
 The {count} sentences should form a short coherent dialogue or mini-story while respecting the sentence-shape limits stated above. Keep each sentence natural and focused on the target topics (or general vocabulary if no topics are specified).
 
@@ -229,8 +251,19 @@ New topic rules (CRITICAL):
 - Bad topic examples: "Common Spelling Errors", "Grammar mistakes", "Basic vocabulary", "Adjective: Caro vs Rico".
 - The name should be 2-6 words and describe a concrete rule or pattern.
 - Do NOT create newTopics for spelling-only errors.
+- Do NOT report newTopics for errors fully explained by a single word form (a wrong inflection, agreement, or choice of one word) — these are already captured through usedVocabulary with spellingOk/usageOk false. Report newTopics only for constructions, multi-word patterns, word pairs, or false friends.
 - Every newTopic must be a {target} grammar or usage topic. NEVER create newTopics about any other language.
 - If the student answered in the wrong language (e.g. a language other than {target}), mark the affected words as errors, give the correct {target} translation in the explanation, and do NOT create newTopics for that other language.
+
+Vocabulary extraction rules (usedVocabulary):
+- For each sentence, list the CONTENT words (NOUN, VERB, ADJ, ADV, PROPN only) in `usedVocabulary`. Skip function words (articles, prepositions, pronouns, auxiliaries, conjunctions).
+- Words from the expected translation: side "target", no spellingOk/usageOk fields.
+- Words from the student's translation: side "student", WITH spellingOk and usageOk.
+- spellingOk is false ONLY for a real misspelling; missing accents, diacritics, punctuation, or capitalization do NOT make spellingOk false.
+- usageOk is false when the word is misused: wrong word choice, wrong inflected form, or broken agreement.
+- expectedForm is true when the surface matches a form used in the expected (or an acceptable) translation; target-side entries always have expectedForm true.
+- `lemma` is the dictionary headword, `pos` is the Universal Dependencies POS tag, `feats` are UD morphological features strictly in "Attr=Val|Attr=Val" format (e.g. "Mood=Ind|Number=Sing|Person=3|Tense=Pres"). Include the full standard UD feature set for the language: always include VerbForm for verbs (e.g. VerbForm=Fin), plus Mood/Tense/Person/Number for finite forms and Gender/Number for nominals, whenever they apply. Use an empty string when no features apply.
+- `cefrLevel`: Estimate approximate CEFR level (A1–C2) for the lemma for a typical adult general learner. Prefer high-frequency / early textbook order. Ignore rare or specialized senses.
 
 Return a JSON object exactly in this shape:
 {{
@@ -242,13 +275,17 @@ Return a JSON object exactly in this shape:
       "acceptableTranslations": ["...", "..."],
       "semanticVerdict": "correct",
       "errors": [{{ "type": "major", "pattern": "...", "explanation": "...", "topicIds": ["..."], "newTopics": [{{ "name": "...", "description": "...", "level": "A1" }}] }}],
-      "perSentenceFeedback": [{{ "comment": "..." }}]
+      "perSentenceFeedback": [{{ "comment": "..." }}],
+      "usedVocabulary": [
+        {{ "surface": "...", "lemma": "...", "pos": "NOUN", "feats": "Gender=Fem|Number=Sing", "side": "target", "expectedForm": true, "cefrLevel": "A2" }},
+        {{ "surface": "...", "lemma": "...", "pos": "VERB", "feats": "Mood=Ind|Number=Sing|Person=3|Tense=Pres", "side": "student", "spellingOk": true, "usageOk": true, "expectedForm": true, "cefrLevel": "A1" }}
+      ]
     }}
   ],
   "evaluatedTopics": [{{ "topicId": "...", "score": 80.0 }}]
 }}
 
-The "errors" array may be empty. When an error has no known curriculum topic, `topicIds` may be empty; use `newTopics` to suggest a new topic. When `topicIds` is empty and no `newTopics` are given, the error will be treated as affecting all topics practiced in that sentence.
+The "errors" and "usedVocabulary" arrays may be empty. When an error has no known curriculum topic, `topicIds` may be empty; use `newTopics` to suggest a new topic. When `topicIds` is empty and no `newTopics` are given, the error will be treated as affecting all topics practiced in that sentence.
 
 CRITICAL: the top-level object MUST contain the key "sentences" with exactly {n} items.
 CRITICAL: explanations and comments must be in {native}.
@@ -573,4 +610,75 @@ pub fn build_new_topic_metadata_prompt(profile: &UserProfile, new_topic: &NewTop
         description = new_topic.description,
         level = proposed_level,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile() -> UserProfile {
+        UserProfile {
+            native_language: "Russian".to_string(),
+            target_language: "Spanish".to_string(),
+            age: Some(30),
+            self_assessed_cefr: Some("A2".to_string()),
+        }
+    }
+
+    #[test]
+    fn exercise_prompt_includes_forced_vocabulary_block() {
+        let lemmas = vec![
+            Lemma {
+                lemma: "comer".to_string(),
+                translation: "есть".to_string(),
+                ..Default::default()
+            },
+            Lemma {
+                lemma: "pequeño".to_string(),
+                ..Default::default()
+            },
+        ];
+        let prompt = build_exercise_prompt(&profile(), &[], &[], &[], &[], &lemmas, 3, 0.8);
+        assert!(prompt.contains("The following words need extra practice"));
+        assert!(prompt.contains("- comer (есть)"));
+        assert!(prompt.contains("- pequeño\n"));
+        // Forced words are included only when they fit naturally.
+        assert!(prompt.contains("if it fits naturally"));
+        assert!(prompt.contains("skip a word rather than distort the sentence"));
+    }
+
+    #[test]
+    fn exercise_prompt_omits_forced_vocabulary_block_when_empty() {
+        let prompt = build_exercise_prompt(&profile(), &[], &[], &[], &[], &[], 3, 0.8);
+        assert!(!prompt.contains("need extra practice"));
+    }
+
+    #[test]
+    fn batch_analysis_prompt_describes_used_vocabulary() {
+        let exercise = Exercise {
+            id: "ex1".to_string(),
+            target_sentence: "Я ем".to_string(),
+            expected_translation: "Como".to_string(),
+            acceptable_translations: vec![],
+            target_topic_ids: vec![],
+            side_topic_ids: vec![],
+            expected_patterns: vec![],
+            hint: None,
+        };
+        let pairs = vec![(exercise, "Como".to_string())];
+        let prompt = build_batch_analysis_prompt(&profile(), &pairs, &[]);
+        assert!(prompt.contains("\"usedVocabulary\""));
+        assert!(prompt.contains("side \"target\""));
+        assert!(prompt.contains("side \"student\""));
+        assert!(prompt.contains("spellingOk"));
+        assert!(prompt.contains("Attr=Val"));
+        assert!(prompt.contains("NOUN, VERB, ADJ, ADV, PROPN"));
+        assert!(prompt.contains("\"cefrLevel\""));
+        assert!(prompt.contains("Estimate approximate CEFR level (A1–C2) for the lemma for a typical adult general learner. Prefer high-frequency / early textbook order. Ignore rare or specialized senses."));
+        // Full UD feature set is requested, including VerbForm for verbs.
+        assert!(prompt.contains("full standard UD feature set"));
+        assert!(prompt.contains("VerbForm=Fin"));
+        // Single-word-form errors must not produce newTopics.
+        assert!(prompt.contains("errors fully explained by a single word form"));
+    }
 }

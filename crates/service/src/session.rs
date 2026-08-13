@@ -11,14 +11,16 @@ use tokio::sync::mpsc;
 use open_course_config::OpenCourseConfig;
 use open_course_core::error::{AppError, Result};
 use open_course_core::session::{
-    AnalysisResult, Exercise, MentorSession, NextSessionTopic, pick_next_session_topic,
-    recent_success_rate, select_side_topics, unique_topic_ids,
+    AnalysisResult, COMPLETED_THRESHOLD, Exercise, MentorSession, NextSessionTopic,
+    pick_next_session_topic, recent_success_rate, select_side_topics, unique_topic_ids,
 };
+use open_course_core::vocabulary::Lemma;
 use open_course_db::Database;
 use open_course_db::apply::apply_analysis_to_db;
 use open_course_db::curriculum::{Topic, cefr_to_numeric};
 use open_course_db::learning_items::{LearningItem, LearningItemsTable, is_learning_item_name};
-use open_course_db::progress::{ProgressTopic, initial_topic_score};
+use open_course_db::lemmas::LemmasTable;
+use open_course_db::progress::{ProgressData, ProgressTopic, initial_topic_score};
 use open_course_llm::factory::create_llm_model;
 use open_course_llm::pipeline::{
     finalize_analysis_with_new_topics, generate_analysis, generate_exercises,
@@ -34,6 +36,7 @@ use crate::outbox_append;
 pub struct ExercisePreparation {
     pub prompt: String,
     pub forced_learning_item_ids: Vec<String>,
+    pub forced_lemma_ids: Vec<String>,
 }
 
 /// Reads progress, learning items and history from the database, picks side
@@ -85,6 +88,22 @@ pub async fn prepare_exercises(
         .map(|li| li.id.clone())
         .collect();
 
+    let lemmas: Vec<Lemma> = db
+        .lemmas()
+        .read_all()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| l.target_lang == profile.target_language)
+        .collect();
+    // Soft vocabulary frontier: the lowest CEFR level that still has
+    // unmastered topics (the same notion as the frontier gate in
+    // core::session::topic_selection, which has no public helper). `None`
+    // when no level information is available.
+    let frontier_cefr = frontier_cefr(all_topics, &progress);
+    let forced_vocabulary = LemmasTable::weakest(&lemmas, 5, frontier_cefr);
+    let forced_lemma_ids = forced_vocabulary.iter().map(|l| l.id.clone()).collect();
+
     let history = db.history().read_all().await.unwrap_or_default();
     let success_rate = recent_success_rate(&history, 5);
 
@@ -94,6 +113,7 @@ pub async fn prepare_exercises(
         &side_topics,
         &candidate_topics,
         &forced_learning_items,
+        &forced_vocabulary,
         config.preferences.batch_size,
         success_rate,
     );
@@ -101,6 +121,7 @@ pub async fn prepare_exercises(
     Ok(ExercisePreparation {
         prompt,
         forced_learning_item_ids,
+        forced_lemma_ids,
     })
 }
 
@@ -243,8 +264,9 @@ pub async fn apply_analysis(
     db: &Database,
     config: Option<&OpenCourseConfig>,
     session: &MentorSession,
-    analysis: &AnalysisResult,
+    analysis: &mut AnalysisResult,
     forced_learning_item_ids: &[String],
+    forced_lemma_ids: &[String],
     data_dir: &Path,
 ) -> Result<AppliedAnalysis> {
     if let Some(config) = config {
@@ -265,9 +287,25 @@ pub async fn apply_analysis(
         })
         .unwrap_or_default();
 
-    let scores = apply_analysis_to_db(analysis, session, forced_learning_item_ids, db).await?;
+    let (scores, touched_lemma_ids, touched_form_ids) = apply_analysis_to_db(
+        analysis,
+        session,
+        forced_learning_item_ids,
+        forced_lemma_ids,
+        db,
+    )
+    .await?;
 
-    outbox_after_apply(db, session, analysis, &scores, forced_learning_item_ids).await;
+    outbox_after_apply(
+        db,
+        session,
+        analysis,
+        &scores,
+        forced_learning_item_ids,
+        &touched_lemma_ids,
+        &touched_form_ids,
+    )
+    .await;
 
     Ok(AppliedAnalysis {
         previous_scores,
@@ -276,17 +314,20 @@ pub async fn apply_analysis(
 }
 
 /// Best-effort outbox entries for everything the session wrote: the session
-/// summary, the progress entries it touched, and the practiced learning
-/// items.
+/// summary, the progress entries it touched, the practiced learning items,
+/// and every lemma/form the apply step reports as touched (created,
+/// practiced, or CEFR-updated).
 async fn outbox_after_apply(
     db: &Database,
     session: &MentorSession,
     analysis: &AnalysisResult,
     scores: &HashMap<String, f64>,
     forced_learning_item_ids: &[String],
+    touched_lemma_ids: &[String],
+    touched_form_ids: &[String],
 ) {
     use open_course_db::outbox::{
-        ENTITY_LEARNING_ITEM, ENTITY_PROGRESS, ENTITY_SESSION, OP_UPSERT,
+        ENTITY_FORM, ENTITY_LEARNING_ITEM, ENTITY_LEMMA, ENTITY_PROGRESS, ENTITY_SESSION, OP_UPSERT,
     };
 
     if let Ok(history) = db.history().read_all().await
@@ -322,6 +363,53 @@ async fn outbox_after_apply(
             }
         }
     }
+
+    if !touched_lemma_ids.is_empty()
+        && let Ok(lemmas) = db.lemmas().read_all().await
+    {
+        let touched: HashSet<&str> = touched_lemma_ids.iter().map(String::as_str).collect();
+        for lemma in &lemmas {
+            if touched.contains(lemma.id.as_str())
+                && let Ok(payload) = serde_json::to_string(lemma)
+            {
+                outbox_append(db, OP_UPSERT, ENTITY_LEMMA, &lemma.id, &payload).await;
+            }
+        }
+    }
+
+    if !touched_form_ids.is_empty()
+        && let Ok(forms) = db.forms().read_all().await
+    {
+        let touched: HashSet<&str> = touched_form_ids.iter().map(String::as_str).collect();
+        for form in &forms {
+            if touched.contains(form.id.as_str())
+                && let Ok(payload) = serde_json::to_string(form)
+            {
+                outbox_append(db, OP_UPSERT, ENTITY_FORM, &form.id, &payload).await;
+            }
+        }
+    }
+}
+
+/// Numeric CEFR (A1=1..C2=6) of the lowest curriculum level that still has
+/// unmastered topics (mastery below `COMPLETED_THRESHOLD`; topics without a
+/// progress record count as unmastered). `None` when no unfinished topic
+/// carries level information.
+fn frontier_cefr(topics: &[Topic], progress: &ProgressData) -> Option<i32> {
+    let mastery_of = |topic_id: &str| -> f64 {
+        progress
+            .topics
+            .iter()
+            .find(|t| t.topic_id == topic_id)
+            .map(|t| t.mastery)
+            .unwrap_or(0.0)
+    };
+    topics
+        .iter()
+        .filter(|t| mastery_of(&t.id) < COMPLETED_THRESHOLD)
+        .map(|t| t.cefr_numeric())
+        .filter(|n| *n > 0)
+        .min()
 }
 
 fn user_cefr_numeric(config: &OpenCourseConfig) -> i32 {

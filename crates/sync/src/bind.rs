@@ -9,7 +9,8 @@ use std::collections::HashSet;
 
 use open_course_db::Database;
 use open_course_db::outbox::{
-    ENTITY_LEARNING_ITEM, ENTITY_PROGRESS, ENTITY_SESSION, ENTITY_TOPIC, OP_UPSERT,
+    ENTITY_FORM, ENTITY_LEARNING_ITEM, ENTITY_LEMMA, ENTITY_PROGRESS, ENTITY_SESSION, ENTITY_TOPIC,
+    OP_UPSERT,
 };
 
 /// Enqueues every local row as an upsert: the first upload of a pair whose
@@ -41,6 +42,18 @@ pub async fn backfill_outbox(db: &Database, include_topics: bool) -> Result<(), 
         let payload = serde_json::to_string(item)?;
         db.outbox()
             .append(OP_UPSERT, ENTITY_LEARNING_ITEM, &item.id, &payload)
+            .await?;
+    }
+    for lemma in &db.lemmas().read_all().await? {
+        let payload = serde_json::to_string(lemma)?;
+        db.outbox()
+            .append(OP_UPSERT, ENTITY_LEMMA, &lemma.id, &payload)
+            .await?;
+    }
+    for form in &db.forms().read_all().await? {
+        let payload = serde_json::to_string(form)?;
+        db.outbox()
+            .append(OP_UPSERT, ENTITY_FORM, &form.id, &payload)
             .await?;
     }
     Ok(())

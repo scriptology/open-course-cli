@@ -23,6 +23,8 @@ pub const ENTITY_TOPIC: &str = "topic";
 pub const ENTITY_PROGRESS: &str = "progress";
 pub const ENTITY_SESSION: &str = "session";
 pub const ENTITY_LEARNING_ITEM: &str = "learning_item";
+pub const ENTITY_LEMMA: &str = "lemma";
+pub const ENTITY_FORM: &str = "form";
 pub const ENTITY_METADATA: &str = "metadata";
 
 #[derive(Debug, Clone, PartialEq)]

@@ -7,8 +7,9 @@ use open_course_db::outbox::OutboxEntry;
 use crate::client::{SyncClient, check_status};
 use crate::error::{PushError, SyncError};
 use crate::protocol::{
-    Change, ConflictBody, PullResponse, PushRequest, PushResponse, entity_is_learning_item,
-    entity_to_wire, op_is_delete, op_is_tombstone_reset, op_is_upsert, op_to_wire,
+    Change, ConflictBody, PullResponse, PushRequest, PushResponse, entity_is_form,
+    entity_is_learning_item, entity_is_lemma, entity_to_wire, op_is_delete, op_is_tombstone_reset,
+    op_is_upsert, op_to_wire,
 };
 
 /// How far past the current time a local `updated_at` may be before it is
@@ -160,6 +161,8 @@ async fn reset_all(db: &Database) -> Result<(), SyncError> {
     db.progress().reset().await?;
     db.history().reset().await?;
     db.learning_items().reset().await?;
+    db.lemmas().reset().await?;
+    db.forms().reset().await?;
     Ok(())
 }
 
@@ -254,6 +257,34 @@ async fn apply_upsert(db: &Database, change: &Change) -> Result<(), SyncError> {
                     .await?;
             }
         }
+        entity if entity_is_lemma(entity) => {
+            let incoming: open_course_core::vocabulary::Lemma =
+                serde_json::from_value(payload.clone())?;
+            let local = db
+                .lemmas()
+                .read_all()
+                .await?
+                .into_iter()
+                .find(|l| l.id == change.entity_id);
+            let local_updated = local.as_ref().and_then(|l| l.updated_at.as_deref());
+            if incoming_wins(local_updated, incoming.updated_at.as_deref()) {
+                db.lemmas().upsert_with_timestamps(&incoming).await?;
+            }
+        }
+        entity if entity_is_form(entity) => {
+            let incoming: open_course_core::vocabulary::Form =
+                serde_json::from_value(payload.clone())?;
+            let local = db
+                .forms()
+                .read_all()
+                .await?
+                .into_iter()
+                .find(|f| f.id == change.entity_id);
+            let local_updated = local.as_ref().and_then(|f| f.updated_at.as_deref());
+            if incoming_wins(local_updated, incoming.updated_at.as_deref()) {
+                db.forms().upsert_with_timestamps(&incoming).await?;
+            }
+        }
         "metadata" => {
             // Metadata payload shape: { "key": ..., "value": ... }.
             let key = payload
@@ -266,8 +297,10 @@ async fn apply_upsert(db: &Database, change: &Change) -> Result<(), SyncError> {
                 .unwrap_or_default();
             db.metadata().set(key, value).await?;
         }
-        other => {
-            return Err(SyncError::Protocol(format!("unknown entity: {other}")));
+        _ => {
+            // Forward compatibility: an entity introduced by a newer client
+            // is skipped instead of failing the whole pull, so one unknown
+            // entity cannot wedge sync forever (the cursor still advances).
         }
     }
     Ok(())
@@ -284,6 +317,8 @@ async fn apply_delete(db: &Database, change: &Change) -> Result<(), SyncError> {
         entity if entity_is_learning_item(entity) => {
             db.learning_items().delete_by_id(&change.entity_id).await?
         }
+        entity if entity_is_lemma(entity) => db.lemmas().delete_by_id(&change.entity_id).await?,
+        entity if entity_is_form(entity) => db.forms().delete_by_id(&change.entity_id).await?,
         // Sessions are append-only and never deleted; metadata keys have no
         // delete operation.
         _ => {}
@@ -301,9 +336,15 @@ async fn apply_tombstone_reset(db: &Database, change: &Change) -> Result<(), Syn
         "progress" => db.progress().reset().await?,
         "session" => db.history().reset().await?,
         entity if entity_is_learning_item(entity) => db.learning_items().reset().await?,
-        // A reset of everything else (or an explicit "*" entity) wipes all
-        // synced tables.
-        _ => reset_all(db).await?,
+        entity if entity_is_lemma(entity) => db.lemmas().reset().await?,
+        entity if entity_is_form(entity) => db.forms().reset().await?,
+        // An explicit "*" entity still wipes all synced tables.
+        "*" => reset_all(db).await?,
+        // Forward compatibility: a tombstone reset for an entity this client
+        // does not know is a no-op — resetting everything here would wipe
+        // unrelated local data on every new entity rollout. The reset
+        // marker is not recorded either: nothing was actually reset.
+        _ => return Ok(()),
     }
     db.metadata()
         .set(open_course_db::metadata::KEY_RESET_AT, &reset_at)

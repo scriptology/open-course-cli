@@ -175,15 +175,17 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
     state.session.loading = false;
     state.stream_status = None;
     match res {
-        Ok(analysis) => {
+        Ok(mut analysis) => {
             if let Some(session) = state.session.mentor_session.take() {
                 let forced_learning_item_ids = state.session.learning_item_ids.clone();
+                let forced_lemma_ids = state.session.lemma_ids.clone();
                 let applied = match open_course_service::session::apply_analysis(
                     &state.db,
                     state.config.as_ref(),
                     &session,
-                    &analysis,
+                    &mut analysis,
                     &forced_learning_item_ids,
+                    &forced_lemma_ids,
                     &state.data_dir,
                 )
                 .await
@@ -237,6 +239,8 @@ async fn handle_analysis(state: &mut AppState, res: Result<AnalysisResult>) {
                         .collect(),
                     new_topics: analysis.new_topics.clone(),
                     new_learning_items: analysis.new_learning_items.clone(),
+                    new_lemmas: analysis.new_lemmas.clone(),
+                    new_forms: analysis.new_forms.clone(),
                 };
 
                 let target_topic_name = state
