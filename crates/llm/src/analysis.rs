@@ -88,6 +88,12 @@ pub async fn finalize_analysis_with_new_topics(
             if error.error_type == open_course_core::session::GrammarErrorType::Spelling {
                 continue;
             }
+            // Single-word errors are owned by vocabulary evidence: the
+            // failed use already scores the lemma/form, so their new topics
+            // must not also become learning items or curriculum topics.
+            if open_course_core::vocabulary::vocabulary_owns_error(sentence, error) {
+                continue;
+            }
             for new_topic in &error.new_topics {
                 if is_abstract_topic_name(&new_topic.name) {
                     log_debug_event(
@@ -234,4 +240,146 @@ pub async fn generate_topic_metadata(
     normalize_topic_defaults(&mut topic, profile);
 
     Ok(topic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::streaming::LlmStream;
+    use async_trait::async_trait;
+    use open_course_core::session::{
+        GrammarError, GrammarErrorType, NewTopicRef, SentenceAnalysis, VocabularyUse,
+    };
+
+    /// Any LLM call fails the test: these cases must be resolved locally.
+    struct NoopClient;
+
+    #[async_trait]
+    impl LlmClient for NoopClient {
+        async fn prompt(&self, _: &str, _: Option<&str>, _: u32) -> Result<String> {
+            panic!("no LLM call expected");
+        }
+
+        async fn stream_prompt(&self, _: &str, _: Option<&str>, _: u32) -> Result<LlmStream> {
+            panic!("no LLM call expected");
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn profile() -> UserProfile {
+        UserProfile {
+            native_language: "ru".to_string(),
+            target_language: "es".to_string(),
+            age: None,
+            self_assessed_cefr: None,
+        }
+    }
+
+    fn analysis_with(error: GrammarError, used_vocabulary: Vec<VocabularyUse>) -> AnalysisResult {
+        AnalysisResult {
+            session_score: Some(50.0),
+            sentences: vec![SentenceAnalysis {
+                sentence_number: 1,
+                student_translation: "el pequeño casa".to_string(),
+                expected_translation: "la casa pequeña".to_string(),
+                acceptable_translations: vec![],
+                semantic_verdict: open_course_core::session::SemanticVerdict::NeedsCorrection,
+                errors: vec![error],
+                per_sentence_feedback: vec![],
+                used_vocabulary,
+            }],
+            evaluated_topics: vec![],
+            new_topics: vec![],
+            new_learning_items: vec![],
+            new_lemmas: vec![],
+            new_forms: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn vocabulary_owned_error_spawns_no_learning_item() {
+        // The error boils down to the single failed word "pequeño": the
+        // vocabulary system owns it, so its new topic is dropped entirely.
+        let error = GrammarError {
+            error_type: GrammarErrorType::Major,
+            pattern: "pequeño instead of pequeña".to_string(),
+            explanation: "gender agreement of pequeño".to_string(),
+            topic_ids: vec![],
+            new_topics: vec![NewTopicRef {
+                name: "Adjective: Pequeño vs Pequeña".to_string(),
+                description: "gender of pequeño".to_string(),
+                level: None,
+            }],
+        };
+        let failed_use = VocabularyUse {
+            surface: "pequeño".to_string(),
+            lemma: "pequeño".to_string(),
+            pos: "ADJ".to_string(),
+            side: "student".to_string(),
+            usage_ok: Some(false),
+            ..Default::default()
+        };
+        let analysis = analysis_with(error, vec![failed_use]);
+
+        let result = finalize_analysis_with_new_topics(
+            &NoopClient,
+            &profile(),
+            &[],
+            analysis,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(result.new_learning_items.is_empty());
+        assert!(result.new_topics.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unowned_error_still_creates_learning_item() {
+        // No failed vocabulary use overlaps the error words: the new topic
+        // survives and becomes a learning item without any LLM call.
+        let error = GrammarError {
+            error_type: GrammarErrorType::Major,
+            pattern: "caro where rico was meant".to_string(),
+            explanation: "confused caro with rico".to_string(),
+            topic_ids: vec![],
+            new_topics: vec![NewTopicRef {
+                name: "Adjective: Caro vs Rico".to_string(),
+                description: "expensive vs tasty".to_string(),
+                level: None,
+            }],
+        };
+        let unrelated_use = VocabularyUse {
+            surface: "casa".to_string(),
+            lemma: "casa".to_string(),
+            pos: "NOUN".to_string(),
+            side: "student".to_string(),
+            usage_ok: Some(false),
+            ..Default::default()
+        };
+        let analysis = analysis_with(error, vec![unrelated_use]);
+
+        let result = finalize_analysis_with_new_topics(
+            &NoopClient,
+            &profile(),
+            &[],
+            analysis,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.new_learning_items.len(), 1);
+        assert_eq!(
+            result.new_learning_items[0].name,
+            "Adjective: Caro vs Rico"
+        );
+        assert!(result.new_topics.is_empty());
+    }
 }

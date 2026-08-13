@@ -3,14 +3,16 @@ use tempfile::TempDir;
 
 use open_course_cli::core::session::{
     AnalysisResult, EvaluatedTopic, Exercise, FeedbackComment, GrammarError, GrammarErrorType,
-    MentorSession, NextSessionTopic, SemanticVerdict, SentenceAnalysis, create_session,
-    get_due_review_topics, get_weak_review_topics, pick_next_session_topic, select_side_topics,
-    select_target_topics,
+    MentorSession, NextSessionTopic, SemanticVerdict, SentenceAnalysis, VocabularyUse,
+    create_session, get_due_review_topics, get_weak_review_topics, pick_next_session_topic,
+    select_side_topics, select_target_topics,
 };
 use open_course_cli::db::Database;
 use open_course_cli::db::apply::{apply_analysis, apply_analysis_to_db};
 use open_course_cli::db::curriculum::{Curriculum, Difficulty, Topic};
 use open_course_cli::db::learning_items::{LearningItem, LearningItemsTable};
+use open_course_cli::db::forms::Form;
+use open_course_cli::db::lemmas::{Lemma, STATUS_PRACTICING};
 use open_course_cli::db::progress::{ProgressData, ProgressTopic};
 
 fn make_topic(id: &str, difficulty: Difficulty) -> Topic {
@@ -245,6 +247,7 @@ async fn apply_analysis_updates_progress() {
                 per_sentence_feedback: vec![FeedbackComment {
                     comment: "Good".to_string(),
                 }],
+                used_vocabulary: vec![],
             },
             SentenceAnalysis {
                 sentence_number: 2,
@@ -261,6 +264,7 @@ async fn apply_analysis_updates_progress() {
                 per_sentence_feedback: vec![FeedbackComment {
                     comment: "OK".to_string(),
                 }],
+                used_vocabulary: vec![],
             },
         ],
         evaluated_topics: vec![
@@ -277,6 +281,8 @@ async fn apply_analysis_updates_progress() {
         ],
         new_topics: vec![],
         new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
     };
 
     let mut progress = ProgressData {
@@ -342,6 +348,7 @@ async fn errors_decrease_existing_score() {
                 ..Default::default()
             }],
             per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
         }],
         evaluated_topics: vec![EvaluatedTopic {
             topic_id: "t1".to_string(),
@@ -350,6 +357,8 @@ async fn errors_decrease_existing_score() {
         }],
         new_topics: vec![],
         new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
     };
 
     let mut progress = ProgressData {
@@ -399,6 +408,7 @@ async fn new_topic_with_errors_grows_mastery() {
                 ..Default::default()
             }],
             per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
         }],
         evaluated_topics: vec![EvaluatedTopic {
             topic_id: "t1".to_string(),
@@ -407,6 +417,8 @@ async fn new_topic_with_errors_grows_mastery() {
         }],
         new_topics: vec![],
         new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
     };
 
     let mut progress = ProgressData {
@@ -465,7 +477,7 @@ async fn apply_analysis_to_db_updates_learning_items() {
     }];
     let session = create_session(exercises, 1);
 
-    let analysis = AnalysisResult {
+    let mut analysis = AnalysisResult {
         session_score: Some(50.0),
         sentences: vec![SentenceAnalysis {
             sentence_number: 1,
@@ -480,16 +492,20 @@ async fn apply_analysis_to_db_updates_learning_items() {
                 ..Default::default()
             }],
             per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
         }],
         evaluated_topics: vec![],
         new_topics: vec![],
         new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
     };
 
     apply_analysis_to_db(
-        &analysis,
+        &mut analysis,
         &session,
         &["es-pequeno-pequena".to_string()],
+        &[],
         &db,
     )
     .await
@@ -543,7 +559,7 @@ async fn apply_analysis_to_db_routes_word_topics_to_learning_items() {
         ..Default::default()
     };
 
-    let analysis = AnalysisResult {
+    let mut analysis = AnalysisResult {
         session_score: Some(50.0),
         sentences: vec![SentenceAnalysis {
             sentence_number: 1,
@@ -558,13 +574,16 @@ async fn apply_analysis_to_db_routes_word_topics_to_learning_items() {
                 ..Default::default()
             }],
             per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
         }],
         evaluated_topics: vec![],
         new_topics: vec![word_topic],
         new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
     };
 
-    apply_analysis_to_db(&analysis, &session, &[], &db)
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
         .await
         .unwrap();
 
@@ -598,7 +617,7 @@ async fn apply_analysis_to_db_routes_word_topics_to_learning_items() {
     practiced.practice_count = 3;
     db.learning_items().upsert(&practiced).await.unwrap();
 
-    apply_analysis_to_db(&analysis, &session, &[], &db)
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
         .await
         .unwrap();
 
@@ -656,10 +675,13 @@ fn exercise_analysis(
             },
             errors,
             per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
         }],
         evaluated_topics: vec![],
         new_topics: vec![],
         new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
     };
     (session, analysis)
 }
@@ -674,8 +696,8 @@ async fn learning_item_not_practiced_keeps_stats_untouched() {
 
     // The item exists but is not forced this session and no new learning
     // item dedupes into it.
-    let (session, analysis) = exercise_analysis("Hello", "Привет", "Привет", vec![]);
-    apply_analysis_to_db(&analysis, &session, &[], &db)
+    let (session, mut analysis) = exercise_analysis("Hello", "Привет", "Привет", vec![]);
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
         .await
         .unwrap();
 
@@ -695,12 +717,13 @@ async fn learning_item_in_session_without_errors_scores_100() {
     let item = make_learning_item("es-pequeno-pequena", "pequeño/pequeña");
     db.learning_items().upsert(&item).await.unwrap();
 
-    let (session, analysis) =
+    let (session, mut analysis) =
         exercise_analysis("small table", "mesa pequeña", "mesa pequeña", vec![]);
     apply_analysis_to_db(
-        &analysis,
+        &mut analysis,
         &session,
         &["es-pequeno-pequena".to_string()],
+        &[],
         &db,
     )
     .await
@@ -730,13 +753,13 @@ async fn learning_item_mentioned_in_error_scores_0() {
     }];
     // The item's words occur in the student translation ("rico") and in the
     // error pattern.
-    let (session, analysis) = exercise_analysis(
+    let (session, mut analysis) = exercise_analysis(
         "The chairs were expensive",
         "Las sillas eran caras",
         "Las sillas eran rico",
         errors,
     );
-    apply_analysis_to_db(&analysis, &session, &["es-caro-rico".to_string()], &db)
+    apply_analysis_to_db(&mut analysis, &session, &["es-caro-rico".to_string()], &[], &db)
         .await
         .unwrap();
 
@@ -762,13 +785,13 @@ async fn learning_item_matches_by_significant_words_not_full_name() {
     }];
     // The full item name never appears anywhere; the words "вслух"/"out loud"
     // occur in the exercise and the error mentions "вслух"/"aloud".
-    let (session, analysis) = exercise_analysis(
+    let (session, mut analysis) = exercise_analysis(
         "She said it out loud",
         "Она сказала это вслух",
         "Она сказала это громко",
         errors,
     );
-    apply_analysis_to_db(&analysis, &session, &["es-vsluh-aloud".to_string()], &db)
+    apply_analysis_to_db(&mut analysis, &session, &["es-vsluh-aloud".to_string()], &[], &db)
         .await
         .unwrap();
 
@@ -791,13 +814,13 @@ async fn forced_item_with_foreign_name_still_gets_credit() {
     let item = make_learning_item("es-colleague", "colleague");
     db.learning_items().upsert(&item).await.unwrap();
 
-    let (session, analysis) = exercise_analysis(
+    let (session, mut analysis) = exercise_analysis(
         "Мой коллега купил стол",
         "Mi colega compró una mesa",
         "Mi colega compró una mesa",
         vec![],
     );
-    apply_analysis_to_db(&analysis, &session, &["es-colleague".to_string()], &db)
+    apply_analysis_to_db(&mut analysis, &session, &["es-colleague".to_string()], &[], &db)
         .await
         .unwrap();
 
@@ -818,13 +841,13 @@ async fn clean_sessions_graduate_item_out_of_weakest() {
 
     // Two clean sessions: 0 -> 34 -> 56, crossing the mastery threshold (50).
     for _ in 0..2 {
-        let (session, analysis) = exercise_analysis(
+        let (session, mut analysis) = exercise_analysis(
             "Мой коллега купил стол",
             "Mi colega compró una mesa",
             "Mi colega compró una mesa",
             vec![],
         );
-        apply_analysis_to_db(&analysis, &session, &["es-colleague".to_string()], &db)
+        apply_analysis_to_db(&mut analysis, &session, &["es-colleague".to_string()], &[], &db)
             .await
             .unwrap();
     }
@@ -858,7 +881,7 @@ async fn new_learning_item_deduped_into_existing() {
     );
     analysis.new_learning_items = vec![new_item];
 
-    apply_analysis_to_db(&analysis, &session, &[], &db)
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
         .await
         .unwrap();
 
@@ -885,7 +908,7 @@ async fn new_topic_deduped_into_existing_curriculum_topic() {
     let (session, mut analysis) = exercise_analysis("Hello", "Привет", "Привет", vec![]);
     analysis.new_topics = vec![dup_topic];
 
-    apply_analysis_to_db(&analysis, &session, &[], &db)
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
         .await
         .unwrap();
 
@@ -959,10 +982,13 @@ async fn acceptable_translation_grows_mastery() {
                 ..Default::default()
             }],
             per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
         }],
         evaluated_topics: vec![],
         new_topics: vec![],
         new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
     };
 
     let mut progress = ProgressData {
@@ -1179,4 +1205,377 @@ fn side_topics_capped_one_level_above_target() {
     let ids: Vec<&str> = sides.iter().map(|t| t.id.as_str()).collect();
     // c1 is the weakest but two levels above the A2 target — excluded.
     assert_eq!(ids, ["a1", "b1"]);
+}
+
+fn make_vocabulary_use(lemma: &str, cefr_level: Option<&str>) -> VocabularyUse {
+    VocabularyUse {
+        lemma: lemma.to_string(),
+        pos: "VERB".to_string(),
+        side: "target".to_string(),
+        cefr_level: cefr_level.map(|s| s.to_string()),
+        ..Default::default()
+    }
+}
+
+fn vocabulary_session(target_topics: &[&str]) -> MentorSession {
+    create_session(
+        vec![Exercise {
+            id: "e1".to_string(),
+            target_sentence: "hablo".to_string(),
+            expected_translation: "hablo".to_string(),
+            acceptable_translations: vec![],
+            target_topic_ids: target_topics.iter().map(|s| s.to_string()).collect(),
+            side_topic_ids: vec![],
+            expected_patterns: vec![],
+            hint: None,
+        }],
+        1,
+    )
+}
+
+fn vocabulary_analysis(vocabulary_use: VocabularyUse) -> AnalysisResult {
+    AnalysisResult {
+        session_score: Some(100.0),
+        sentences: vec![SentenceAnalysis {
+            sentence_number: 1,
+            student_translation: "hablo".to_string(),
+            expected_translation: "hablo".to_string(),
+            acceptable_translations: vec![],
+            semantic_verdict: SemanticVerdict::Correct,
+            errors: vec![],
+            per_sentence_feedback: vec![],
+            used_vocabulary: vec![vocabulary_use],
+        }],
+        evaluated_topics: vec![],
+        new_topics: vec![],
+        new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
+    }
+}
+
+async fn vocabulary_db(dir: &TempDir, topics: Vec<Topic>) -> Database {
+    let db = Database::connect(&dir.path().join("db")).await.unwrap();
+    for topic in &topics {
+        db.curriculum().upsert(topic).await.unwrap();
+    }
+    db
+}
+
+#[tokio::test]
+async fn apply_assigns_cefr_from_target_topic() {
+    let dir = TempDir::new().unwrap();
+    // The exercise targets two leveled topics: the lemma takes the minimum.
+    let db = vocabulary_db(
+        &dir,
+        vec![make_level_topic("t-b1", "B1"), make_level_topic("t-a2", "A2")],
+    )
+    .await;
+
+    let session = vocabulary_session(&["t-b1", "t-a2"]);
+    let mut analysis = vocabulary_analysis(make_vocabulary_use("hablar", Some("C1")));
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let lemmas = db.lemmas().read_all().await.unwrap();
+    assert_eq!(lemmas.len(), 1);
+    assert_eq!(lemmas[0].cefr_level.as_deref(), Some("A2"));
+    assert_eq!(lemmas[0].cefr_source.as_deref(), Some("topic"));
+}
+
+#[tokio::test]
+async fn apply_falls_back_to_llm_cefr() {
+    let dir = TempDir::new().unwrap();
+    // Topic without level information: the LLM estimate is used.
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+
+    let session = vocabulary_session(&["t1"]);
+    let mut analysis = vocabulary_analysis(make_vocabulary_use("hablar", Some("B1")));
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let lemmas = db.lemmas().read_all().await.unwrap();
+    assert_eq!(lemmas.len(), 1);
+    assert_eq!(lemmas[0].cefr_level.as_deref(), Some("B1"));
+    assert_eq!(lemmas[0].cefr_source.as_deref(), Some("llm"));
+}
+
+#[tokio::test]
+async fn apply_upgrades_llm_cefr_to_topic() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_level_topic("t1", "A2")]).await;
+
+    let existing = Lemma {
+        id: "en-hablar".to_string(),
+        lemma: "hablar".to_string(),
+        pos: "VERB".to_string(),
+        target_lang: "en".to_string(),
+        native_lang: "ru".to_string(),
+        cefr_level: Some("B1".to_string()),
+        cefr_source: Some("llm".to_string()),
+        ..Default::default()
+    };
+    db.lemmas().upsert(&existing).await.unwrap();
+
+    // The reappearance carries no LLM level; the topic level upgrades the
+    // stored estimate even without scoring evidence.
+    let session = vocabulary_session(&["t1"]);
+    let mut analysis = vocabulary_analysis(make_vocabulary_use("hablar", None));
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let lemmas = db.lemmas().read_all().await.unwrap();
+    assert_eq!(lemmas.len(), 1);
+    assert_eq!(lemmas[0].cefr_level.as_deref(), Some("A2"));
+    assert_eq!(lemmas[0].cefr_source.as_deref(), Some("topic"));
+}
+
+#[tokio::test]
+async fn apply_does_not_overwrite_topic_cefr_with_llm() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+
+    let existing = Lemma {
+        id: "en-hablar".to_string(),
+        lemma: "hablar".to_string(),
+        pos: "VERB".to_string(),
+        target_lang: "en".to_string(),
+        native_lang: "ru".to_string(),
+        cefr_level: Some("A2".to_string()),
+        cefr_source: Some("topic".to_string()),
+        ..Default::default()
+    };
+    db.lemmas().upsert(&existing).await.unwrap();
+
+    let session = vocabulary_session(&["t1"]);
+    let mut analysis = vocabulary_analysis(make_vocabulary_use("hablar", Some("C1")));
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let lemmas = db.lemmas().read_all().await.unwrap();
+    assert_eq!(lemmas.len(), 1);
+    assert_eq!(lemmas[0].cefr_level.as_deref(), Some("A2"));
+    assert_eq!(lemmas[0].cefr_source.as_deref(), Some("topic"));
+}
+
+#[tokio::test]
+async fn apply_ignores_garbage_cefr_level() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+
+    let session = vocabulary_session(&["t1"]);
+    let mut analysis = vocabulary_analysis(make_vocabulary_use("hablar", Some("Z9")));
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let lemmas = db.lemmas().read_all().await.unwrap();
+    assert_eq!(lemmas.len(), 1);
+    assert_eq!(lemmas[0].cefr_level, None);
+    assert_eq!(lemmas[0].cefr_source, None);
+}
+
+fn student_use(lemma: &str, surface: &str, feats: &str) -> VocabularyUse {
+    VocabularyUse {
+        lemma: lemma.to_string(),
+        pos: "VERB".to_string(),
+        surface: surface.to_string(),
+        feats: feats.to_string(),
+        side: "student".to_string(),
+        usage_ok: Some(true),
+        ..Default::default()
+    }
+}
+
+fn stored_hablar_lemma() -> Lemma {
+    Lemma {
+        id: "en-hablar".to_string(),
+        lemma: "hablar".to_string(),
+        pos: "VERB".to_string(),
+        target_lang: "en".to_string(),
+        native_lang: "ru".to_string(),
+        ..Default::default()
+    }
+}
+
+fn stored_hablo_form(feats: &str, feats_key: &str) -> Form {
+    Form {
+        id: "en-hablar--hablo".to_string(),
+        lemma_id: "en-hablar".to_string(),
+        surface: "hablo".to_string(),
+        feats: feats.to_string(),
+        feats_key: feats_key.to_string(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn apply_fuzzy_merges_form_with_feats_subset() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+    db.lemmas().upsert(&stored_hablar_lemma()).await.unwrap();
+    db.forms()
+        .upsert(&stored_hablo_form(
+            "Mood=Ind|Number=Sing|Person=1|Tense=Pres|VerbForm=Fin",
+            "mood=ind|number=sing|person=1|tense=pres|verbform=fin",
+        ))
+        .await
+        .unwrap();
+
+    let session = vocabulary_session(&["t1"]);
+    // The incoming feats set is a subset of the stored one: the use merges
+    // into the existing form instead of creating a near-duplicate.
+    let mut analysis = vocabulary_analysis(student_use("hablar", "hablo", "Tense=Pres|Mood=Ind"));
+    let (_, _, touched_forms) = apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let forms = db.forms().read_all().await.unwrap();
+    assert_eq!(forms.len(), 1);
+    assert_eq!(forms[0].id, "en-hablar--hablo");
+    // Evidence landed on the existing form; the richer feats were kept.
+    assert_eq!(forms[0].correct, 1);
+    assert_eq!(forms[0].mastery, 34.0);
+    assert_eq!(
+        forms[0].feats_key,
+        "mood=ind|number=sing|person=1|tense=pres|verbform=fin"
+    );
+    assert!(touched_forms.contains(&"en-hablar--hablo".to_string()));
+    assert!(analysis.new_forms.is_empty());
+}
+
+#[tokio::test]
+async fn apply_fuzzy_merge_enriches_sparse_feats() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+    db.lemmas().upsert(&stored_hablar_lemma()).await.unwrap();
+    db.forms()
+        .upsert(&stored_hablo_form("Tense=Pres", "tense=pres"))
+        .await
+        .unwrap();
+
+    let session = vocabulary_session(&["t1"]);
+    // Target-side use (no scoring evidence) with a richer feats set: the
+    // stored feats/feats_key are upgraded and the form is persisted.
+    let mut vocabulary_use = student_use("hablar", "hablo", "Mood=Ind|Tense=Pres");
+    vocabulary_use.side = "target".to_string();
+    vocabulary_use.usage_ok = None;
+    let mut analysis = vocabulary_analysis(vocabulary_use);
+    let (_, _, touched_forms) = apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let forms = db.forms().read_all().await.unwrap();
+    assert_eq!(forms.len(), 1);
+    assert_eq!(forms[0].feats, "Mood=Ind|Tense=Pres");
+    assert_eq!(forms[0].feats_key, "mood=ind|tense=pres");
+    assert!(touched_forms.contains(&"en-hablar--hablo".to_string()));
+}
+
+#[tokio::test]
+async fn apply_creates_new_form_when_feats_diverge() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+    db.lemmas().upsert(&stored_hablar_lemma()).await.unwrap();
+    db.forms()
+        .upsert(&stored_hablo_form(
+            "Mood=Ind|Number=Sing|Person=1|Tense=Pres|VerbForm=Fin",
+            "mood=ind|number=sing|person=1|tense=pres|verbform=fin",
+        ))
+        .await
+        .unwrap();
+
+    let session = vocabulary_session(&["t1"]);
+    // Indicative vs subjunctive: similarity far below the merge threshold,
+    // so a separate form is created.
+    let mut analysis = vocabulary_analysis(student_use("hablar", "hablo", "Mood=Sub|Tense=Pres"));
+    apply_analysis_to_db(&mut analysis, &session, &[], &[], &db)
+        .await
+        .unwrap();
+
+    let forms = db.forms().read_all().await.unwrap();
+    assert_eq!(forms.len(), 2);
+    assert!(forms.iter().any(|f| f.id == "en-hablar--hablo-1"));
+}
+
+#[tokio::test]
+async fn forced_lemma_without_evidence_is_untouched() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+    let mut lemma = stored_hablar_lemma();
+    lemma.mastery = 40.0;
+    lemma.practice_count = 2;
+    lemma.correct_uses = 1;
+    lemma.status = STATUS_PRACTICING;
+    lemma.last_seen = Some("2024-01-01T00:00:00Z".to_string());
+    db.lemmas().upsert(&lemma).await.unwrap();
+
+    let session = vocabulary_session(&["t1"]);
+    let mut analysis = vocabulary_analysis(make_vocabulary_use("hablar", None));
+    // The forced lemma never appeared in the session: neutral non-use, no
+    // credit at all (replaces the former soft credit with a perfect score).
+    analysis.sentences[0].used_vocabulary.clear();
+
+    let (_, touched_lemmas, _) = apply_analysis_to_db(
+        &mut analysis,
+        &session,
+        &[],
+        &["en-hablar".to_string()],
+        &db,
+    )
+    .await
+    .unwrap();
+
+    assert!(!touched_lemmas.contains(&"en-hablar".to_string()));
+    let stored = db.lemmas().read_all().await.unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].mastery, 40.0);
+    assert_eq!(stored[0].practice_count, 2);
+    assert_eq!(stored[0].correct_uses, 1);
+    assert_eq!(
+        stored[0].last_seen.as_deref(),
+        Some("2024-01-01T00:00:00Z")
+    );
+    assert_eq!(stored[0].status, STATUS_PRACTICING);
+}
+
+#[tokio::test]
+async fn forced_lemma_with_evidence_scores_as_before() {
+    let dir = TempDir::new().unwrap();
+    let db = vocabulary_db(&dir, vec![make_topic("t1", Difficulty::Beginner)]).await;
+    let mut lemma = stored_hablar_lemma();
+    lemma.mastery = 40.0;
+    lemma.practice_count = 2;
+    lemma.correct_uses = 1;
+    lemma.status = STATUS_PRACTICING;
+    lemma.last_seen = Some("2024-01-01T00:00:00Z".to_string());
+    db.lemmas().upsert(&lemma).await.unwrap();
+
+    let session = vocabulary_session(&["t1"]);
+    let mut analysis = vocabulary_analysis(student_use("hablar", "hablo", "Tense=Pres"));
+    let (_, touched_lemmas, _) = apply_analysis_to_db(
+        &mut analysis,
+        &session,
+        &[],
+        &["en-hablar".to_string()],
+        &db,
+    )
+    .await
+    .unwrap();
+
+    assert!(touched_lemmas.contains(&"en-hablar".to_string()));
+    let stored = db.lemmas().read_all().await.unwrap();
+    assert_eq!(stored.len(), 1);
+    // ema_update(40, 100) = 40 * 0.66 + 100 * 0.34 = 60.4 -> 60.
+    assert_eq!(stored[0].mastery, 60.0);
+    assert_eq!(stored[0].practice_count, 3);
+    assert_eq!(stored[0].correct_uses, 2);
+    assert_ne!(
+        stored[0].last_seen.as_deref(),
+        Some("2024-01-01T00:00:00Z")
+    );
 }

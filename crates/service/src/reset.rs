@@ -58,6 +58,11 @@ pub async fn execute_reset(db: &Database, action: ResetAction) -> Result<()> {
             db.curriculum().reset().await?;
             db.reviews().reset().await?;
             db.learning_items().reset().await?;
+            db.lemmas().reset().await?;
+            db.forms().reset().await?;
+            // TODO: also emit tombstoneReset for lemma/form once old clients
+            // are updated — their sync engine wipes all data on a tombstone
+            // for an unknown entity.
             for entity in [
                 ENTITY_PROGRESS,
                 ENTITY_SESSION,

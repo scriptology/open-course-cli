@@ -294,7 +294,7 @@ async fn run_exercises_check(client: Arc<dyn LlmClient>, profile: &UserProfile) 
     let wrapper = DiagnosticLlmClient::from_arc(client);
     let start = Instant::now();
     let topics = synthetic_topics(profile);
-    let prompt = build_exercise_prompt(profile, &topics[..1], &topics[1..], &topics, &[], 1, 0.75);
+    let prompt = build_exercise_prompt(profile, &topics[..1], &topics[1..], &topics, &[], &[], 1, 0.75);
     let status = match timeout(
         EXERCISES_TIMEOUT,
         generate_exercises(&wrapper, &prompt, None, None::<&Path>),

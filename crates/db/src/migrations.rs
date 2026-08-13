@@ -18,7 +18,7 @@ use crate::metadata::MetadataTable;
 use open_course_core::error::Result;
 
 /// The schema version this build migrates to.
-pub const CURRENT_SCHEMA_VERSION: i32 = 4;
+pub const CURRENT_SCHEMA_VERSION: i32 = 5;
 
 type MigrationFn = fn(&Connection) -> Pin<Box<dyn Future<Output = Result<()>> + Send + '_>>;
 
@@ -28,6 +28,7 @@ const MIGRATIONS: &[(i32, MigrationFn)] = &[
     (2, |c| Box::pin(migrate_v2_timestamps(c))),
     (3, |c| Box::pin(migrate_v3_session_uuids(c))),
     (4, |c| Box::pin(migrate_v4_outbox(c))),
+    (5, |c| Box::pin(migrate_v5_vocabulary(c))),
 ];
 
 /// Brings the database at `connection` up to `CURRENT_SCHEMA_VERSION`.
@@ -237,6 +238,25 @@ async fn migrate_v4_outbox(connection: &Connection) -> Result<()> {
     if !table_exists(connection, crate::outbox::TABLE_NAME).await {
         connection
             .create_empty_table(crate::outbox::TABLE_NAME, crate::outbox::schema())
+            .execute()
+            .await
+            .map_err(crate::error::DbError::from)?;
+    }
+    Ok(())
+}
+
+/// v5: the vocabulary tables (lemmas and their inflected forms).
+async fn migrate_v5_vocabulary(connection: &Connection) -> Result<()> {
+    if !table_exists(connection, crate::lemmas::TABLE_NAME).await {
+        connection
+            .create_empty_table(crate::lemmas::TABLE_NAME, crate::lemmas::schema())
+            .execute()
+            .await
+            .map_err(crate::error::DbError::from)?;
+    }
+    if !table_exists(connection, crate::forms::TABLE_NAME).await {
+        connection
+            .create_empty_table(crate::forms::TABLE_NAME, crate::forms::schema())
             .execute()
             .await
             .map_err(crate::error::DbError::from)?;
@@ -470,6 +490,10 @@ mod tests {
         );
         assert_eq!(db.outbox().len().await.unwrap(), 0);
 
+        // v5 vocabulary tables exist and are empty.
+        assert!(db.lemmas().read_all().await.unwrap().is_empty());
+        assert!(db.forms().read_all().await.unwrap().is_empty());
+
         // Reconnecting is a no-op (migrations are not re-applied destructively).
         let db = Database::connect(&path).await.unwrap();
         let curriculum = db.curriculum().read_all().await.unwrap();
@@ -488,6 +512,8 @@ mod tests {
         );
         assert!(db.curriculum().read_all().await.unwrap().topics.is_empty());
         assert_eq!(db.outbox().len().await.unwrap(), 0);
+        assert!(db.lemmas().read_all().await.unwrap().is_empty());
+        assert!(db.forms().read_all().await.unwrap().is_empty());
     }
 
     #[tokio::test]

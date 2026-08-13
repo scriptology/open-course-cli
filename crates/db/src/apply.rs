@@ -1,25 +1,31 @@
 //! Applying a finished session's analysis to the database: topic mastery
 //! updates, history records, adaptive alerts and learning items.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
 
 use crate::curriculum::Topic;
+use crate::forms::Form;
 use crate::history::{HistoryTable, SessionSummary};
 use crate::learning_items::{
     LearningItem, is_duplicate_name, is_learning_item_name, significant_words,
     text_contains_any_word,
 };
+use crate::lemmas::Lemma;
 use crate::progress::{ProgressData, ProgressTopic};
+use open_course_core::curriculum::{CEFR_LEVELS, Curriculum, cefr_to_numeric};
 use open_course_core::error::Result;
-
-use open_course_core::session::models::AnalysisResult;
+use open_course_core::session::models::{AnalysisResult, VocabularyUse};
 use open_course_core::session::scoring::{
     adaptive_alpha, average, clamp_score, ema_update, topic_exercise_scores,
 };
 use open_course_core::session::{
     LOW_SESSION_SCORE_THRESHOLD, MASTERY_THRESHOLD, MentorSession, unique_topic_ids,
+};
+use open_course_core::vocabulary::{
+    STATUS_NEW, derive_status, find_form_fuzzy, find_lemma, normalize_feats_key,
+    should_replace_cefr, vocabulary_session_score,
 };
 
 pub async fn apply_analysis(
@@ -142,12 +148,20 @@ pub async fn apply_analysis(
     Ok(final_scores)
 }
 
+/// Returns the final topic masteries plus the ids of every lemma and form
+/// the session touched (created, practiced, or CEFR-updated), so the caller
+/// can emit outbox entries for exactly the rows that changed.
+///
+/// Forced lemmas earn practice credit only through student-side evidence:
+/// `_forced_lemma_ids` is kept for call-site symmetry but a forced lemma
+/// without an observed use is left completely untouched.
 pub async fn apply_analysis_to_db(
-    analysis: &AnalysisResult,
+    analysis: &mut AnalysisResult,
     session: &MentorSession,
     forced_learning_item_ids: &[String],
+    _forced_lemma_ids: &[String],
     db: &crate::Database,
-) -> Result<HashMap<String, f64>> {
+) -> Result<(HashMap<String, f64>, Vec<String>, Vec<String>)> {
     let mut progress = db.progress().read_all().await?;
 
     let mut learning_items: HashMap<String, LearningItem> = db
@@ -241,10 +255,273 @@ pub async fn apply_analysis_to_db(
         db.learning_items().upsert(item).await?;
     }
 
+    // Vocabulary: lemmas and forms mentioned in `used_vocabulary`. Words
+    // from the target sentence (side "target") are only registered as NEW;
+    // words from the student's translation (side "student") carry per-use
+    // assessments and produce scoring evidence. Both sides ensure the
+    // lemma/form exists — student-side evidence needs an entity to attach
+    // to even when the word never appeared in the target sentence.
+    let mut lemmas: Vec<Lemma> = db.lemmas().read_all().await?;
+    let mut forms: Vec<Form> = db.forms().read_all().await?;
+    // Worst-case evidence per entity: the lowest session score across all
+    // observed uses, plus whether any use had an error.
+    let mut lemma_evidence: HashMap<String, (f64, bool)> = HashMap::new();
+    let mut form_evidence: HashMap<String, (f64, bool)> = HashMap::new();
+    let mut created_lemma_ids: Vec<String> = Vec::new();
+    let mut created_form_ids: Vec<String> = Vec::new();
+    // Existing forms whose feats were enriched by a richer incoming variant
+    // through fuzzy-merge; they must be persisted even without evidence.
+    let mut enriched_form_ids: HashSet<String> = HashSet::new();
+    // Lemmas whose CEFR level was upgraded by a higher-ranked source without
+    // any scoring evidence; they still need to be persisted.
+    let mut cefr_updated_lemma_ids: HashSet<String> = HashSet::new();
+
+    for sentence in &analysis.sentences {
+        for vocabulary_use in &sentence.used_vocabulary {
+            if vocabulary_use.lemma.is_empty() {
+                continue;
+            }
+            let cefr = cefr_candidate(
+                session,
+                &existing_curriculum,
+                sentence.sentence_number,
+                vocabulary_use,
+            );
+            let lemma_pos = match find_lemma(
+                &lemmas,
+                &existing_curriculum.target_language,
+                &vocabulary_use.lemma,
+                &vocabulary_use.pos,
+            ) {
+                Some(pos) => {
+                    // Reappearance of a known lemma: a strictly higher-ranked
+                    // source replaces the stored level (topic overrides an
+                    // LLM guess, never the other way round).
+                    if let Some((level, source)) = &cefr
+                        && should_replace_cefr(lemmas[pos].cefr_source.as_deref(), source)
+                    {
+                        lemmas[pos].cefr_level = Some(level.clone());
+                        lemmas[pos].cefr_source = Some(source.to_string());
+                        cefr_updated_lemma_ids.insert(lemmas[pos].id.clone());
+                    }
+                    pos
+                }
+                None => {
+                    let (cefr_level, cefr_source) = match &cefr {
+                        Some((level, source)) => {
+                            (Some(level.clone()), Some(source.to_string()))
+                        }
+                        None => (None, None),
+                    };
+                    let mut lemma = Lemma {
+                        id: Lemma::slug_id(
+                            &vocabulary_use.lemma,
+                            &existing_curriculum.target_language,
+                        ),
+                        lemma: vocabulary_use.lemma.clone(),
+                        pos: vocabulary_use.pos.clone(),
+                        target_lang: existing_curriculum.target_language.clone(),
+                        native_lang: existing_curriculum.native_language.clone(),
+                        status: STATUS_NEW,
+                        cefr_level,
+                        cefr_source,
+                        ..Default::default()
+                    };
+                    // The slug id is taken by a different (lemma, pos):
+                    // disambiguate with a POS suffix.
+                    if lemmas.iter().any(|l| l.id == lemma.id) {
+                        lemma.id =
+                            format!("{}-{}", lemma.id, vocabulary_use.pos.to_lowercase());
+                    }
+                    created_lemma_ids.push(lemma.id.clone());
+                    lemmas.push(lemma);
+                    lemmas.len() - 1
+                }
+            };
+            let lemma_id = lemmas[lemma_pos].id.clone();
+
+            if vocabulary_use.surface.is_empty() {
+                continue;
+            }
+            let feats_key = normalize_feats_key(&vocabulary_use.feats);
+            let form_pos =
+                match find_form_fuzzy(&forms, &lemma_id, &vocabulary_use.surface, &feats_key) {
+                    Some(pos) => {
+                        // Fuzzy hit: the incoming use merges into the existing
+                        // form instead of creating a near-duplicate. When the
+                        // incoming feats set is richer (more segments) than
+                        // the stored one, upgrade feats/feats_key to the
+                        // fuller description and persist the form.
+                        if feats_segment_count(&feats_key)
+                            > feats_segment_count(&forms[pos].feats_key)
+                        {
+                            forms[pos].feats = vocabulary_use.feats.clone();
+                            forms[pos].feats_key = feats_key.clone();
+                            enriched_form_ids.insert(forms[pos].id.clone());
+                        }
+                        Some(pos)
+                    }
+                    None => {
+                        let base_id = Form::id(&lemma_id, &vocabulary_use.surface);
+                        let mut id = base_id.clone();
+                        // feats_key collisions on the same surface get numeric
+                        // suffixes (same pattern as topic_id_from_name).
+                        let mut suffix = 0;
+                        while forms.iter().any(|f| f.id == id) {
+                            suffix += 1;
+                            id = format!("{base_id}-{suffix}");
+                        }
+                        let form = Form {
+                            id,
+                            lemma_id: lemma_id.clone(),
+                            surface: vocabulary_use.surface.clone(),
+                            feats: vocabulary_use.feats.clone(),
+                            feats_key,
+                            status: STATUS_NEW,
+                            ..Default::default()
+                        };
+                        created_form_ids.push(form.id.clone());
+                        forms.push(form);
+                        Some(forms.len() - 1)
+                    }
+                };
+
+            if vocabulary_use.side != "student" {
+                continue;
+            }
+            // A missing assessment (None) is treated conservatively as OK:
+            // the LLM omits the flags when nothing is wrong, so an absent
+            // flag must not penalize the word.
+            let session_score = vocabulary_session_score(
+                vocabulary_use.spelling_ok.unwrap_or(true),
+                vocabulary_use.usage_ok.unwrap_or(true),
+            );
+            let had_error = session_score < 100.0;
+            lemma_evidence
+                .entry(lemma_id.clone())
+                .and_modify(|(score, err)| {
+                    *score = score.min(session_score);
+                    *err = *err || had_error;
+                })
+                .or_insert((session_score, had_error));
+            if let Some(pos) = form_pos {
+                let form_id = forms[pos].id.clone();
+                form_evidence
+                    .entry(form_id)
+                    .and_modify(|(score, err)| {
+                        *score = score.min(session_score);
+                        *err = *err || had_error;
+                    })
+                    .or_insert((session_score, had_error));
+            }
+        }
+    }
+
+    // Scored lemmas: only those with student-side evidence. A forced lemma
+    // the student never used earns no credit — its mastery, counters,
+    // last_seen and status stay untouched and it is not marked touched
+    // (neutral non-use instead of the former soft credit with a perfect
+    // score). Forms likewise score only through evidence.
+    let mut touched_lemma_ids: HashSet<String> = created_lemma_ids.iter().cloned().collect();
+    touched_lemma_ids.extend(cefr_updated_lemma_ids);
+    let mut touched_form_ids: HashSet<String> = created_form_ids.iter().cloned().collect();
+    touched_form_ids.extend(enriched_form_ids);
+
+    for (id, (session_score, had_error)) in &lemma_evidence {
+        if let Some(lemma) = lemmas.iter_mut().find(|l| &l.id == id) {
+            lemma.mastery = ema_update(lemma.mastery, *session_score);
+            lemma.practice_count += 1;
+            if *had_error {
+                lemma.incorrect_uses += 1;
+            } else {
+                lemma.correct_uses += 1;
+            }
+            lemma.last_seen = Some(now.clone());
+            lemma.status = derive_status(lemma.mastery, *had_error);
+            touched_lemma_ids.insert(id.clone());
+        }
+    }
+
+    for (id, (session_score, had_error)) in &form_evidence {
+        if let Some(form) = forms.iter_mut().find(|f| &f.id == id) {
+            form.mastery = ema_update(form.mastery, *session_score);
+            if *had_error {
+                form.incorrect += 1;
+            } else {
+                form.correct += 1;
+            }
+            form.last_seen = Some(now.clone());
+            form.status = derive_status(form.mastery, *had_error);
+            touched_form_ids.insert(id.clone());
+        }
+    }
+
+    // Report the created entities (post-scoring state) so callers can emit
+    // outbox entries and session summaries.
+    analysis.new_lemmas = created_lemma_ids
+        .iter()
+        .filter_map(|id| lemmas.iter().find(|l| &l.id == id).cloned())
+        .collect();
+    analysis.new_forms = created_form_ids
+        .iter()
+        .filter_map(|id| forms.iter().find(|f| &f.id == id).cloned())
+        .collect();
+
+    for lemma in lemmas.iter().filter(|l| touched_lemma_ids.contains(&l.id)) {
+        db.lemmas().upsert(lemma).await?;
+    }
+    for form in forms.iter().filter(|f| touched_form_ids.contains(&f.id)) {
+        db.forms().upsert(form).await?;
+    }
+
     let history = db.history();
     let scores = apply_analysis(analysis, session, &mut progress, &history).await?;
     db.progress().write_all(&progress).await?;
-    Ok(scores)
+    let mut touched_lemmas: Vec<String> = touched_lemma_ids.into_iter().collect();
+    touched_lemmas.sort();
+    let mut touched_forms: Vec<String> = touched_form_ids.into_iter().collect();
+    touched_forms.sort();
+    Ok((scores, touched_lemmas, touched_forms))
+}
+
+/// Number of `key=value` segments in a normalized feats key — used to decide
+/// which of two fuzzy-merged variants carries the richer description.
+fn feats_segment_count(feats_key: &str) -> usize {
+    feats_key.split('|').filter(|s| !s.is_empty()).count()
+}
+
+/// CEFR candidate for a vocabulary use: the minimum valid level among the
+/// curriculum topics targeted by the exercise the sentence belongs to
+/// (source "topic", matching the early-textbook-order guidance given to the
+/// LLM), falling back to the LLM's per-use estimate (source "llm"). Levels
+/// outside `CEFR_LEVELS` are dropped as garbage.
+fn cefr_candidate(
+    session: &MentorSession,
+    curriculum: &Curriculum,
+    sentence_number: i32,
+    vocabulary_use: &VocabularyUse,
+) -> Option<(String, &'static str)> {
+    // sentence_number is 1-based and matches the exercise order (validated
+    // at parse time).
+    if sentence_number >= 1
+        && let Some(exercise) = session.exercises.get((sentence_number - 1) as usize)
+    {
+        let topic_level = exercise
+            .target_topic_ids
+            .iter()
+            .filter_map(|id| curriculum.topics.iter().find(|t| &t.id == id))
+            .filter_map(|t| t.level.as_deref())
+            .filter(|level| CEFR_LEVELS.contains(level))
+            .min_by_key(|level| cefr_to_numeric(level).unwrap_or(i32::MAX));
+        if let Some(level) = topic_level {
+            return Some((level.to_string(), "topic"));
+        }
+    }
+    vocabulary_use
+        .cefr_level
+        .as_deref()
+        .filter(|level| CEFR_LEVELS.contains(level))
+        .map(|level| (level.to_string(), "llm"))
 }
 
 /// Inserts a new learning item, merging fuzzy name duplicates into the

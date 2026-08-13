@@ -1,8 +1,10 @@
 use lancedb::connect;
 
 use crate::curriculum::{CurriculumTable, TABLE_NAME as CURRICULUM_TABLE};
+use crate::forms::FormsTable;
 use crate::history::HistoryTable;
 use crate::learning_items::LearningItemsTable;
+use crate::lemmas::LemmasTable;
 use crate::metadata::MetadataTable;
 use crate::outbox::OutboxTable;
 use crate::progress::ProgressTable;
@@ -12,8 +14,10 @@ use open_course_core::error::Result;
 pub mod apply;
 pub mod curriculum;
 pub mod error;
+pub mod forms;
 pub mod history;
 pub mod learning_items;
+pub mod lemmas;
 pub mod metadata;
 pub mod migrations;
 pub mod outbox;
@@ -28,6 +32,8 @@ pub struct Database {
     history: HistoryTable,
     reviews: ReviewsTable,
     learning_items: LearningItemsTable,
+    lemmas: LemmasTable,
+    forms: FormsTable,
     metadata: MetadataTable,
     outbox: OutboxTable,
 }
@@ -49,6 +55,8 @@ impl Database {
         let history = HistoryTable::open(&connection).await?;
         let reviews = ReviewsTable::open(&connection).await?;
         let learning_items = LearningItemsTable::open(&connection).await?;
+        let lemmas = LemmasTable::open(&connection).await?;
+        let forms = FormsTable::open(&connection).await?;
         let outbox = OutboxTable::open(&connection).await?;
         Ok(Self {
             curriculum,
@@ -56,6 +64,8 @@ impl Database {
             history,
             reviews,
             learning_items,
+            lemmas,
+            forms,
             metadata,
             outbox,
         })
@@ -89,6 +99,14 @@ impl Database {
 
     pub fn learning_items(&self) -> LearningItemsTable {
         self.learning_items.clone()
+    }
+
+    pub fn lemmas(&self) -> LemmasTable {
+        self.lemmas.clone()
+    }
+
+    pub fn forms(&self) -> FormsTable {
+        self.forms.clone()
     }
 
     pub fn metadata(&self) -> MetadataTable {
