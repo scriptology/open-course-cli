@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/scriptology/open-course-cli/compare/v0.12.0...v0.13.0) (2026-08-13)
+
+
+### Features
+
+* vocabulary system with lemmas, UD forms, and CEFR levels ([86093b5](https://github.com/scriptology/open-course-cli/commit/86093b58f837aa209727e8c995e728f95a71ed4e))
+* vocabulary system with lemmas, UD forms, and CEFR levels ([552dda5](https://github.com/scriptology/open-course-cli/commit/552dda536ca1378c4e3934716b288f33a2561e34))
+
 ## [0.12.0](https://github.com/scriptology/open-course-cli/compare/v0.11.6...v0.12.0) (2026-08-12)
 
 
