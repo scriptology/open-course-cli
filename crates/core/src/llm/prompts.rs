@@ -612,7 +612,6 @@ pub fn build_new_topic_metadata_prompt(profile: &UserProfile, new_topic: &NewTop
     )
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

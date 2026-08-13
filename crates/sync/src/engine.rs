@@ -8,8 +8,8 @@ use crate::client::{SyncClient, check_status};
 use crate::error::{PushError, SyncError};
 use crate::protocol::{
     Change, ConflictBody, PullResponse, PushRequest, PushResponse, entity_is_form,
-    entity_is_learning_item, entity_is_lemma, entity_to_wire, op_is_delete,
-    op_is_tombstone_reset, op_is_upsert, op_to_wire,
+    entity_is_learning_item, entity_is_lemma, entity_to_wire, op_is_delete, op_is_tombstone_reset,
+    op_is_upsert, op_to_wire,
 };
 
 /// How far past the current time a local `updated_at` may be before it is
@@ -317,12 +317,8 @@ async fn apply_delete(db: &Database, change: &Change) -> Result<(), SyncError> {
         entity if entity_is_learning_item(entity) => {
             db.learning_items().delete_by_id(&change.entity_id).await?
         }
-        entity if entity_is_lemma(entity) => {
-            db.lemmas().delete_by_id(&change.entity_id).await?
-        }
-        entity if entity_is_form(entity) => {
-            db.forms().delete_by_id(&change.entity_id).await?
-        }
+        entity if entity_is_lemma(entity) => db.lemmas().delete_by_id(&change.entity_id).await?,
+        entity if entity_is_form(entity) => db.forms().delete_by_id(&change.entity_id).await?,
         // Sessions are append-only and never deleted; metadata keys have no
         // delete operation.
         _ => {}

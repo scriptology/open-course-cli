@@ -314,12 +314,7 @@ mod tests {
     use lancedb::connect;
     use tempfile::TempDir;
 
-    fn make_lemma(
-        id: &str,
-        status: i32,
-        mastery: f64,
-        last_seen: Option<&str>,
-    ) -> Lemma {
+    fn make_lemma(id: &str, status: i32, mastery: f64, last_seen: Option<&str>) -> Lemma {
         Lemma {
             id: id.to_string(),
             lemma: id.to_string(),
@@ -361,8 +356,18 @@ mod tests {
         let lemmas = vec![
             make_lemma("recent", STATUS_NEW, 40.0, Some("2024-01-10T00:00:00Z")),
             make_lemma("never", STATUS_NEW, 40.0, None),
-            make_lemma("older", STATUS_PRACTICING, 40.0, Some("2024-01-01T00:00:00Z")),
-            make_lemma("weakest", STATUS_PRACTICING, 10.0, Some("2024-02-01T00:00:00Z")),
+            make_lemma(
+                "older",
+                STATUS_PRACTICING,
+                40.0,
+                Some("2024-01-01T00:00:00Z"),
+            ),
+            make_lemma(
+                "weakest",
+                STATUS_PRACTICING,
+                10.0,
+                Some("2024-02-01T00:00:00Z"),
+            ),
         ];
         let weak = LemmasTable::weakest(&lemmas, 4, None);
         let ids: Vec<&str> = weak.iter().map(|l| l.id.as_str()).collect();

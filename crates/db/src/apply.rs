@@ -308,9 +308,7 @@ pub async fn apply_analysis_to_db(
                 }
                 None => {
                     let (cefr_level, cefr_source) = match &cefr {
-                        Some((level, source)) => {
-                            (Some(level.clone()), Some(source.to_string()))
-                        }
+                        Some((level, source)) => (Some(level.clone()), Some(source.to_string())),
                         None => (None, None),
                     };
                     let mut lemma = Lemma {
@@ -330,8 +328,7 @@ pub async fn apply_analysis_to_db(
                     // The slug id is taken by a different (lemma, pos):
                     // disambiguate with a POS suffix.
                     if lemmas.iter().any(|l| l.id == lemma.id) {
-                        lemma.id =
-                            format!("{}-{}", lemma.id, vocabulary_use.pos.to_lowercase());
+                        lemma.id = format!("{}-{}", lemma.id, vocabulary_use.pos.to_lowercase());
                     }
                     created_lemma_ids.push(lemma.id.clone());
                     lemmas.push(lemma);

@@ -10,8 +10,8 @@ use open_course_cli::core::session::{
 use open_course_cli::db::Database;
 use open_course_cli::db::apply::{apply_analysis, apply_analysis_to_db};
 use open_course_cli::db::curriculum::{Curriculum, Difficulty, Topic};
-use open_course_cli::db::learning_items::{LearningItem, LearningItemsTable};
 use open_course_cli::db::forms::Form;
+use open_course_cli::db::learning_items::{LearningItem, LearningItemsTable};
 use open_course_cli::db::lemmas::{Lemma, STATUS_PRACTICING};
 use open_course_cli::db::progress::{ProgressData, ProgressTopic};
 
@@ -759,9 +759,15 @@ async fn learning_item_mentioned_in_error_scores_0() {
         "Las sillas eran rico",
         errors,
     );
-    apply_analysis_to_db(&mut analysis, &session, &["es-caro-rico".to_string()], &[], &db)
-        .await
-        .unwrap();
+    apply_analysis_to_db(
+        &mut analysis,
+        &session,
+        &["es-caro-rico".to_string()],
+        &[],
+        &db,
+    )
+    .await
+    .unwrap();
 
     let updated = db.learning_items().read_all().await.unwrap();
     assert_eq!(updated.len(), 1);
@@ -791,9 +797,15 @@ async fn learning_item_matches_by_significant_words_not_full_name() {
         "Она сказала это громко",
         errors,
     );
-    apply_analysis_to_db(&mut analysis, &session, &["es-vsluh-aloud".to_string()], &[], &db)
-        .await
-        .unwrap();
+    apply_analysis_to_db(
+        &mut analysis,
+        &session,
+        &["es-vsluh-aloud".to_string()],
+        &[],
+        &db,
+    )
+    .await
+    .unwrap();
 
     let updated = db.learning_items().read_all().await.unwrap();
     assert_eq!(updated.len(), 1);
@@ -820,9 +832,15 @@ async fn forced_item_with_foreign_name_still_gets_credit() {
         "Mi colega compró una mesa",
         vec![],
     );
-    apply_analysis_to_db(&mut analysis, &session, &["es-colleague".to_string()], &[], &db)
-        .await
-        .unwrap();
+    apply_analysis_to_db(
+        &mut analysis,
+        &session,
+        &["es-colleague".to_string()],
+        &[],
+        &db,
+    )
+    .await
+    .unwrap();
 
     let updated = db.learning_items().read_all().await.unwrap();
     assert_eq!(updated.len(), 1);
@@ -847,9 +865,15 @@ async fn clean_sessions_graduate_item_out_of_weakest() {
             "Mi colega compró una mesa",
             vec![],
         );
-        apply_analysis_to_db(&mut analysis, &session, &["es-colleague".to_string()], &[], &db)
-            .await
-            .unwrap();
+        apply_analysis_to_db(
+            &mut analysis,
+            &session,
+            &["es-colleague".to_string()],
+            &[],
+            &db,
+        )
+        .await
+        .unwrap();
     }
 
     let updated = db.learning_items().read_all().await.unwrap();
@@ -1268,7 +1292,10 @@ async fn apply_assigns_cefr_from_target_topic() {
     // The exercise targets two leveled topics: the lemma takes the minimum.
     let db = vocabulary_db(
         &dir,
-        vec![make_level_topic("t-b1", "B1"), make_level_topic("t-a2", "A2")],
+        vec![
+            make_level_topic("t-b1", "B1"),
+            make_level_topic("t-a2", "A2"),
+        ],
     )
     .await;
 
@@ -1536,10 +1563,7 @@ async fn forced_lemma_without_evidence_is_untouched() {
     assert_eq!(stored[0].mastery, 40.0);
     assert_eq!(stored[0].practice_count, 2);
     assert_eq!(stored[0].correct_uses, 1);
-    assert_eq!(
-        stored[0].last_seen.as_deref(),
-        Some("2024-01-01T00:00:00Z")
-    );
+    assert_eq!(stored[0].last_seen.as_deref(), Some("2024-01-01T00:00:00Z"));
     assert_eq!(stored[0].status, STATUS_PRACTICING);
 }
 
@@ -1574,8 +1598,5 @@ async fn forced_lemma_with_evidence_scores_as_before() {
     assert_eq!(stored[0].mastery, 60.0);
     assert_eq!(stored[0].practice_count, 3);
     assert_eq!(stored[0].correct_uses, 2);
-    assert_ne!(
-        stored[0].last_seen.as_deref(),
-        Some("2024-01-01T00:00:00Z")
-    );
+    assert_ne!(stored[0].last_seen.as_deref(), Some("2024-01-01T00:00:00Z"));
 }

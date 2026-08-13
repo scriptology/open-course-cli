@@ -327,8 +327,7 @@ async fn outbox_after_apply(
     touched_form_ids: &[String],
 ) {
     use open_course_db::outbox::{
-        ENTITY_FORM, ENTITY_LEARNING_ITEM, ENTITY_LEMMA, ENTITY_PROGRESS, ENTITY_SESSION,
-        OP_UPSERT,
+        ENTITY_FORM, ENTITY_LEARNING_ITEM, ENTITY_LEMMA, ENTITY_PROGRESS, ENTITY_SESSION, OP_UPSERT,
     };
 
     if let Ok(history) = db.history().read_all().await
@@ -413,7 +412,8 @@ fn frontier_cefr(topics: &[Topic], progress: &ProgressData) -> Option<i32> {
         .min()
 }
 
-fn user_cefr_numeric(config: &OpenCourseConfig) -> i32 {    cefr_to_numeric(
+fn user_cefr_numeric(config: &OpenCourseConfig) -> i32 {
+    cefr_to_numeric(
         config
             .active_profile()
             .self_assessed_cefr

@@ -324,16 +324,10 @@ mod tests {
         };
         let analysis = analysis_with(error, vec![failed_use]);
 
-        let result = finalize_analysis_with_new_topics(
-            &NoopClient,
-            &profile(),
-            &[],
-            analysis,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let result =
+            finalize_analysis_with_new_topics(&NoopClient, &profile(), &[], analysis, None, None)
+                .await
+                .unwrap();
 
         assert!(result.new_learning_items.is_empty());
         assert!(result.new_topics.is_empty());
@@ -364,22 +358,13 @@ mod tests {
         };
         let analysis = analysis_with(error, vec![unrelated_use]);
 
-        let result = finalize_analysis_with_new_topics(
-            &NoopClient,
-            &profile(),
-            &[],
-            analysis,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let result =
+            finalize_analysis_with_new_topics(&NoopClient, &profile(), &[], analysis, None, None)
+                .await
+                .unwrap();
 
         assert_eq!(result.new_learning_items.len(), 1);
-        assert_eq!(
-            result.new_learning_items[0].name,
-            "Adjective: Caro vs Rico"
-        );
+        assert_eq!(result.new_learning_items[0].name, "Adjective: Caro vs Rico");
         assert!(result.new_topics.is_empty());
     }
 }

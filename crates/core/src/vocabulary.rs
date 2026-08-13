@@ -228,7 +228,12 @@ pub fn find_lemma(existing: &[Lemma], target_lang: &str, lemma: &str, pos: &str)
 /// Index of the existing form matching `(lemma_id, feats_key)`. Falls back
 /// to a surface match when `feats_key` is empty, so malformed LLM feats do
 /// not produce duplicate forms.
-pub fn find_form(existing: &[Form], lemma_id: &str, surface: &str, feats_key: &str) -> Option<usize> {
+pub fn find_form(
+    existing: &[Form],
+    lemma_id: &str,
+    surface: &str,
+    feats_key: &str,
+) -> Option<usize> {
     existing.iter().position(|f| {
         f.lemma_id == lemma_id
             && if feats_key.is_empty() {
@@ -320,7 +325,10 @@ mod tests {
         assert_eq!(normalize_feats_key(""), "");
         assert_eq!(normalize_feats_key("|| |"), "");
         // Malformed segments are kept, not dropped.
-        assert_eq!(normalize_feats_key("bogus|Number=Sing"), "bogus|number=sing");
+        assert_eq!(
+            normalize_feats_key("bogus|Number=Sing"),
+            "bogus|number=sing"
+        );
     }
 
     #[test]
@@ -409,7 +417,10 @@ mod tests {
     #[test]
     fn ids_are_deterministic() {
         assert_eq!(Lemma::slug_id("comer", "es"), "es-comer");
-        assert_eq!(Lemma::slug_id("Pequeño/Pequeña", "es"), "es-pequeno-pequena");
+        assert_eq!(
+            Lemma::slug_id("Pequeño/Pequeña", "es"),
+            "es-pequeno-pequena"
+        );
         assert_eq!(Form::id("es-comer", "comí"), "es-comer--comi");
         assert_eq!(Form::id("es-comer", "Comí"), "es-comer--comi");
     }
@@ -473,12 +484,22 @@ mod tests {
         ];
         // Same lemma and feats_key -> duplicate.
         assert_eq!(
-            find_form(&existing, "es-comer", "como", "Mood=Ind|Number=Sing|Person=1"),
+            find_form(
+                &existing,
+                "es-comer",
+                "como",
+                "Mood=Ind|Number=Sing|Person=1"
+            ),
             Some(0)
         );
         // Different feats_key -> distinct form.
         assert_eq!(
-            find_form(&existing, "es-comer", "como", "Mood=Ind|Number=Plur|Person=1"),
+            find_form(
+                &existing,
+                "es-comer",
+                "como",
+                "Mood=Ind|Number=Plur|Person=1"
+            ),
             None
         );
         // Empty feats_key falls back to the surface match.

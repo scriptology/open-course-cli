@@ -1352,7 +1352,6 @@ async fn backfill_is_safe_to_repeat() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // Vocabulary: lemma and form sync (single-word entities, no wire mapping)
 // ---------------------------------------------------------------------------
@@ -1395,7 +1394,11 @@ async fn pull_applies_lemma_and_form_upserts_with_lww() {
         .await
         .unwrap();
     let stale_lemma = lemma("es-hablar", 10.0, Some("2025-01-01T00:00:00Z"));
-    let new_form = form("es-hablar--hablo", "es-hablar", Some("2025-01-01T00:00:00Z"));
+    let new_form = form(
+        "es-hablar--hablo",
+        "es-hablar",
+        Some("2025-01-01T00:00:00Z"),
+    );
     seed_changes(
         &state,
         vec![
@@ -1430,10 +1433,7 @@ async fn pull_applies_lemma_and_form_upserts_with_lww() {
     let forms = db.forms().read_all().await.unwrap();
     assert_eq!(forms.len(), 1);
     assert_eq!(forms[0].surface, "hablo");
-    assert_eq!(
-        forms[0].updated_at.as_deref(),
-        Some("2025-01-01T00:00:00Z")
-    );
+    assert_eq!(forms[0].updated_at.as_deref(), Some("2025-01-01T00:00:00Z"));
 }
 
 #[tokio::test]
@@ -1598,8 +1598,7 @@ async fn roundtrip_lemma_between_two_clients() {
         .into_iter()
         .find(|l| l.id == "es-hablar")
         .unwrap();
-    db_a
-        .outbox()
+    db_a.outbox()
         .append(
             OP_UPSERT,
             ENTITY_LEMMA,
