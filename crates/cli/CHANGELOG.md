@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/scriptology/open-course-cli/compare/v0.14.0...v0.15.0) (2026-08-14)
+
+
+### Features
+
+* **core:** show warmup cards only for words present in exercises ([c6e5aae](https://github.com/scriptology/open-course-cli/commit/c6e5aae6fb8487bffdbf6395e5e99682dc007d09))
+
 ## [0.14.0](https://github.com/scriptology/open-course-cli/compare/v0.13.0...v0.14.0) (2026-08-13)
 
 
