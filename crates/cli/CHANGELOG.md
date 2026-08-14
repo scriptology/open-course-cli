@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.15.1](https://github.com/scriptology/open-course-cli/compare/v0.15.0...v0.15.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **vocabulary:** apply the warm-up card cap after skipping untranslated lemmas ([54b7717](https://github.com/scriptology/open-course-cli/commit/54b77174430266873650b2422b74cf4d464cf911))
+* **vocabulary:** apply the warm-up card cap after skipping untranslated lemmas ([559dd4d](https://github.com/scriptology/open-course-cli/commit/559dd4d8736cf4f814fd1df6f9ab9497f545fb8e))
+* **vocabulary:** first session contact moves words new-&gt;practicing ([a2585c0](https://github.com/scriptology/open-course-cli/commit/a2585c094dc4ad34bce4bbe7150239bf66383554))
+* **vocabulary:** first session contact moves words new-&gt;practicing ([cec4dc6](https://github.com/scriptology/open-course-cli/commit/cec4dc6a44d8761bb8911f80aa7dc04327c7ea8f))
+
 ## [0.15.0](https://github.com/scriptology/open-course-cli/compare/v0.14.0...v0.15.0) (2026-08-14)
 
 
