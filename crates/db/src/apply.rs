@@ -434,7 +434,7 @@ pub async fn apply_analysis_to_db(
                 lemma.correct_uses += 1;
             }
             lemma.last_seen = Some(now.clone());
-            lemma.status = derive_status(lemma.mastery, *had_error);
+            lemma.status = derive_status(lemma.mastery, *had_error, lemma.practice_count > 0);
             touched_lemma_ids.insert(id.clone());
         }
     }
@@ -448,7 +448,8 @@ pub async fn apply_analysis_to_db(
                 form.correct += 1;
             }
             form.last_seen = Some(now.clone());
-            form.status = derive_status(form.mastery, *had_error);
+            form.status =
+                derive_status(form.mastery, *had_error, form.correct + form.incorrect > 0);
             touched_form_ids.insert(id.clone());
         }
     }
