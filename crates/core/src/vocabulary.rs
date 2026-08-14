@@ -301,13 +301,18 @@ pub fn should_replace_cefr(existing_source: Option<&str>, new_source: &str) -> b
     cefr_source_rank(Some(new_source)) > cefr_source_rank(existing_source)
 }
 
-/// Vocabulary status derived from mastery: 0 below 50, 1 from 50, 2 from 80.
-/// An observed error caps the status at `STATUS_PRACTICING`: one mistake
-/// means the word is not fully known yet.
-pub fn derive_status(mastery: f64, had_error: bool) -> i32 {
+/// Vocabulary status derived from mastery and practice history: 0 when the
+/// word has never been practiced, 1 from a mastery of 50 or once the word has
+/// been contacted at least once (`practiced`), 2 from a mastery of 80.
+///
+/// `new` = never appeared in the student's output; `practicing` = has been
+/// seen/used (even with an error) but not yet mastered; `known` = mastered.
+/// An observed error caps the status at `STATUS_PRACTICING`: a mistake means
+/// the word is not fully known yet, regardless of mastery.
+pub fn derive_status(mastery: f64, had_error: bool, practiced: bool) -> i32 {
     let base = if mastery >= COMPLETED_THRESHOLD {
         STATUS_KNOWN
-    } else if mastery >= MASTERY_THRESHOLD {
+    } else if mastery >= MASTERY_THRESHOLD || practiced {
         STATUS_PRACTICING
     } else {
         STATUS_NEW
@@ -509,19 +514,24 @@ mod tests {
 
     #[test]
     fn derive_status_thresholds() {
-        assert_eq!(derive_status(0.0, false), STATUS_NEW);
-        assert_eq!(derive_status(49.9, false), STATUS_NEW);
-        assert_eq!(derive_status(50.0, false), STATUS_PRACTICING);
-        assert_eq!(derive_status(79.9, false), STATUS_PRACTICING);
-        assert_eq!(derive_status(80.0, false), STATUS_KNOWN);
-        assert_eq!(derive_status(100.0, false), STATUS_KNOWN);
+        assert_eq!(derive_status(0.0, false, false), STATUS_NEW);
+        assert_eq!(derive_status(49.9, false, false), STATUS_NEW);
+        assert_eq!(derive_status(50.0, false, false), STATUS_PRACTICING);
+        assert_eq!(derive_status(79.9, false, false), STATUS_PRACTICING);
+        assert_eq!(derive_status(80.0, false, false), STATUS_KNOWN);
+        assert_eq!(derive_status(100.0, false, false), STATUS_KNOWN);
+
+        assert_eq!(derive_status(34.0, false, true), STATUS_PRACTICING);
+        assert_eq!(derive_status(0.0, false, true), STATUS_PRACTICING);
     }
 
     #[test]
     fn derive_status_error_caps_at_practicing() {
-        assert_eq!(derive_status(95.0, true), STATUS_PRACTICING);
-        assert_eq!(derive_status(60.0, true), STATUS_PRACTICING);
-        assert_eq!(derive_status(10.0, true), STATUS_NEW);
+        assert_eq!(derive_status(95.0, true, false), STATUS_PRACTICING);
+        assert_eq!(derive_status(60.0, true, false), STATUS_PRACTICING);
+        assert_eq!(derive_status(34.0, true, true), STATUS_PRACTICING);
+        assert_eq!(derive_status(0.0, true, true), STATUS_PRACTICING);
+        assert_eq!(derive_status(10.0, true, false), STATUS_NEW);
     }
 
     #[test]
