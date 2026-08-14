@@ -246,7 +246,6 @@ pub fn match_warmup_items(
             appears
                 || (known_forms.is_none_or(|forms| forms.is_empty()) && by_key.contains_key(&key))
         })
-        .take(MAX_WARMUP_ITEMS)
         .filter_map(|lemma| {
             let key = normalize_key(&lemma.lemma);
             let item = match by_key.get(&key) {
@@ -279,6 +278,9 @@ pub fn match_warmup_items(
                 Some(item)
             }
         })
+        // Cap cards, not candidate lemmas: a translation-less lemma must not
+        // eat a slot that a later translated lemma could have filled.
+        .take(MAX_WARMUP_ITEMS)
         .collect()
 }
 
@@ -1010,5 +1012,21 @@ mod tests {
         assert_eq!(items.len(), MAX_WARMUP_ITEMS);
         let lemmas: Vec<&str> = items.iter().map(|i| i.lemma.as_str()).collect();
         assert_eq!(lemmas, ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]);
+    }
+
+    #[test]
+    fn warmup_cap_applies_after_skipping_untranslated() {
+        // Ten qualifying lemmas, the first without a translation: the cap
+        // applies to cards, not to candidate lemmas, so the list still fills
+        // up to eight (w1..w8) instead of stopping at seven.
+        let mut forced = vec![forced_lemma("es-w0", "w0", "")];
+        forced.extend((1..10).map(|i| forced_lemma(&format!("es-w{i}"), &format!("w{i}"), "t")));
+        let raw: Vec<_> = (0..10)
+            .map(|i| raw_warmup(&format!("w{i}"), None, None))
+            .collect();
+        let items = match_warmup_items(&forced, &[], &[], raw);
+        assert_eq!(items.len(), MAX_WARMUP_ITEMS);
+        assert_eq!(items[0].lemma, "w1");
+        assert_eq!(items[MAX_WARMUP_ITEMS - 1].lemma, "w8");
     }
 }
