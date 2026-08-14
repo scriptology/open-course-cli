@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/scriptology/open-course-cli/compare/v0.15.0...v0.15.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* vocabulary: first session contact moves words new->practicing ([cec4dc6](https://github.com/scriptology/open-course-cli/commit/cec4dc6a44d8761bb8911f80aa7dc04327c7ea8f))
+
 ## [0.15.0](https://github.com/scriptology/open-course-cli/compare/v0.14.0...v0.15.0) (2026-08-14)
 
 
