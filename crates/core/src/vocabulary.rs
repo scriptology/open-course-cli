@@ -180,15 +180,34 @@ fn non_empty(value: Option<String>) -> Option<String> {
     })
 }
 
+/// Normalized word tokens of every exercise's target sentence: the sentence
+/// is split on non-alphanumeric characters and each token is folded through
+/// `normalize_key`.
+fn exercise_tokens(exercises: &[crate::session::Exercise]) -> HashSet<String> {
+    exercises
+        .iter()
+        .flat_map(|ex| ex.target_sentence.split(|c: char| !c.is_alphanumeric()))
+        .map(normalize_key)
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
 /// Builds warm-up cards for a session's forced lemmas from the LLM's raw
-/// `warmup` output. Cards follow the forced-lemma order and are capped at
-/// `MAX_WARMUP_ITEMS`. A raw entry whose lemma matches (via `normalize_key`)
-/// supplies the translation and example; unmatched forced lemmas fall back
-/// to the stored translation with no example. Lemmas without any translation
-/// are skipped (there is nothing to teach), and raw entries matching no
-/// forced lemma are dropped.
+/// `warmup` output. Only words that actually appear in the session's
+/// exercises get a card: a forced lemma qualifies when its headword or one
+/// of its known forms (matched via `normalize_key` against the exercise
+/// tokens) shows up in a target sentence. A lemma with no known forms is
+/// also included when the LLM returned a warm-up entry for it (a new word
+/// whose inflections cannot be verified yet). Cards follow the forced-lemma
+/// order and are capped at `MAX_WARMUP_ITEMS`. A raw entry whose lemma
+/// matches supplies the translation and example; otherwise the stored
+/// translation is used with no example. Lemmas without any translation are
+/// skipped (there is nothing to teach), and raw entries matching no forced
+/// lemma are dropped.
 pub fn match_warmup_items(
     forced: &[Lemma],
+    forms: &[Form],
+    exercises: &[crate::session::Exercise],
     raw: Vec<crate::llm::parse::RawWarmupItem>,
 ) -> Vec<crate::session::WarmupItem> {
     use std::collections::HashMap;
@@ -202,8 +221,31 @@ pub fn match_warmup_items(
         by_key.entry(key).or_insert(item);
     }
 
+    let tokens = exercise_tokens(exercises);
+    let mut forms_by_lemma: HashMap<&str, Vec<&Form>> = HashMap::new();
+    for form in forms {
+        forms_by_lemma
+            .entry(form.lemma_id.as_str())
+            .or_default()
+            .push(form);
+    }
+
     forced
         .iter()
+        .filter(|lemma| {
+            let key = normalize_key(&lemma.lemma);
+            let known_forms = forms_by_lemma.get(lemma.id.as_str());
+            let appears = tokens.contains(&key)
+                || known_forms.is_some_and(|forms| {
+                    forms
+                        .iter()
+                        .any(|f| tokens.contains(&normalize_key(&f.surface)))
+                });
+            // A form-less lemma cannot be verified against the exercises, so
+            // an LLM warm-up entry is trusted on its own.
+            appears
+                || (known_forms.is_none_or(|forms| forms.is_empty()) && by_key.contains_key(&key))
+        })
         .take(MAX_WARMUP_ITEMS)
         .filter_map(|lemma| {
             let key = normalize_key(&lemma.lemma);
@@ -785,11 +827,33 @@ mod tests {
         }
     }
 
+    fn exercise(target_sentence: &str) -> crate::session::Exercise {
+        crate::session::Exercise {
+            id: "ex1".to_string(),
+            target_sentence: target_sentence.to_string(),
+            expected_translation: String::new(),
+            acceptable_translations: vec![],
+            target_topic_ids: vec![],
+            side_topic_ids: vec![],
+            expected_patterns: vec![],
+            hint: None,
+        }
+    }
+
+    fn known_form(lemma_id: &str, surface: &str) -> Form {
+        Form {
+            id: Form::id(lemma_id, surface),
+            lemma_id: lemma_id.to_string(),
+            surface: surface.to_string(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn warmup_match_uses_llm_translation_and_example() {
         let forced = vec![forced_lemma("es-comer", "comer", "есть")];
         let raw = vec![raw_warmup("Comer", Some("кушать"), Some("Como pan."))];
-        let items = match_warmup_items(&forced, raw);
+        let items = match_warmup_items(&forced, &[], &[], raw);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].lemma_id.as_deref(), Some("es-comer"));
         // The display form comes from the stored lemma, not the LLM casing.
@@ -803,20 +867,21 @@ mod tests {
     fn warmup_match_falls_back_to_stored_translation() {
         let forced = vec![forced_lemma("es-comer", "comer", "есть")];
         let raw = vec![raw_warmup("comer", None, None)];
-        let items = match_warmup_items(&forced, raw);
+        let items = match_warmup_items(&forced, &[], &[], raw);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].translation, "есть");
         assert_eq!(items[0].example, None);
     }
 
     #[test]
-    fn warmup_unmatched_lemma_uses_stored_data() {
+    fn warmup_lemma_in_exercise_without_llm_entry_uses_stored_data() {
         let forced = vec![{
             let mut l = forced_lemma("es-comer", "comer", "есть");
             l.cefr_level = Some("A2".to_string());
             l
         }];
-        let items = match_warmup_items(&forced, vec![]);
+        let exercises = vec![exercise("Quiero comer pan.")];
+        let items = match_warmup_items(&forced, &[], &exercises, vec![]);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].translation, "есть");
         assert_eq!(items[0].cefr_level.as_deref(), Some("A2"));
@@ -824,13 +889,78 @@ mod tests {
     }
 
     #[test]
+    fn warmup_excludes_lemma_absent_from_exercises_without_llm_entry() {
+        let forced = vec![
+            forced_lemma("es-comer", "comer", "есть"),
+            forced_lemma("es-beber", "beber", "пить"),
+        ];
+        // Only "comer" shows up in the exercises; "beber" has no known
+        // forms and no LLM entry, so it gets no card.
+        let exercises = vec![exercise("Quiero comer pan.")];
+        let items = match_warmup_items(&forced, &[], &exercises, vec![]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "comer");
+
+        // Known forms that also never appear do not rescue the lemma.
+        let forms = vec![known_form("es-beber", "bebo")];
+        let items = match_warmup_items(&forced, &forms, &exercises, vec![]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "comer");
+    }
+
+    #[test]
+    fn warmup_matches_inflected_form_in_exercise() {
+        let forced = vec![forced_lemma("es-hablar", "hablar", "говорить")];
+        let forms = vec![known_form("es-hablar", "hablo")];
+        let exercises = vec![exercise("Hablo con Maria.")];
+        let items = match_warmup_items(&forced, &forms, &exercises, vec![]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "hablar");
+        assert_eq!(items[0].translation, "говорить");
+    }
+
+    #[test]
+    fn warmup_matching_is_case_insensitive_but_keeps_diacritics() {
+        let forced = vec![
+            forced_lemma("es-comer", "Comer", "есть"),
+            forced_lemma("es-ano", "ano", "год (без тильды)"),
+        ];
+        // "COMER" matches case-insensitively; "año" must not match "ano".
+        let exercises = vec![exercise("COMER pan este año.")];
+        let items = match_warmup_items(&forced, &[], &exercises, vec![]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "Comer");
+    }
+
+    #[test]
+    fn warmup_formless_lemma_with_llm_entry_is_trusted() {
+        let forced = vec![
+            forced_lemma("es-comer", "comer", "есть"),
+            forced_lemma("es-hablar", "hablar", "говорить"),
+        ];
+        // "hablar" has a known form that never appears, so its LLM entry is
+        // not enough; "comer" has no forms and is trusted.
+        let forms = vec![known_form("es-hablar", "hablo")];
+        let raw = vec![
+            raw_warmup("comer", Some("кушать"), None),
+            raw_warmup("hablar", Some("разговаривать"), None),
+        ];
+        let items = match_warmup_items(&forced, &forms, &[], raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "comer");
+        assert_eq!(items[0].translation, "кушать");
+    }
+
+    #[test]
     fn warmup_skips_lemmas_without_translation() {
-        // Unmatched and no stored translation: nothing to teach.
+        // Present in an exercise but with no stored translation: nothing to
+        // teach.
         let forced = vec![
             forced_lemma("es-comer", "comer", "есть"),
             forced_lemma("es-ser", "ser", ""),
         ];
-        let items = match_warmup_items(&forced, vec![]);
+        let exercises = vec![exercise("Quiero comer y ser feliz.")];
+        let items = match_warmup_items(&forced, &[], &exercises, vec![]);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].lemma, "comer");
 
@@ -838,7 +968,7 @@ mod tests {
         // one is empty too: skipped as well.
         let forced = vec![forced_lemma("es-ser", "ser", "")];
         let raw = vec![raw_warmup("ser", Some(""), Some("Soy yo."))];
-        assert!(match_warmup_items(&forced, raw).is_empty());
+        assert!(match_warmup_items(&forced, &[], &[], raw).is_empty());
     }
 
     #[test]
@@ -850,7 +980,7 @@ mod tests {
             // Empty lemmas never match anything.
             raw_warmup("", Some("y"), None),
         ];
-        let items = match_warmup_items(&forced, raw);
+        let items = match_warmup_items(&forced, &[], &[], raw);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].lemma, "comer");
     }
@@ -866,7 +996,7 @@ mod tests {
             .rev()
             .map(|i| raw_warmup(&format!("w{i}"), None, None))
             .collect();
-        let items = match_warmup_items(&forced, raw);
+        let items = match_warmup_items(&forced, &[], &[], raw);
         assert_eq!(items.len(), MAX_WARMUP_ITEMS);
         let lemmas: Vec<&str> = items.iter().map(|i| i.lemma.as_str()).collect();
         assert_eq!(lemmas, ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]);

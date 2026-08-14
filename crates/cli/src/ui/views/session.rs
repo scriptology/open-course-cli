@@ -530,11 +530,13 @@ pub(crate) async fn start_exercises_for_topic(
     let tx = state.llm_tx.clone();
     let prompt = preparation.prompt;
     let forced_lemmas = preparation.forced_lemmas;
+    let forced_forms = preparation.forced_forms;
     tokio::spawn(async move {
         let result = open_course_service::session::generate_session_exercises(
             &config,
             &prompt,
             &forced_lemmas,
+            &forced_forms,
             &tx,
             Some(data_dir.as_path()),
         )

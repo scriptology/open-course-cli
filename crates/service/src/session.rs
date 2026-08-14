@@ -15,7 +15,7 @@ use open_course_core::session::{
     NextSessionTopic, pick_next_session_topic, recent_success_rate, select_side_topics,
     unique_topic_ids,
 };
-use open_course_core::vocabulary::{Lemma, match_warmup_items};
+use open_course_core::vocabulary::{Form, Lemma, match_warmup_items};
 use open_course_db::Database;
 use open_course_db::apply::apply_analysis_to_db;
 use open_course_db::curriculum::{Topic, cefr_to_numeric};
@@ -41,6 +41,9 @@ pub struct ExercisePreparation {
     /// The full forced-vocabulary lemmas behind `forced_lemma_ids`, kept for
     /// the warm-up phase shown before the exercises.
     pub forced_lemmas: Vec<Lemma>,
+    /// Known inflected forms of the forced lemmas, used to match warm-up
+    /// cards against the words the exercises actually contain.
+    pub forced_forms: Vec<Form>,
 }
 
 /// Reads progress, learning items and history from the database, picks side
@@ -106,7 +109,15 @@ pub async fn prepare_exercises(
     // when no level information is available.
     let frontier_cefr = frontier_cefr(all_topics, &progress);
     let forced_vocabulary = LemmasTable::weakest(&lemmas, 5, frontier_cefr);
-    let forced_lemma_ids = forced_vocabulary.iter().map(|l| l.id.clone()).collect();
+    let forced_lemma_ids: Vec<String> = forced_vocabulary.iter().map(|l| l.id.clone()).collect();
+    let forced_forms: Vec<Form> = db
+        .forms()
+        .read_all()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| forced_lemma_ids.contains(&f.lemma_id))
+        .collect();
 
     let history = db.history().read_all().await.unwrap_or_default();
     let success_rate = recent_success_rate(&history, 5);
@@ -127,21 +138,29 @@ pub async fn prepare_exercises(
         forced_learning_item_ids,
         forced_lemma_ids,
         forced_lemmas: forced_vocabulary,
+        forced_forms,
     })
 }
 
 /// Runs the exercise-generation LLM call for a prepared prompt and matches
-/// the returned warm-up entries against the session's forced lemmas.
+/// the returned warm-up entries against the session's forced lemmas, keeping
+/// only cards for words the generated exercises actually contain.
 pub async fn generate_session_exercises(
     config: &OpenCourseConfig,
     prompt: &str,
     forced_lemmas: &[Lemma],
+    forced_forms: &[Form],
     tx: &mpsc::Sender<LlmResult>,
     data_dir: Option<&Path>,
 ) -> Result<GeneratedSession> {
     let model = create_llm_model(config)?;
     let parsed = generate_exercises(model.as_ref(), prompt, Some(tx), data_dir).await?;
-    let warmup = match_warmup_items(forced_lemmas, parsed.warmup);
+    let warmup = match_warmup_items(
+        forced_lemmas,
+        forced_forms,
+        &parsed.exercises,
+        parsed.warmup,
+    );
     Ok(GeneratedSession {
         exercises: parsed.exercises,
         warmup,
