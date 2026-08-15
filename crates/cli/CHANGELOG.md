@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/scriptology/open-course-cli/compare/v0.15.1...v0.16.0) (2026-08-15)
+
+
+### Features
+
+* **vocabulary:** preview new words and rotate forced review vocabulary ([ea2de30](https://github.com/scriptology/open-course-cli/commit/ea2de3048d0e5d12395dcb63c072ef9824553e2e))
+
 ## [0.15.1](https://github.com/scriptology/open-course-cli/compare/v0.15.0...v0.15.1) (2026-08-14)
 
 
