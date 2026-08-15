@@ -53,15 +53,33 @@ where
     deserializer.deserialize_any(StringOrVec)
 }
 
-/// One warm-up card shown before the session's exercises: a forced
-/// vocabulary lemma with its translation and an optional example sentence.
-/// Filled by matching the LLM's `warmup` output against the session's
-/// forced lemmas (see `vocabulary::match_warmup_items`); never persisted.
+/// Whether a warm-up card reinforces a word the learner has already been
+/// evaluated on (`Review`) or introduces one they haven't (`New`) — either a
+/// word with no `Lemma` row at all, or one that exists but is still
+/// `STATUS_NEW` (never evaluated). Both count as "new" to the learner and
+/// get the same visual treatment; only words the learner has actually been
+/// scored on (`STATUS_PRACTICING`, possibly weak) are `Review`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum WarmupKind {
+    #[default]
+    Review,
+    New,
+}
+
+/// One warm-up card shown before the session's exercises: either a forced
+/// vocabulary lemma being reinforced, or a genuinely new word previewed from
+/// the session's freshly-generated exercises. Filled by matching the LLM's
+/// `warmup`/`vocabulary` output against the session's forced lemmas and
+/// existing vocabulary (see `vocabulary::match_warmup_items` and
+/// `vocabulary::new_word_items`); never persisted.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WarmupItem {
-    /// Id of the lemma this card was built from.
+    /// Id of the lemma this card was built from; `None` for a genuinely new
+    /// word that has no `Lemma` row yet.
     #[serde(default)]
     pub lemma_id: Option<String>,
     pub lemma: String,
@@ -77,6 +95,10 @@ pub struct WarmupItem {
     /// Short example sentence in the target language.
     #[serde(default)]
     pub example: Option<String>,
+    /// `Review` (reinforcing a known-but-weak word) or `New` (previewing a
+    /// word the learner hasn't been evaluated on yet).
+    #[serde(default)]
+    pub kind: WarmupKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]

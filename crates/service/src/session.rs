@@ -15,7 +15,7 @@ use open_course_core::session::{
     NextSessionTopic, pick_next_session_topic, recent_success_rate, select_side_topics,
     unique_topic_ids,
 };
-use open_course_core::vocabulary::{Form, Lemma, match_warmup_items};
+use open_course_core::vocabulary::{Form, Lemma, match_warmup_items, new_word_items};
 use open_course_db::Database;
 use open_course_db::apply::apply_analysis_to_db;
 use open_course_db::curriculum::{Topic, cefr_to_numeric};
@@ -44,6 +44,10 @@ pub struct ExercisePreparation {
     /// Known inflected forms of the forced lemmas, used to match warm-up
     /// cards against the words the exercises actually contain.
     pub forced_forms: Vec<Form>,
+    /// The learner's full existing vocabulary (all statuses, this pair's
+    /// target language) — used to tell genuinely new words (previewed via
+    /// `vocabulary::new_word_items`) apart from ones already in the table.
+    pub existing_lemmas: Vec<Lemma>,
 }
 
 /// Reads progress, learning items and history from the database, picks side
@@ -89,7 +93,11 @@ pub async fn prepare_exercises(
         .into_iter()
         .filter(|li| li.target_lang == profile.target_language)
         .collect();
-    let forced_learning_items = LearningItemsTable::weakest(&learning_items, 3);
+    // Forced counts scale to the session's batch size so a small batch
+    // doesn't get crowded out by forced review vocabulary, leaving room for
+    // organic/curriculum content.
+    let batch_size = config.preferences.batch_size as usize;
+    let forced_learning_items = LearningItemsTable::weakest(&learning_items, batch_size.min(3));
     let forced_learning_item_ids = forced_learning_items
         .iter()
         .map(|li| li.id.clone())
@@ -108,7 +116,7 @@ pub async fn prepare_exercises(
     // core::session::topic_selection, which has no public helper). `None`
     // when no level information is available.
     let frontier_cefr = frontier_cefr(all_topics, &progress);
-    let forced_vocabulary = LemmasTable::weakest(&lemmas, 5, frontier_cefr);
+    let forced_vocabulary = LemmasTable::weakest(&lemmas, batch_size.min(5), frontier_cefr);
     let forced_lemma_ids: Vec<String> = forced_vocabulary.iter().map(|l| l.id.clone()).collect();
     let forced_forms: Vec<Form> = db
         .forms()
@@ -139,28 +147,39 @@ pub async fn prepare_exercises(
         forced_lemma_ids,
         forced_lemmas: forced_vocabulary,
         forced_forms,
+        existing_lemmas: lemmas,
     })
 }
 
-/// Runs the exercise-generation LLM call for a prepared prompt and matches
-/// the returned warm-up entries against the session's forced lemmas, keeping
-/// only cards for words the generated exercises actually contain.
+/// Runs the exercise-generation LLM call for a prepared prompt and builds
+/// the warm-up phase from two sources: the returned `warmup` entries matched
+/// against the session's forced lemmas (review cards, only for words the
+/// generated exercises actually contain), and genuinely new words the LLM
+/// reports using that aren't in `existing_lemmas` yet (preview cards, see
+/// `vocabulary::new_word_items`). Combined and capped at `MAX_WARMUP_ITEMS`.
 pub async fn generate_session_exercises(
     config: &OpenCourseConfig,
     prompt: &str,
     forced_lemmas: &[Lemma],
     forced_forms: &[Form],
+    existing_lemmas: &[Lemma],
     tx: &mpsc::Sender<LlmResult>,
     data_dir: Option<&Path>,
 ) -> Result<GeneratedSession> {
     let model = create_llm_model(config)?;
     let parsed = generate_exercises(model.as_ref(), prompt, Some(tx), data_dir).await?;
-    let warmup = match_warmup_items(
+    let mut warmup = match_warmup_items(
         forced_lemmas,
         forced_forms,
         &parsed.exercises,
         parsed.warmup,
     );
+    warmup.extend(new_word_items(
+        existing_lemmas,
+        &parsed.exercises,
+        parsed.vocabulary,
+    ));
+    warmup.truncate(open_course_core::vocabulary::MAX_WARMUP_ITEMS);
     Ok(GeneratedSession {
         exercises: parsed.exercises,
         warmup,

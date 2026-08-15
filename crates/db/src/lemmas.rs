@@ -6,6 +6,7 @@ use futures_util::stream::TryStreamExt;
 use lancedb::Connection;
 use lancedb::database::CreateTableMode;
 use lancedb::query::{ExecutableQuery, QueryBase};
+use rand::seq::SliceRandom;
 
 use crate::util::eq_predicate;
 use open_course_core::curriculum::cefr_to_numeric;
@@ -19,6 +20,22 @@ pub const TABLE_NAME: &str = "lemmas";
 /// `core::session::MASTERY_THRESHOLD`; the constant is deliberately
 /// duplicated here to keep the db layer self-contained.
 const LEMMA_MASTERY_THRESHOLD: f64 = 50.0;
+
+/// How much wider than `n` the rotation window is: `weakest` samples `n`
+/// lemmas at random from the `n * ROTATION_POOL_FACTOR` weakest qualifying
+/// candidates instead of always returning the same top `n`. A lemma the LLM
+/// keeps skipping never updates `last_seen`, so without this it would tie at
+/// the very top of the ranking forever and get forced every session.
+const ROTATION_POOL_FACTOR: usize = 3;
+
+/// Windows `qualified` (already sorted weakest-first) down to the rotation
+/// pool a caller should sample `n` lemmas from. Pure and separate from the
+/// shuffle so the windowing math is unit-testable without asserting on
+/// randomness.
+fn rotation_pool(qualified: Vec<Lemma>, n: usize) -> Vec<Lemma> {
+    let pool_size = (n * ROTATION_POOL_FACTOR).min(qualified.len());
+    qualified.into_iter().take(pool_size).collect()
+}
 
 pub(crate) fn schema() -> Arc<Schema> {
     Arc::new(Schema::new(vec![
@@ -171,6 +188,11 @@ impl LemmasTable {
     /// lemmas with a CEFR level more than one step above the frontier sort
     /// after everything else but are never excluded. Lemmas without a level
     /// (or when `frontier_cefr` is `None`) keep the plain weakness order.
+    ///
+    /// The final `n` are sampled at random from the `n * ROTATION_POOL_FACTOR`
+    /// weakest qualifying candidates (see `rotation_pool`) rather than always
+    /// being the literal weakest `n`, so the same handful of words aren't
+    /// forced into every session.
     pub fn weakest(lemmas: &[Lemma], n: usize, frontier_cefr: Option<i32>) -> Vec<Lemma> {
         // 0 = at/just above the frontier or unknown level; 1 = further ahead.
         let level_group = |l: &Lemma| match (frontier_cefr, l.cefr_level.as_deref()) {
@@ -208,8 +230,38 @@ impl LemmasTable {
                 (None, None) => std::cmp::Ordering::Equal,
             }
         });
-        qualified.into_iter().take(n).collect()
+        // Rotate within each frontier level-group separately, never across
+        // them: `qualified` is already sorted group-0-then-group-1, so the
+        // first index where the group flips to 1 is the boundary. Group 1
+        // (deferred) only fills slots group 0 couldn't — mixing the two into
+        // one shuffle pool would let a deferred word leak ahead of an
+        // available level-appropriate one purely by luck of the shuffle,
+        // defeating the frontier soft-preference.
+        let boundary = qualified
+            .iter()
+            .position(|l| level_group(l) == 1)
+            .unwrap_or(qualified.len());
+        let far = qualified.split_off(boundary);
+        let mut result = rotate_within_group(qualified, n);
+        if result.len() < n {
+            result.extend(rotate_within_group(far, n - result.len()));
+        }
+        result
     }
+}
+
+/// Samples up to `n` lemmas at random from the `n * ROTATION_POOL_FACTOR`
+/// weakest of `qualified` (already sorted weakest-first). Returns
+/// `qualified` untouched, in order, when it's no wider than `n` — no
+/// rotation choice to make, so the meaningful weakest-first order (e.g.
+/// warm-up card order) is preserved rather than scrambled for nothing.
+fn rotate_within_group(qualified: Vec<Lemma>, n: usize) -> Vec<Lemma> {
+    let mut pool = rotation_pool(qualified, n);
+    if pool.len() <= n {
+        return pool;
+    }
+    pool.shuffle(&mut rand::rng());
+    pool.into_iter().take(n).collect()
 }
 
 pub(crate) fn lemma_to_record_batch(lemma: &Lemma) -> Result<RecordBatch> {
@@ -427,6 +479,96 @@ mod tests {
         let weak = LemmasTable::weakest(&lemmas, 4, None);
         let ids: Vec<&str> = weak.iter().map(|l| l.id.as_str()).collect();
         assert_eq!(ids, ["noun", "no-pos"]);
+    }
+
+    #[test]
+    fn rotation_pool_returns_everything_when_qualified_fits() {
+        let lemmas: Vec<Lemma> = (0..3)
+            .map(|i| make_lemma(&format!("w{i}"), STATUS_NEW, 10.0, None))
+            .collect();
+        assert_eq!(rotation_pool(lemmas.clone(), 5).len(), 3);
+        assert_eq!(rotation_pool(lemmas, 3).len(), 3);
+    }
+
+    #[test]
+    fn rotation_pool_bounds_at_n_times_factor() {
+        let lemmas: Vec<Lemma> = (0..20)
+            .map(|i| make_lemma(&format!("w{i}"), STATUS_NEW, 10.0, None))
+            .collect();
+        // n=5 -> pool capped at 5 * ROTATION_POOL_FACTOR (3) = 15, not 20.
+        assert_eq!(rotation_pool(lemmas, 5).len(), 15);
+    }
+
+    #[test]
+    fn weakest_does_not_shuffle_when_pool_fits_n() {
+        // Exactly as many qualifying lemmas as requested: no rotation choice
+        // to make, so the weakest-first order must be preserved exactly.
+        let lemmas = vec![
+            make_lemma("weakest", STATUS_NEW, 5.0, None),
+            make_lemma("middle", STATUS_NEW, 15.0, None),
+            make_lemma("strongest", STATUS_PRACTICING, 25.0, None),
+        ];
+        let weak = LemmasTable::weakest(&lemmas, 3, None);
+        let ids: Vec<&str> = weak.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(ids, ["weakest", "middle", "strongest"]);
+    }
+
+    #[test]
+    fn weakest_rotation_samples_from_pool_without_exceeding_it() {
+        // 20 equally-weak candidates, only 5 forced: every result must come
+        // from the top-15 rotation pool (5 * ROTATION_POOL_FACTOR), and the
+        // literal top-5 must not be the only ones ever chosen. Run several
+        // times so a single unlucky shuffle doesn't fail the assertion.
+        let lemmas: Vec<Lemma> = (0..20)
+            .map(|i| make_lemma(&format!("w{i}"), STATUS_NEW, 10.0, None))
+            .collect();
+        let pool_ids: std::collections::HashSet<String> =
+            (0..15).map(|i| format!("w{i}")).collect();
+
+        let mut saw_outside_top_5 = false;
+        for _ in 0..20 {
+            let weak = LemmasTable::weakest(&lemmas, 5, None);
+            assert_eq!(weak.len(), 5);
+            for lemma in &weak {
+                assert!(
+                    pool_ids.contains(&lemma.id),
+                    "{} is outside the rotation pool",
+                    lemma.id
+                );
+            }
+            if weak
+                .iter()
+                .any(|l| !["w0", "w1", "w2", "w3", "w4"].contains(&l.id.as_str()))
+            {
+                saw_outside_top_5 = true;
+            }
+        }
+        assert!(
+            saw_outside_top_5,
+            "rotation never picked a lemma outside the literal top 5 across 20 tries"
+        );
+    }
+
+    #[test]
+    fn weakest_rotation_never_crosses_frontier_group_boundary() {
+        // 10 level-appropriate candidates plus one deferred (far-above-
+        // frontier) lemma, only 3 requested: the deferred lemma must never
+        // be chosen while 10 appropriate ones are available, across many
+        // shuffles.
+        let mut ahead = make_lemma("ahead", STATUS_NEW, 10.0, None);
+        ahead.cefr_level = Some("C1".to_string());
+        let mut lemmas: Vec<Lemma> = (0..10)
+            .map(|i| make_lemma(&format!("w{i}"), STATUS_NEW, 10.0, None))
+            .collect();
+        lemmas.push(ahead);
+
+        for _ in 0..20 {
+            let weak = LemmasTable::weakest(&lemmas, 3, Some(2));
+            assert!(
+                weak.iter().all(|l| l.id != "ahead"),
+                "deferred lemma leaked into the result ahead of an available one"
+            );
+        }
     }
 
     #[tokio::test]

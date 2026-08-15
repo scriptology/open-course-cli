@@ -168,6 +168,24 @@ pub fn build_exercise_prompt(
         )
     };
 
+    let vocabulary_extraction_note = format!(
+        "\nIn addition to the exercises{warmup_ref}, return a top-level \"vocabulary\" array \
+         listing every CONTENT word (NOUN, VERB, ADJ, ADV, PROPN only — skip articles, \
+         prepositions, pronouns, auxiliaries, conjunctions) that appears in the target sentences \
+         you just wrote, one entry per distinct word, each with these fields:\n\
+         - lemma: the dictionary headword\n\
+         - surface: the exact inflected form as it appears in the sentence\n\
+         - pos: part of speech (Universal Dependencies tag)\n\
+         - cefrLevel: approximate CEFR level (\"A1\"–\"C2\")\n\
+         - translation: the translation in {native}\n",
+        warmup_ref = if forced_vocabulary.is_empty() {
+            ""
+        } else {
+            " and the requested \"warmup\" array"
+        },
+        native = profile.native_language,
+    );
+
     format!(
         "You are a language tutor. Generate {count} connected translation exercises from {native} to {target}.
 
@@ -195,7 +213,7 @@ For each exercise output a JSON object with these fields:
 - expectedPatterns: grammar patterns the student should use
 - hint: optional short hint
 
-Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}",
+Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}{vocabulary_extraction_note}",
         native = profile.native_language,
         target = profile.target_language,
         warmup_output_note = if forced_vocabulary.is_empty() {

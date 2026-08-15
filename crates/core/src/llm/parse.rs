@@ -14,6 +14,13 @@ pub struct Exercises {
     /// lemma. Optional: older prompts and bare-array responses have none.
     #[serde(default)]
     pub warmup: Vec<RawWarmupItem>,
+    /// Content vocabulary the model used across the generated exercises,
+    /// requested independently of `warmup`/forced vocabulary so genuinely
+    /// new words (not yet in the learner's vocabulary table) can be
+    /// previewed too (see `vocabulary::new_word_items`). Optional: older
+    /// prompts and bare-array responses have none.
+    #[serde(default)]
+    pub vocabulary: Vec<RawVocabularyItem>,
 }
 
 /// Warm-up entry as returned by the LLM, before it is matched against the
@@ -32,6 +39,29 @@ pub struct RawWarmupItem {
     pub translation: Option<String>,
     #[serde(default)]
     pub example: Option<String>,
+}
+
+/// Content-vocabulary entry as returned by the LLM for the exercises it just
+/// generated, before it is diffed against the learner's existing vocabulary
+/// (see `vocabulary::new_word_items`). Every field is optional so a partial
+/// entry never breaks parsing of the whole response.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawVocabularyItem {
+    #[serde(default)]
+    pub lemma: String,
+    /// The exact inflected form as it appears in the sentence — checked
+    /// against the generated text instead of `lemma` (which, for an
+    /// inflected verb like "como" from "comer", usually never appears
+    /// verbatim), so a chatty LLM can't invent vocabulary that isn't there.
+    #[serde(default)]
+    pub surface: String,
+    #[serde(default)]
+    pub pos: Option<String>,
+    #[serde(default)]
+    pub cefr_level: Option<String>,
+    #[serde(default)]
+    pub translation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -76,6 +106,7 @@ pub fn parse_session_exercises(
         return Ok(Exercises {
             exercises: vec,
             warmup: vec![],
+            vocabulary: vec![],
         });
     }
 

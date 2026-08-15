@@ -118,6 +118,21 @@ fn exercise_prompt_includes_forced_vocabulary() {
 }
 
 #[test]
+fn exercise_prompt_always_requests_vocabulary_extraction() {
+    let p = profile();
+    let all = vec![topic("t1")];
+    let target = vec![topic("t1")];
+    // No forced learning items, no forced vocabulary: the "vocabulary"
+    // extraction request must still be present, independent of forced
+    // vocabulary — it's how genuinely new words get previewed.
+    let prompt = build_exercise_prompt(&p, &target, &[], &all, &[], &[], 3, 0.75);
+
+    assert!(prompt.contains("\"vocabulary\""));
+    assert!(prompt.contains("CONTENT word"));
+    assert!(!prompt.contains("\"warmup\""));
+}
+
+#[test]
 fn analysis_prompt_includes_answers() {
     use open_course_cli::core::session::Exercise;
 
