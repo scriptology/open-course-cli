@@ -203,7 +203,10 @@ fn exercise_tokens(exercises: &[crate::session::Exercise]) -> HashSet<String> {
 /// matches supplies the translation and example; otherwise the stored
 /// translation is used with no example. Lemmas without any translation are
 /// skipped (there is nothing to teach), and raw entries matching no forced
-/// lemma are dropped.
+/// lemma are dropped. Each card is tagged `WarmupKind::New` when the lemma
+/// hasn't been evaluated yet (`STATUS_NEW`) or `WarmupKind::Review`
+/// otherwise (see `new_word_items` for words with no `Lemma` row at all,
+/// tagged `New` the same way).
 pub fn match_warmup_items(
     forced: &[Lemma],
     forms: &[Form],
@@ -248,6 +251,15 @@ pub fn match_warmup_items(
         })
         .filter_map(|lemma| {
             let key = normalize_key(&lemma.lemma);
+            // A lemma the learner hasn't been evaluated on yet (STATUS_NEW,
+            // mastery 0) counts as "new" to them, same as a word with no
+            // Lemma row at all (see `new_word_items`) — only a word already
+            // scored at least once (STATUS_PRACTICING) is a plain review.
+            let kind = if lemma.status == STATUS_NEW {
+                crate::session::WarmupKind::New
+            } else {
+                crate::session::WarmupKind::Review
+            };
             let item = match by_key.get(&key) {
                 Some(raw) => {
                     let translation = non_empty(raw.translation.clone())
@@ -261,6 +273,7 @@ pub fn match_warmup_items(
                             .or_else(|| lemma.cefr_level.clone()),
                         translation,
                         example: non_empty(raw.example.clone()),
+                        kind,
                     }
                 }
                 None => crate::session::WarmupItem {
@@ -270,6 +283,7 @@ pub fn match_warmup_items(
                     cefr_level: lemma.cefr_level.clone(),
                     translation: lemma.translation.clone(),
                     example: None,
+                    kind,
                 },
             };
             if item.translation.is_empty() {
@@ -281,6 +295,65 @@ pub fn match_warmup_items(
         // Cap cards, not candidate lemmas: a translation-less lemma must not
         // eat a slot that a later translated lemma could have filled.
         .take(MAX_WARMUP_ITEMS)
+        .collect()
+}
+
+/// Builds warm-up preview cards for genuinely new words: content words the
+/// LLM reports using in the session's exercises (`raw`, the `"vocabulary"`
+/// array from `Exercises`) that have no `Lemma` row at all yet in
+/// `existing_lemmas`, regardless of that lemma's status — a word already in
+/// the table (even `STATUS_NEW`) is `match_warmup_items`'s job, not this
+/// one. Same invariants as `match_warmup_items`: the word must actually
+/// appear in a generated exercise (no hallucinated vocabulary) — checked
+/// against `surface` (the inflected form actually used), not `lemma` itself,
+/// since an inflected verb's dictionary headword usually never appears
+/// verbatim (falls back to `lemma` when the LLM omits `surface`) — and
+/// non-content POS and empty translations are skipped. Every card is tagged
+/// `WarmupKind::New`.
+pub fn new_word_items(
+    existing_lemmas: &[Lemma],
+    exercises: &[crate::session::Exercise],
+    raw: Vec<crate::llm::parse::RawVocabularyItem>,
+) -> Vec<crate::session::WarmupItem> {
+    use std::collections::HashSet;
+
+    let known_keys: HashSet<String> = existing_lemmas
+        .iter()
+        .map(|l| normalize_key(&l.lemma))
+        .collect();
+    let tokens = exercise_tokens(exercises);
+
+    let mut seen_keys: HashSet<String> = HashSet::new();
+    raw.into_iter()
+        .filter_map(|item| {
+            let key = normalize_key(item.lemma.trim());
+            if key.is_empty() || known_keys.contains(&key) || !seen_keys.insert(key.clone()) {
+                return None;
+            }
+            let pos = item.pos.clone().unwrap_or_default();
+            if !is_content_pos(&pos) {
+                return None;
+            }
+            let surface_key = normalize_key(item.surface.trim());
+            let appears = if surface_key.is_empty() {
+                tokens.contains(&key)
+            } else {
+                tokens.contains(&surface_key)
+            };
+            if !appears {
+                return None;
+            }
+            let translation = non_empty(item.translation)?;
+            Some(crate::session::WarmupItem {
+                lemma_id: None,
+                lemma: item.lemma,
+                pos: non_empty(item.pos),
+                cefr_level: non_empty(item.cefr_level),
+                translation,
+                example: None,
+                kind: crate::session::WarmupKind::New,
+            })
+        })
         .collect()
 }
 
@@ -1028,5 +1101,117 @@ mod tests {
         assert_eq!(items.len(), MAX_WARMUP_ITEMS);
         assert_eq!(items[0].lemma, "w1");
         assert_eq!(items[MAX_WARMUP_ITEMS - 1].lemma, "w8");
+    }
+
+    #[test]
+    fn match_warmup_items_tags_new_status_as_new() {
+        let forced = vec![forced_lemma("es-comer", "comer", "есть")];
+        // forced_lemma defaults status to STATUS_NEW (0).
+        let items = match_warmup_items(&forced, &[], &[], vec![raw_warmup("comer", None, None)]);
+        assert_eq!(items[0].kind, crate::session::WarmupKind::New);
+    }
+
+    #[test]
+    fn match_warmup_items_tags_practicing_status_as_review() {
+        let mut lemma = forced_lemma("es-comer", "comer", "есть");
+        lemma.status = STATUS_PRACTICING;
+        lemma.mastery = 20.0;
+        let items = match_warmup_items(&[lemma], &[], &[], vec![raw_warmup("comer", None, None)]);
+        assert_eq!(items[0].kind, crate::session::WarmupKind::Review);
+    }
+
+    // --- new_word_items ---
+
+    fn raw_vocabulary(
+        lemma: &str,
+        surface: &str,
+        pos: &str,
+        translation: Option<&str>,
+    ) -> crate::llm::parse::RawVocabularyItem {
+        crate::llm::parse::RawVocabularyItem {
+            lemma: lemma.to_string(),
+            surface: surface.to_string(),
+            pos: Some(pos.to_string()),
+            cefr_level: None,
+            translation: translation.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn new_word_items_excludes_existing_lemmas() {
+        let existing = vec![forced_lemma("es-comer", "comer", "есть")];
+        // "comer" appears via its exact headword form here, so the surface
+        // check wouldn't be what excludes it — the existing-lemma check is.
+        let exercises = vec![exercise("Quiero comer y beber.")];
+        let raw = vec![
+            raw_vocabulary("comer", "comer", "VERB", Some("кушать")),
+            raw_vocabulary("beber", "beber", "VERB", Some("пить")),
+        ];
+        let items = new_word_items(&existing, &exercises, raw);
+        // "comer" already has a Lemma row (any status) — not new, even
+        // though the LLM reported it too; only "beber" is genuinely new.
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "beber");
+        assert_eq!(items[0].lemma_id, None);
+        assert_eq!(items[0].kind, crate::session::WarmupKind::New);
+    }
+
+    #[test]
+    fn new_word_items_matches_inflected_surface_not_headword() {
+        // The dictionary headword "comer" never appears verbatim — only its
+        // inflected surface "como" does. Matching must go through `surface`.
+        let exercises = vec![exercise("Como pan cada día.")];
+        let raw = vec![raw_vocabulary("comer", "como", "VERB", Some("кушать"))];
+        let items = new_word_items(&[], &exercises, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "comer");
+    }
+
+    #[test]
+    fn new_word_items_falls_back_to_lemma_when_surface_missing() {
+        let exercises = vec![exercise("Quiero comer pan.")];
+        let raw = vec![raw_vocabulary("comer", "", "VERB", Some("кушать"))];
+        let items = new_word_items(&[], &exercises, raw);
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn new_word_items_excludes_function_pos() {
+        let exercises = vec![exercise("Quiero comer con ella.")];
+        let raw = vec![
+            raw_vocabulary("comer", "comer", "VERB", Some("кушать")),
+            raw_vocabulary("con", "con", "ADP", Some("с")),
+        ];
+        let items = new_word_items(&[], &exercises, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "comer");
+    }
+
+    #[test]
+    fn new_word_items_requires_translation() {
+        let exercises = vec![exercise("Quiero comer pan.")];
+        let raw = vec![raw_vocabulary("comer", "comer", "VERB", None)];
+        assert!(new_word_items(&[], &exercises, raw).is_empty());
+    }
+
+    #[test]
+    fn new_word_items_requires_appearance_in_exercises() {
+        // The LLM claims "beber" but it never made it into any sentence —
+        // same anti-hallucination guard as match_warmup_items.
+        let exercises = vec![exercise("Quiero comer pan.")];
+        let raw = vec![raw_vocabulary("beber", "bebo", "VERB", Some("пить"))];
+        assert!(new_word_items(&[], &exercises, raw).is_empty());
+    }
+
+    #[test]
+    fn new_word_items_dedups_repeated_lemmas() {
+        let exercises = vec![exercise("Como pan y como fruta.")];
+        let raw = vec![
+            raw_vocabulary("comer", "como", "VERB", Some("кушать")),
+            raw_vocabulary("comer", "como", "VERB", Some("есть (дубль)")),
+        ];
+        let items = new_word_items(&[], &exercises, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].translation, "кушать");
     }
 }

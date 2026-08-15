@@ -13,7 +13,7 @@ use crate::ui::views::utils::{
 };
 use crate::ui::widgets::{Card, build_footer_wrapped};
 use open_course_core::error::{AppError, Result};
-use open_course_core::session::{MentorSession, NextSessionTopic, WarmupItem};
+use open_course_core::session::{MentorSession, NextSessionTopic, WarmupItem, WarmupKind};
 use open_course_db::curriculum::Topic;
 use open_course_llm::pipeline::log_debug_event;
 
@@ -189,10 +189,12 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     item.lemma.clone(),
                     Style::default().add_modifier(Modifier::BOLD),
                 )];
-                let badges: Vec<&str> = [item.pos.as_deref(), item.cefr_level.as_deref()]
-                    .into_iter()
-                    .flatten()
-                    .collect();
+                let new_badge = (item.kind == WarmupKind::New).then_some("NEW");
+                let badges: Vec<&str> =
+                    [new_badge, item.pos.as_deref(), item.cefr_level.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .collect();
                 if !badges.is_empty() {
                     word_spans.push(Span::styled(
                         format!("  {}", badges.join(" · ")),
@@ -531,12 +533,14 @@ pub(crate) async fn start_exercises_for_topic(
     let prompt = preparation.prompt;
     let forced_lemmas = preparation.forced_lemmas;
     let forced_forms = preparation.forced_forms;
+    let existing_lemmas = preparation.existing_lemmas;
     tokio::spawn(async move {
         let result = open_course_service::session::generate_session_exercises(
             &config,
             &prompt,
             &forced_lemmas,
             &forced_forms,
+            &existing_lemmas,
             &tx,
             Some(data_dir.as_path()),
         )
