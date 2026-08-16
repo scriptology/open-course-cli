@@ -84,6 +84,13 @@ pub fn build_exercise_prompt(
         "Student age: {age}. Use contexts and examples that fit the life experience of a typical {age}-year-old."
     );
 
+    // Prompt prose needs the full language name ("Spanish"), not the bare
+    // ISO code `profile.native_language`/`target_language` store internally
+    // (that code format is load-bearing elsewhere — see `english_name`'s doc
+    // comment in `language.rs`).
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
+
     let complexity_anchor = effective_level
         .as_deref()
         .unwrap_or("the student's CEFR level");
@@ -163,8 +170,8 @@ pub fn build_exercise_prompt(
             - cefrLevel: approximate CEFR level (\"A1\"–\"C2\")\n\
             - translation: the translation in {native}\n\
             - example: one short example sentence in {target} using the word; it must NOT appear in any exercise\n",
-            native = profile.native_language,
-            target = profile.target_language,
+            native = native_name,
+            target = target_name,
         )
     };
 
@@ -183,7 +190,7 @@ pub fn build_exercise_prompt(
         } else {
             " and the requested \"warmup\" array"
         },
-        native = profile.native_language,
+        native = native_name,
     );
 
     format!(
@@ -214,8 +221,8 @@ For each exercise output a JSON object with these fields:
 - hint: optional short hint
 
 Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}{vocabulary_extraction_note}",
-        native = profile.native_language,
-        target = profile.target_language,
+        native = native_name,
+        target = target_name,
         warmup_output_note = if forced_vocabulary.is_empty() {
             ""
         } else {
@@ -229,6 +236,8 @@ pub fn build_batch_analysis_prompt(
     pairs: &[(Exercise, String)],
     topics: &[Topic],
 ) -> String {
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     let blocks = pairs
         .iter()
         .enumerate()
@@ -236,7 +245,7 @@ pub fn build_batch_analysis_prompt(
             format!(
                 "Exercise {}:\nOriginal ({}): {}\nExpected translation: {}\nStudent translation: {}",
                 i + 1,
-                profile.native_language,
+                native_name,
                 exercise.target_sentence,
                 exercise.expected_translation,
                 answer
@@ -322,12 +331,14 @@ CRITICAL: the top-level object MUST contain the key "sentences" with exactly {n}
 CRITICAL: explanations and comments must be in {native}.
 CRITICAL: do not include any markdown code fences."#,
         n = pairs.len(),
-        native = profile.native_language,
-        target = profile.target_language
+        native = native_name,
+        target = target_name
     )
 }
 
 pub fn build_topic_review_prompt(profile: &UserProfile, topic: &Topic) -> String {
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     format!(
         "You are a language tutor. Prepare a focused review of the topic \"{}\" in {} for a {} speaker.
 
@@ -349,12 +360,12 @@ Format your response as well-structured Markdown that the terminal renderer supp
 
 Return ONLY the Markdown content. Do not wrap output in code fences.",
         topic.name,
-        profile.target_language,
-        profile.native_language,
+        target_name,
+        native_name,
         topic.description,
-        profile.target_language,
-        profile.native_language,
-        profile.native_language
+        target_name,
+        native_name,
+        native_name
     )
 }
 
@@ -386,6 +397,8 @@ pub fn build_curriculum_extension_prompt(
         .age
         .map(|age| format!("Student age: {age}. Avoid childish topics unless appropriate."))
         .unwrap_or_else(|| "Student age: not specified.".to_string());
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     format!(
         "You are expanding a language learning curriculum for {target} for a {native} speaker.\n\
         Goal: general fluency.\n\
@@ -415,8 +428,8 @@ pub fn build_curriculum_extension_prompt(
         - version: 1\n\
         \n\
         CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.",
-        target = profile.target_language,
-        native = profile.native_language,
+        target = target_name,
+        native = native_name,
         cefr = cefr,
         age_hint = age_hint,
         existing = existing_lines.join("\n"),
@@ -430,33 +443,37 @@ pub fn build_curriculum_extension_prompt(
 }
 
 pub fn build_topic_metadata_prompt(topic_id: &str, profile: &UserProfile) -> String {
+    // `target_name`/`native_name` (full English names) go in prompt prose;
+    // `target_code`/`native_code` (raw ISO 639-1 codes, unchanged) go in the
+    // requested `targetLang`/`nativeLang` JSON fields, since those are read
+    // back into `Topic.target_lang`/`native_lang` and must stay in the same
+    // code format `profile.target_language`/`native_language` use internally.
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     format!(
-        "Generate a language learning topic for the topic id \"{}\" in {} for a {} speaker.\n\
-        The student's current CEFR level is {}. The topic should be appropriate for this level or below if it is a prerequisite topic.\n\
+        "Generate a language learning topic for the topic id \"{topic_id}\" in {target_name} for a {native_name} speaker.\n\
+        The student's current CEFR level is {cefr}. The topic should be appropriate for this level or below if it is a prerequisite topic.\n\
         \n\
         Return a JSON object with:\n\
-        - id: \"{}\" (exactly this id)\n\
+        - id: \"{topic_id}\" (exactly this id)\n\
         - name: short display name (2-5 words)\n\
         - description: 1-2 sentences explaining the topic\n\
         - difficulty: \"beginner\" | \"intermediate\" | \"advanced\"\n\
         - level: CEFR level (\"A1\", \"A2\", \"B1\", \"B2\", \"C1\", \"C2\")\n\
         - tags: string[] (relevant grammar/vocabulary tags)\n\
-        - targetLang: \"{}\"\n\
-        - nativeLang: \"{}\"\n\
+        - targetLang: \"{target_code}\"\n\
+        - nativeLang: \"{native_code}\"\n\
         - version: 1\n\
         \n\
-        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native_name} (the student's native language). Only linguistic examples may be in {target_name}.\n\
         \n\
         Respond ONLY with the JSON object. No extra commentary.",
-        topic_id,
-        profile.target_language,
-        profile.native_language,
-        profile.self_assessed_cefr.as_deref().unwrap_or("beginner"),
-        topic_id,
-        profile.target_language,
-        profile.native_language,
-        native = profile.native_language,
-        target = profile.target_language
+        topic_id = topic_id,
+        target_name = target_name,
+        native_name = native_name,
+        cefr = profile.self_assessed_cefr.as_deref().unwrap_or("beginner"),
+        target_code = profile.target_language,
+        native_code = profile.native_language,
     )
 }
 
@@ -478,14 +495,22 @@ pub fn build_curriculum_level_prompt(
         .age
         .map(|age| format!("The student is {age} years old. Avoid school, kindergarten, or other child-specific scenarios unless the age makes them clearly relevant."))
         .unwrap_or_else(|| "The student's age is not specified; keep contexts neutral and broadly applicable.".to_string());
+    // `target_name`/`native_name` (full English names) go in prompt prose;
+    // `target_code`/`native_code` (raw ISO 639-1 codes) go in the requested
+    // `targetLang`/`nativeLang`/`targetLanguage`/`nativeLanguage` JSON
+    // fields, since those are read back into `Topic.target_lang`/
+    // `native_lang` and must stay in the code format `profile.target_language`/
+    // `native_language` use internally.
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     format!(
-        "You are a senior professor of linguistics and language pedagogy. You are designing a focused {target} course for a {native} speaker.\n\
+        "You are a senior professor of linguistics and language pedagogy. You are designing a focused {target_name} course for a {native_name} speaker.\n\
         \n\
         {age_hint}\n\
         \n\
-        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native} to {target} or analyzing written {target}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\
+        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native_name} to {target_name} or analyzing written {target_name}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\
         \n\
-        Your current task: produce around {count} focused {target} topics a learner must master to progress from CEFR {previous} to CEFR {level}. Cover each translatable domain listed below with a few concrete, narrow topics. Prefer small, actionable topics that fit 1–2 translation exercises.\n\
+        Your current task: produce around {count} focused {target_name} topics a learner must master to progress from CEFR {previous} to CEFR {level}. Cover each translatable domain listed below with a few concrete, narrow topics. Prefer small, actionable topics that fit 1–2 translation exercises.\n\
         \n\
         All topics in this level must have:\n\
         - difficulty: \"{difficulty}\"\n\
@@ -502,23 +527,25 @@ pub fn build_curriculum_level_prompt(
         - difficulty: \"{difficulty}\"\n\
         - level: \"{level}\"\n\
         - tags: [\"domain:<domain-name>\", ...]\n\
-        - targetLang: \"{target}\"\n\
-        - nativeLang: \"{native}\"\n\
+        - targetLang: \"{target_code}\"\n\
+        - nativeLang: \"{native_code}\"\n\
         - version: 1\n\
         \n\
-        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native_name} (the student's native language). Only linguistic examples may be in {target_name}.\n\
         \n\
         Return a JSON object:\n\
         {{\n\
           \"version\": 1,\n\
-          \"targetLanguage\": \"{target}\",\n\
-          \"nativeLanguage\": \"{native}\",\n\
+          \"targetLanguage\": \"{target_code}\",\n\
+          \"nativeLanguage\": \"{native_code}\",\n\
           \"topics\": [ ... ]\n\
         }}\n\
         \n\
         Keep the response concise and valid JSON. Do not include commentary or markdown code fences.",
-        target = profile.target_language,
-        native = profile.native_language,
+        target_name = target_name,
+        native_name = native_name,
+        target_code = profile.target_language,
+        native_code = profile.native_language,
         level = level,
         previous = previous,
         difficulty = difficulty,
@@ -534,18 +561,20 @@ pub fn build_curriculum_gap_prompt(
     missing_domains: &[&str],
 ) -> String {
     let difficulty = cefr_to_difficulty(level);
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     format!(
-        "You are a senior professor of linguistics and language pedagogy. The {target} curriculum for CEFR level {level} is missing topics in the following domains: {domains}.\n\
+        "You are a senior professor of linguistics and language pedagogy. The {target_name} curriculum for CEFR level {level} is missing topics in the following domains: {domains}.\n\
         \n\
         Generate exactly the topics needed to cover these domains. Each topic must be translatable in written form (no listening/speaking-only topics). Do not duplicate topics the learner already has at this level.\n\
         \n\
-        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native_name} (the student's native language). Only linguistic examples may be in {target_name}.\n\
         \n\
         Return a JSON object:\n\
         {{\n\
           \"version\": 1,\n\
-          \"targetLanguage\": \"{target}\",\n\
-          \"nativeLanguage\": \"{native}\",\n\
+          \"targetLanguage\": \"{target_code}\",\n\
+          \"nativeLanguage\": \"{native_code}\",\n\
           \"topics\": [\n\
             {{\n\
               \"id\": \"kebab-case id\",\n\
@@ -554,14 +583,16 @@ pub fn build_curriculum_gap_prompt(
               \"difficulty\": \"{difficulty}\",\n\
               \"level\": \"{level}\",\n\
               \"tags\": [\"domain:<domain-name>\", ...],\n\
-              \"targetLang\": \"{target}\",\n\
-              \"nativeLang\": \"{native}\",\n\
+              \"targetLang\": \"{target_code}\",\n\
+              \"nativeLang\": \"{native_code}\",\n\
               \"version\": 1\n\
             }}\n\
           ]\n\
         }}",
-        target = profile.target_language,
-        native = profile.native_language,
+        target_name = target_name,
+        native_name = native_name,
+        target_code = profile.target_language,
+        native_code = profile.native_language,
         level = level,
         difficulty = difficulty,
         domains = missing_domains.join(", ")
@@ -576,12 +607,14 @@ pub fn build_curriculum_domain_prompt(
     count: usize,
 ) -> String {
     let difficulty = cefr_to_difficulty(level);
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     format!(
-        "You are a senior professor of linguistics and language pedagogy. You are designing {target} topics for CEFR level {level} for a {native} speaker.\n\n\
+        "You are a senior professor of linguistics and language pedagogy. You are designing {target_name} topics for CEFR level {level} for a {native_name} speaker.\n\n\
         Focus ONLY on the following domain. Do not include topics from other domains.\n\
         Domain: {domain} — {domain_description}\n\n\
-        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native} to {target} or analyzing written {target}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\n\
-        Generate exactly {count} focused, narrow {target} topics in this domain that a learner must master to progress at CEFR {level}. Each topic should be small enough to practice in 1–2 translation exercises.\n\n\
+        This course is delivered entirely through translation exercises (sentences and short written texts). Generate ONLY topics that can be practiced by translating from {native_name} to {target_name} or analyzing written {target_name}. Do NOT include listening, speaking, pronunciation drills, or conversation-only topics.\n\n\
+        Generate exactly {count} focused, narrow {target_name} topics in this domain that a learner must master to progress at CEFR {level}. Each topic should be small enough to practice in 1–2 translation exercises.\n\n\
         All topics must have:\n\
         - difficulty: \"{difficulty}\"\n\
         - level: \"{level}\"\n\
@@ -593,20 +626,22 @@ pub fn build_curriculum_domain_prompt(
         - difficulty: \"{difficulty}\"\n\
         - level: \"{level}\"\n\
         - tags: [\"domain:{domain}\", ...]\n\
-        - targetLang: \"{target}\"\n\
-        - nativeLang: \"{native}\"\n\
+        - targetLang: \"{target_code}\"\n\
+        - nativeLang: \"{native_code}\"\n\
         - version: 1\n\n\
-        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native_name} (the student's native language). Only linguistic examples may be in {target_name}.\n\n\
         Return a JSON object:\n\
         {{\n\
           \"version\": 1,\n\
-          \"targetLanguage\": \"{target}\",\n\
-          \"nativeLanguage\": \"{native}\",\n\
+          \"targetLanguage\": \"{target_code}\",\n\
+          \"nativeLanguage\": \"{native_code}\",\n\
           \"topics\": [ ... ]\n\
         }}\n\n\
         Before returning, double-check that each topic is narrow, has a valid kebab-case id, and belongs to the {domain} domain.",
-        target = profile.target_language,
-        native = profile.native_language,
+        target_name = target_name,
+        native_name = native_name,
+        target_code = profile.target_language,
+        native_code = profile.native_language,
         level = level,
         difficulty = difficulty,
         domain = domain,
@@ -622,20 +657,24 @@ pub fn build_new_topic_metadata_prompt(profile: &UserProfile, new_topic: &NewTop
         .or(profile.self_assessed_cefr.as_deref())
         .unwrap_or("A1");
     let proposed_level = new_topic.level.as_deref().unwrap_or("A1");
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
     format!(
-        "You are expanding a language learning curriculum for {target} for a {native} speaker.\n\
+        "You are expanding a language learning curriculum for {target_name} for a {native_name} speaker.\n\
         The learner's current CEFR level is {cefr}.\n\n\
         Generate a curriculum topic based on this learner error:\n\
         - Proposed name: {name}\n\
         - Proposed description: {description}\n\
         - Proposed CEFR level: {level}\n\n\
         Return a JSON object:\n\
-        {{ \"id\": \"kebab-case-id\", \"name\": \"...\", \"description\": \"...\", \"difficulty\": \"beginner\" | \"intermediate\" | \"advanced\", \"level\": \"A1\" | \"A2\" | \"B1\" | \"B2\" | \"C1\" | \"C2\", \"tags\": string[], \"targetLang\": \"{target}\", \"nativeLang\": \"{native}\", \"version\": 1 }}\n\n\
+        {{ \"id\": \"kebab-case-id\", \"name\": \"...\", \"description\": \"...\", \"difficulty\": \"beginner\" | \"intermediate\" | \"advanced\", \"level\": \"A1\" | \"A2\" | \"B1\" | \"B2\" | \"C1\" | \"C2\", \"tags\": string[], \"targetLang\": \"{target_code}\", \"nativeLang\": \"{native_code}\", \"version\": 1 }}\n\n\
         The id must be unique kebab-case. The name should be 2-6 words. The description should be 1-2 sentences. The difficulty must match the CEFR level.\n\n\
-        CRITICAL: write each topic's \"name\" and \"description\" in {native} (the student's native language). Only linguistic examples may be in {target}.\n\n\
+        CRITICAL: write each topic's \"name\" and \"description\" in {native_name} (the student's native language). Only linguistic examples may be in {target_name}.\n\n\
         Respond ONLY with the JSON object. No markdown code fences.",
-        target = profile.target_language,
-        native = profile.native_language,
+        target_name = target_name,
+        native_name = native_name,
+        target_code = profile.target_language,
+        native_code = profile.native_language,
         cefr = cefr,
         name = new_topic.name,
         description = new_topic.description,
@@ -648,9 +687,11 @@ mod tests {
     use super::*;
 
     fn profile() -> UserProfile {
+        // Real profiles store ISO 639-1 codes (see onboarding), not full
+        // names — prompt-building must expand these itself for prose.
         UserProfile {
-            native_language: "Russian".to_string(),
-            target_language: "Spanish".to_string(),
+            native_language: "ru".to_string(),
+            target_language: "es".to_string(),
             age: Some(30),
             self_assessed_cefr: Some("A2".to_string()),
         }
@@ -684,6 +725,24 @@ mod tests {
         assert!(prompt.contains("the translation in Russian"));
         assert!(prompt.contains("example sentence in Spanish"));
         assert!(prompt.contains("must NOT appear in any exercise"));
+    }
+
+    #[test]
+    fn topic_metadata_prompt_expands_codes_to_names_in_prose_only() {
+        let prompt = build_topic_metadata_prompt("topic-1", &profile());
+        // Prose describing the languages must use full English names, not
+        // the raw "ru"/"es" codes `profile.native_language`/`target_language`
+        // store internally — otherwise the LLM sees ambiguous prompts like
+        // "Native language: ru" and can garble which language goes where.
+        assert!(prompt.contains("in Spanish for a Russian speaker"));
+        assert!(prompt.contains(
+            "in Russian (the student's native language). Only linguistic examples may be in Spanish"
+        ));
+        // The machine-readable JSON fields must still use the raw codes,
+        // since they're read back into `Topic.target_lang`/`native_lang`
+        // and compared against `profile.target_language` elsewhere.
+        assert!(prompt.contains("- targetLang: \"es\""));
+        assert!(prompt.contains("- nativeLang: \"ru\""));
     }
 
     #[test]
