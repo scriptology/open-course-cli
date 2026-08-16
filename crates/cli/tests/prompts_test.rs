@@ -39,7 +39,10 @@ fn exercise_prompt_includes_profile() {
     let side = vec![topic("t2")];
     let prompt = build_exercise_prompt(&p, &target, &side, &all, &[], &[], 3, 0.75);
 
-    assert!(prompt.contains("ru to en"));
+    // Prompt prose spells out the language name for the LLM (not the raw
+    // "ru"/"en" codes `UserProfile` stores internally) — see `english_name`
+    // in `crates/core/src/language.rs`.
+    assert!(prompt.contains("Russian to English"));
     assert!(prompt.contains("Target topics: Topic t1"));
     assert!(prompt.contains("B1"));
     assert!(prompt.contains("Student age: 30"));
@@ -153,7 +156,7 @@ fn analysis_prompt_includes_answers() {
 
     assert!(prompt.contains("Student translation: Hi"));
     assert!(prompt.contains("topicId: \"t1\""));
-    assert!(prompt.contains("explanations and comments must be in ru"));
+    assert!(prompt.contains("explanations and comments must be in Russian"));
     assert!(prompt.contains("\"spelling\""));
     assert!(prompt.contains("Do NOT include `newTopics` for spelling errors"));
     assert!(prompt.contains("generalizable, reusable grammar or usage pattern"));
