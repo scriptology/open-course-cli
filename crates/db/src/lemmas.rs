@@ -482,6 +482,23 @@ mod tests {
     }
 
     #[test]
+    fn weakest_tracks_discourse_marker_conjunctions() {
+        // Regression: a topic like "Discourse Markers and Connectors" is
+        // mostly SCONJ/CCONJ vocabulary ("although", "but"). These must be
+        // selectable for review, not silently filtered out as function
+        // words the way prepositions/determiners are.
+        let mut although = make_lemma("although", STATUS_PRACTICING, 20.0, None);
+        although.pos = "SCONJ".to_string();
+        let mut but = make_lemma("but", STATUS_NEW, 10.0, None);
+        but.pos = "CCONJ".to_string();
+        let lemmas = vec![although, but];
+
+        let weak = LemmasTable::weakest(&lemmas, 4, None);
+        let ids: Vec<&str> = weak.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(ids, ["but", "although"]);
+    }
+
+    #[test]
     fn rotation_pool_returns_everything_when_qualified_fits() {
         let lemmas: Vec<Lemma> = (0..3)
             .map(|i| make_lemma(&format!("w{i}"), STATUS_NEW, 10.0, None))

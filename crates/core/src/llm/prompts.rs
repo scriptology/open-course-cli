@@ -177,8 +177,8 @@ pub fn build_exercise_prompt(
 
     let vocabulary_extraction_note = format!(
         "\nIn addition to the exercises{warmup_ref}, return a top-level \"vocabulary\" array \
-         listing every CONTENT word (NOUN, VERB, ADJ, ADV, PROPN only — skip articles, \
-         prepositions, pronouns, auxiliaries, conjunctions) that appears in the target sentences \
+         listing every CONTENT word (NOUN, VERB, ADJ, ADV, PROPN, SCONJ, CCONJ only — skip \
+         articles, prepositions, pronouns, auxiliaries) that appears in the target sentences \
          you just wrote, one entry per distinct word, each with these fields:\n\
          - lemma: the dictionary headword\n\
          - surface: the exact inflected form as it appears in the sentence\n\
@@ -296,7 +296,7 @@ New topic rules (CRITICAL):
 - If the student answered in the wrong language (e.g. a language other than {target}), mark the affected words as errors, give the correct {target} translation in the explanation, and do NOT create newTopics for that other language.
 
 Vocabulary extraction rules (usedVocabulary):
-- For each sentence, list the CONTENT words (NOUN, VERB, ADJ, ADV, PROPN only) in `usedVocabulary`. Skip function words (articles, prepositions, pronouns, auxiliaries, conjunctions).
+- For each sentence, list the CONTENT words (NOUN, VERB, ADJ, ADV, PROPN, SCONJ, CCONJ only) in `usedVocabulary`. Skip function words (articles, prepositions, pronouns, auxiliaries).
 - Words from the expected translation: side "target", no spellingOk/usageOk fields.
 - Words from the student's translation: side "student", WITH spellingOk and usageOk.
 - spellingOk is false ONLY for a real misspelling; missing accents, diacritics, punctuation, or capitalization do NOT make spellingOk false.
