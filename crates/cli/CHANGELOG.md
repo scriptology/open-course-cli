@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/scriptology/open-course-cli/compare/v0.16.0...v0.16.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **prompts:** expand language codes to names in prompt prose ([1b8be3f](https://github.com/scriptology/open-course-cli/commit/1b8be3fcd536cbe367cba17e9bfd04dddea3b447))
+
 ## [0.16.0](https://github.com/scriptology/open-course-cli/compare/v0.15.1...v0.16.0) (2026-08-15)
 
 
