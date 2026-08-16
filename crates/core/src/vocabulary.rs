@@ -12,12 +12,23 @@ use crate::learning_items::{significant_words, slugify, text_contains_any_word};
 use crate::session::{COMPLETED_THRESHOLD, GrammarError, MASTERY_THRESHOLD, SentenceAnalysis};
 
 /// Content-word POS tags eligible for forced vocabulary practice.
-pub const CONTENT_POS: &[&str] = &["NOUN", "VERB", "ADJ", "ADV", "PROPN"];
+///
+/// Conjunctions (SCONJ/CCONJ) count as content: discourse markers like
+/// "although", "because", "however", "therefore" are a small, semantically
+/// rich closed class students genuinely need to learn word by word — no
+/// different from the conjunctive adverbs ("however", "moreover") already
+/// tracked here as ADV. Excluding them meant a topic like "Discourse
+/// Markers and Connectors" could track literally none of its own target
+/// vocabulary, since most of it is SCONJ/CCONJ.
+pub const CONTENT_POS: &[&str] = &["NOUN", "VERB", "ADJ", "ADV", "PROPN", "SCONJ", "CCONJ"];
 
 /// Function-word POS tags (the closed UD set) excluded from forced
-/// vocabulary practice.
+/// vocabulary practice: purely grammatical scaffolding (prepositions,
+/// determiners, pronouns, auxiliaries, particles, interjections,
+/// punctuation, symbols) rather than words with independent lexical
+/// meaning.
 const FUNCTION_POS: &[&str] = &[
-    "ADP", "AUX", "CCONJ", "DET", "INTJ", "PART", "PRON", "PUNCT", "SCONJ", "SYM", "X",
+    "ADP", "AUX", "DET", "INTJ", "PART", "PRON", "PUNCT", "SYM", "X",
 ];
 
 /// Whether a lemma with this POS tag is a content-word candidate for
@@ -575,10 +586,15 @@ mod tests {
 
     #[test]
     fn is_content_pos_filters_function_words() {
-        for pos in ["NOUN", "verb", "Adj", "ADV", "PROPN"] {
+        // Conjunctions count as content: discourse markers ("although",
+        // "however", "therefore") are lexical items worth tracking, not
+        // grammatical scaffolding.
+        for pos in [
+            "NOUN", "verb", "Adj", "ADV", "PROPN", "SCONJ", "CCONJ", "sconj",
+        ] {
             assert!(is_content_pos(pos), "{pos} should be content");
         }
-        for pos in ["PART", "ADP", "DET", "PRON", "AUX", "CCONJ", "PUNCT"] {
+        for pos in ["PART", "ADP", "DET", "PRON", "AUX", "PUNCT"] {
             assert!(!is_content_pos(pos), "{pos} should be function");
         }
         // Empty or unrecognized tags are lazily accepted.
@@ -1185,6 +1201,18 @@ mod tests {
         let items = new_word_items(&[], &exercises, raw);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].lemma, "comer");
+    }
+
+    #[test]
+    fn new_word_items_tracks_discourse_marker_conjunctions() {
+        // Regression: "although" (SCONJ) must be previewable as a new word,
+        // same as any noun/verb — only truly grammatical POS (ADP, DET, ...)
+        // are excluded.
+        let exercises = vec![exercise("Aunque llueve, salgo.")];
+        let raw = vec![raw_vocabulary("aunque", "aunque", "SCONJ", Some("хотя"))];
+        let items = new_word_items(&[], &exercises, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "aunque");
     }
 
     #[test]
