@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/scriptology/open-course-cli/compare/v0.16.1...v0.16.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **vocabulary:** track conjunctions as content vocabulary ([5404db0](https://github.com/scriptology/open-course-cli/commit/5404db057054c6388a8f5d73f4a32a0ed01ff648))
+
 ## [0.16.1](https://github.com/scriptology/open-course-cli/compare/v0.16.0...v0.16.1) (2026-08-16)
 
 
