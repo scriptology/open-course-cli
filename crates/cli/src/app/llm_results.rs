@@ -173,7 +173,11 @@ fn handle_exercises(state: &mut AppState, res: Result<GeneratedSession>) {
             state.session.cursor = 0;
         }
         Err(e) => {
-            state.toast = Some(Toast::error(e.to_string()));
+            // A toast disappears after a few seconds and leaves the user on
+            // the topic-selection screen with no way to retry; show a
+            // persistent error screen with retry/settings/home instead.
+            state.session.generation_error = Some(e.to_string());
+            state.session.mode = session::Mode::Error;
         }
     }
 }

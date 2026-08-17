@@ -712,4 +712,28 @@ mod tests {
         state.view = View::Session;
         assert!(!view_content_overflows(&state));
     }
+
+    #[tokio::test]
+    async fn failed_exercise_generation_shows_error_mode() {
+        // A generation failure must surface as a persistent error screen
+        // (retry/settings/home), not a disappearing toast.
+        let mut state = test_state().await;
+        state.view = View::Session;
+        state.session.loading = true;
+
+        apply_llm_result(
+            &mut state,
+            LlmResult::Exercises(Err(open_course_core::error::AppError::Config(
+                "boom".to_string(),
+            ))),
+        )
+        .await;
+
+        assert_eq!(state.session.mode, session::Mode::Error);
+        assert_eq!(
+            state.session.generation_error.as_deref(),
+            Some("Config error: boom")
+        );
+        assert!(state.toast.is_none());
+    }
 }
