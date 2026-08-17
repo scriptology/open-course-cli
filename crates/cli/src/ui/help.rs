@@ -197,6 +197,13 @@ fn session_groups(state: &AppState, labels: ReportLabels, common: CommonLabels) 
             ),
             group(common.group_exit, vec![entry("Esc", labels.back)]),
         ],
+        SessionMode::Error => vec![
+            group(
+                common.group_actions,
+                vec![entry("r", labels.retry), entry("p", labels.settings)],
+            ),
+            group(common.group_exit, vec![entry("Esc", common.dashboard)]),
+        ],
     }
 }
 

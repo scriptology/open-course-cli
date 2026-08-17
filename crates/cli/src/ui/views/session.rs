@@ -7,22 +7,25 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wid
 use crate::app::{AppState, LlmResult, View};
 use crate::ui::colors;
 use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
-use crate::ui::views::curriculum;
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
 };
-use crate::ui::widgets::{Card, build_footer_wrapped};
+use crate::ui::views::{curriculum, settings};
+use crate::ui::widgets::{Card, build_footer_wrapped, error_lines};
 use open_course_core::error::{AppError, Result};
 use open_course_core::session::{MentorSession, NextSessionTopic, WarmupItem, WarmupKind};
 use open_course_db::curriculum::Topic;
 use open_course_llm::pipeline::log_debug_event;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
     TopicSelection,
     WarmUp,
     Practicing,
+    /// Exercise generation failed: show the error with retry/settings/home
+    /// actions instead of silently returning to topic selection.
+    Error,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,6 +48,8 @@ pub struct SessionState {
     pub warmup_index: usize,
     /// Whether the current warm-up card's translation is visible.
     pub warmup_revealed: bool,
+    /// Set when exercise generation fails; shown in `Mode::Error`.
+    pub generation_error: Option<String>,
 }
 
 impl SessionState {
@@ -132,6 +137,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         Mode::Practicing => {
             build_footer_wrapped(&[("Enter", labels.submit), ("Esc", labels.back)], width)
         }
+        Mode::Error => build_footer_wrapped(
+            &[
+                ("r", labels.retry),
+                ("p", labels.settings),
+                ("Esc", common.dashboard),
+            ],
+            width,
+        ),
     };
     let chunks = screen_chunks(area, footer_text.lines().count() as u16);
 
@@ -259,6 +272,19 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 chunks[2],
             );
         }
+        Mode::Error => {
+            let message = state.session.generation_error.as_deref().unwrap_or("");
+            let mut card = Card::new(labels.error.to_string());
+            for line in error_lines(message) {
+                card = card.line(line);
+            }
+            frame.render_widget(card, chunks[0]);
+
+            frame.render_widget(
+                Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
+                chunks[2],
+            );
+        }
     }
 }
 
@@ -267,7 +293,36 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
         Mode::TopicSelection => handle_topic_selection(state, code).await,
         Mode::WarmUp => handle_warmup(state, code).await,
         Mode::Practicing => handle_practicing(state, code).await,
+        Mode::Error => handle_generation_error(state, code).await,
     }
+}
+
+/// Generation-error screen: `r` retries with the same target topic, `p` opens
+/// the LLM provider settings, `Esc` returns to the dashboard. Any other key
+/// keeps the error visible (unlike the global error box, which dismisses on
+/// any key).
+async fn handle_generation_error(state: &mut AppState, code: KeyCode) -> Result<()> {
+    match code {
+        KeyCode::Char('r') => {
+            state.session.generation_error = None;
+            state.session.mode = Mode::TopicSelection;
+            if let Some(topic_id) = state.session.target_topic_id.clone() {
+                start_exercises_for_topic(state, &topic_id, None).await?;
+            }
+        }
+        KeyCode::Char('p') => {
+            state.session.generation_error = None;
+            state.session.mode = Mode::TopicSelection;
+            state.settings.section = settings::Section::Provider;
+            state.view = View::Settings;
+        }
+        KeyCode::Esc => {
+            reset_session(&mut state.session);
+            state.view = View::Dashboard;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Warm-up phase: forward-only flashcards. Enter (or Space) reveals the
@@ -639,6 +694,7 @@ pub(crate) fn reset_session(session: &mut SessionState) {
     session.warmup_items.clear();
     session.warmup_index = 0;
     session.warmup_revealed = false;
+    session.generation_error = None;
 }
 
 #[cfg(test)]
