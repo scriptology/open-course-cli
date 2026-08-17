@@ -7,10 +7,10 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wid
 use crate::app::{AppState, LlmResult, View};
 use crate::ui::colors;
 use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
-use crate::ui::views::{curriculum, settings};
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
 };
+use crate::ui::views::{curriculum, settings};
 use crate::ui::widgets::{Card, build_footer_wrapped, error_lines};
 use open_course_core::error::{AppError, Result};
 use open_course_core::session::{MentorSession, NextSessionTopic, WarmupItem, WarmupKind};
