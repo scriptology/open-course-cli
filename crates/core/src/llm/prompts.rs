@@ -212,15 +212,17 @@ The {count} sentences should form a short coherent dialogue or mini-story while 
 
 For each exercise output a JSON object with these fields:
 - id: unique string
-- targetSentence: sentence in {native} for the student to translate
-- expectedTranslation: one natural correct translation in {target}
-- acceptableTranslations: array of 1–3 additional valid translations in {target} that are semantically equivalent but may use different wording, synonyms, or word order. Include only genuinely equivalent variants.
+- targetSentence: sentence in {native} for the student to translate — written ENTIRELY in {native}; every single word must be {native}, never mix in {target} words or phrases
+- expectedTranslation: one natural correct translation in {target}, written ENTIRELY in {target}
+- acceptableTranslations: array of 1–3 additional valid translations in {target}, all written ENTIRELY in {target}, that are semantically equivalent but may use different wording, synonyms, or word order. Include only genuinely equivalent variants.
 - targetTopicIds: array of target topic ids from the list above (use empty array if none apply)
 - sideTopicIds: array of side topic ids from the list above (use empty array if none apply)
 - expectedPatterns: grammar patterns the student should use
 - hint: optional short hint
 
-Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}{vocabulary_extraction_note}",
+Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}{vocabulary_extraction_note}
+
+CRITICAL: language separation. Each targetSentence must be 100% {native} and each translation (expectedTranslation, acceptableTranslations) must be 100% {target}. Never mix both languages within one sentence. If a sentence would naturally borrow a {target} word, translate that word into {native} instead.",
         native = native_name,
         target = target_name,
         warmup_output_note = if forced_vocabulary.is_empty() {
@@ -750,6 +752,20 @@ mod tests {
         let prompt = build_exercise_prompt(&profile(), &[], &[], &[], &[], &[], 3, 0.8);
         assert!(!prompt.contains("need extra practice"));
         assert!(!prompt.contains("\"warmup\""));
+    }
+
+    #[test]
+    fn exercise_prompt_demands_language_separation() {
+        // Weak models sometimes return a targetSentence that mixes the native
+        // and target languages; the prompt must forbid that explicitly, with
+        // the expanded language names (see `english_name`).
+        let prompt = build_exercise_prompt(&profile(), &[], &[], &[], &[], &[], 3, 0.8);
+        assert!(prompt.contains("written ENTIRELY in Russian"));
+        assert!(prompt.contains("written ENTIRELY in Spanish"));
+        assert!(prompt.contains("CRITICAL: language separation."));
+        assert!(prompt.contains("must be 100% Russian"));
+        assert!(prompt.contains("must be 100% Spanish"));
+        assert!(prompt.contains("Never mix both languages within one sentence"));
     }
 
     #[test]
