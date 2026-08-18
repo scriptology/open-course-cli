@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/scriptology/open-course-cli/compare/v0.16.2...v0.17.0) (2026-08-17)
+
+
+### Features
+
+* **cli:** persistent error screen when session generation fails ([2a09502](https://github.com/scriptology/open-course-cli/commit/2a09502e937de1713d66a954b017405dd4bc3947))
+* **core:** demand native/target language separation in exercise prompt ([9fc8053](https://github.com/scriptology/open-course-cli/commit/9fc8053f829abc10709a3ceb8127310600418bc1))
+
 ## [0.16.2](https://github.com/scriptology/open-course-cli/compare/v0.16.1...v0.16.2) (2026-08-16)
 
 
