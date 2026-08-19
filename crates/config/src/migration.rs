@@ -25,6 +25,7 @@ pub fn try_migrate_from_profile_md(
             base_url: None,
             endpoint: None,
             reasoning_effort: None,
+            enable_thinking: None,
         },
         profile,
     );

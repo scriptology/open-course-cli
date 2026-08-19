@@ -115,6 +115,8 @@ pub enum ProviderConfig {
         endpoint: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning_effort: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enable_thinking: Option<bool>,
     },
 }
 
@@ -144,6 +146,8 @@ impl<'de> Deserialize<'de> for ProviderConfig {
             endpoint: Option<String>,
             #[serde(default)]
             reasoning_effort: Option<String>,
+            #[serde(default)]
+            enable_thinking: Option<bool>,
         }
         let helper = Helper::deserialize(deserializer)?;
         match helper.ty.as_str() {
@@ -153,6 +157,7 @@ impl<'de> Deserialize<'de> for ProviderConfig {
                 base_url: helper.base_url,
                 endpoint: helper.endpoint,
                 reasoning_effort: helper.reasoning_effort,
+                enable_thinking: helper.enable_thinking,
             }),
             _ => Err(serde::de::Error::custom(format!(
                 "unknown provider config type: {}",
@@ -197,6 +202,14 @@ impl ProviderConfig {
         }
     }
 
+    pub fn enable_thinking(&self) -> Option<bool> {
+        match self {
+            ProviderConfig::ApiKey {
+                enable_thinking, ..
+            } => *enable_thinking,
+        }
+    }
+
     /// Returns a copy with a different API key.
     pub fn with_api_key(mut self, api_key: Option<String>) -> Self {
         match &mut self {
@@ -227,5 +240,30 @@ impl ProviderConfig {
             ProviderConfig::ApiKey { endpoint: slot, .. } => *slot = endpoint,
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trips_without_enable_thinking() {
+        let json = r#"{"type":"apiKey","model":"test-model"}"#;
+        let config: ProviderConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.enable_thinking(), None);
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(!serialized.contains("enable_thinking"));
+    }
+
+    #[test]
+    fn round_trips_with_enable_thinking() {
+        let json = r#"{"type":"apiKey","model":"test-model","enable_thinking":false}"#;
+        let config: ProviderConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.enable_thinking(), Some(false));
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(serialized.contains(r#""enable_thinking":false"#));
+        let reparsed: ProviderConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed, config);
     }
 }

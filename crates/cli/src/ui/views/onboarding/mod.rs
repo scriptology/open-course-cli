@@ -356,6 +356,7 @@ fn build_config_from_onboarding(onboarding: &OnboardingState) -> OpenCourseConfi
         },
         endpoint: None,
         reasoning_effort: None,
+        enable_thinking: None,
     };
 
     let mut config = OpenCourseConfig::new(onboarding.provider, provider_config, profile);
