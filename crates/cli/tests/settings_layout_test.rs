@@ -37,6 +37,7 @@ fn make_test_config() -> OpenCourseConfig {
         base_url: None,
         endpoint: None,
         reasoning_effort: None,
+        enable_thinking: None,
     };
     let mut config = OpenCourseConfig::new(ProviderId::OpenAi, provider_config, profile);
     config.preferences = UserPreferences {

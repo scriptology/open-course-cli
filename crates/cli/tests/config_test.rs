@@ -28,6 +28,7 @@ fn config_roundtrip() {
         base_url: None,
         endpoint: None,
         reasoning_effort: None,
+        enable_thinking: None,
     };
     let config = OpenCourseConfig::new(ProviderId::OpenAi, provider_config, profile);
     write_config(&config, dir.path()).unwrap();

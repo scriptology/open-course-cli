@@ -103,6 +103,7 @@ pub struct RigClient {
     base_url: String,
     api_key: String,
     reasoning_effort: Option<String>,
+    enable_thinking: Option<bool>,
 }
 
 impl RigClient {
@@ -120,6 +121,7 @@ impl RigClient {
 
         let api_key = api_key.unwrap_or_default();
         let reasoning_effort = config.reasoning_effort().map(|s| s.to_string());
+        let enable_thinking = config.enable_thinking();
 
         let (inner, base_url) = match provider_id {
             ProviderId::Anthropic => {
@@ -174,6 +176,7 @@ impl RigClient {
             base_url,
             api_key,
             reasoning_effort,
+            enable_thinking,
         })
     }
 
@@ -188,12 +191,15 @@ impl RigClient {
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
                 RigClientInner::OpenAi(client) => {
-                    let extractor = ExtractorBuilder::<_, T>::new(
+                    let mut extractor = ExtractorBuilder::<_, T>::new(
                         openai::completion::CompletionModel::new(client.clone(), &self.model),
                     )
-                    .max_tokens(max_tokens as u64)
-                    .build();
-                    extractor.extract(prompt).await
+                    .max_tokens(max_tokens as u64);
+                    if self.enable_thinking == Some(false) {
+                        extractor = extractor
+                            .additional_params(serde_json::json!({"enable_thinking": false}));
+                    }
+                    extractor.build().extract(prompt).await
                 }
                 RigClientInner::Anthropic(client) => {
                     client
@@ -242,10 +248,16 @@ impl RigClient {
         model: &str,
         system: Option<&str>,
         max_tokens: u32,
+        enable_thinking: Option<bool>,
     ) -> Agent<openai::completion::CompletionModel> {
         let builder =
             openai::completion::CompletionModel::new(client.clone(), model).into_agent_builder();
         let builder = builder.max_tokens(max_tokens as u64);
+        let builder = if enable_thinking == Some(false) {
+            builder.additional_params(serde_json::json!({"enable_thinking": false}))
+        } else {
+            builder
+        };
         let builder = if let Some(system) = system {
             builder.preamble(system)
         } else {
@@ -292,9 +304,15 @@ impl LlmClient for RigClient {
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
                 RigClientInner::OpenAi(client) => {
-                    Self::openai_agent(client, &self.model, system, max_tokens)
-                        .prompt(prompt)
-                        .await
+                    Self::openai_agent(
+                        client,
+                        &self.model,
+                        system,
+                        max_tokens,
+                        self.enable_thinking,
+                    )
+                    .prompt(prompt)
+                    .await
                 }
                 RigClientInner::Anthropic(client) => {
                     Self::anthropic_agent(client, &self.model, system, max_tokens)
@@ -343,6 +361,7 @@ impl LlmClient for RigClient {
                     system,
                     prompt,
                     self.reasoning_effort.as_deref(),
+                    self.enable_thinking,
                     max_tokens,
                 )
                 .await
@@ -405,6 +424,7 @@ mod tests {
             base_url: base_url.map(str::to_string),
             endpoint: endpoint.map(str::to_string),
             reasoning_effort: None,
+            enable_thinking: None,
         }
     }
 

@@ -360,6 +360,7 @@ fn ensure_provider_config(config: &mut OpenCourseConfig, provider_id: ProviderId
             base_url: default_url,
             endpoint: None,
             reasoning_effort: None,
+            enable_thinking: None,
         },
     );
 }
