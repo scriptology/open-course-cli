@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/scriptology/open-course-cli/compare/v0.17.0...v0.18.0) (2026-08-20)
+
+
+### Features
+
+* **llm:** support enable_thinking option for OpenAI-compatible providers ([096a1b6](https://github.com/scriptology/open-course-cli/commit/096a1b6c506327ca67bfa7288671e59d3870e16c))
+
 ## [0.17.0](https://github.com/scriptology/open-course-cli/compare/v0.16.2...v0.17.0) (2026-08-17)
 
 
