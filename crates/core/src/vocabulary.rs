@@ -175,9 +175,6 @@ pub fn normalize_key(s: &str) -> String {
     s.nfkc().collect::<String>().to_lowercase()
 }
 
-/// Maximum number of warm-up cards shown before a session's exercises.
-pub const MAX_WARMUP_ITEMS: usize = 8;
-
 /// `Some(value)` trimmed when non-empty, `None` otherwise. The LLM sometimes
 /// emits empty strings instead of omitting an optional field.
 fn non_empty(value: Option<String>) -> Option<String> {
@@ -191,13 +188,20 @@ fn non_empty(value: Option<String>) -> Option<String> {
     })
 }
 
-/// Normalized word tokens of every exercise's target sentence: the sentence
-/// is split on non-alphanumeric characters and each token is folded through
+/// Normalized word tokens of every exercise's expected and acceptable
+/// translations: the target-language sentences where the taught words
+/// actually appear (`target_sentence` is in the learner's native language,
+/// so words from it would never match). Each sentence is split on
+/// non-alphanumeric characters and each token is folded through
 /// `normalize_key`.
 fn exercise_tokens(exercises: &[crate::session::Exercise]) -> HashSet<String> {
     exercises
         .iter()
-        .flat_map(|ex| ex.target_sentence.split(|c: char| !c.is_alphanumeric()))
+        .flat_map(|ex| {
+            std::iter::once(ex.expected_translation.as_str())
+                .chain(ex.acceptable_translations.iter().map(String::as_str))
+        })
+        .flat_map(|sentence| sentence.split(|c: char| !c.is_alphanumeric()))
         .map(normalize_key)
         .filter(|token| !token.is_empty())
         .collect()
@@ -206,18 +210,19 @@ fn exercise_tokens(exercises: &[crate::session::Exercise]) -> HashSet<String> {
 /// Builds warm-up cards for a session's forced lemmas from the LLM's raw
 /// `warmup` output. Only words that actually appear in the session's
 /// exercises get a card: a forced lemma qualifies when its headword or one
-/// of its known forms (matched via `normalize_key` against the exercise
-/// tokens) shows up in a target sentence. A lemma with no known forms is
-/// also included when the LLM returned a warm-up entry for it (a new word
-/// whose inflections cannot be verified yet). Cards follow the forced-lemma
-/// order and are capped at `MAX_WARMUP_ITEMS`. A raw entry whose lemma
-/// matches supplies the translation and example; otherwise the stored
-/// translation is used with no example. Lemmas without any translation are
-/// skipped (there is nothing to teach), and raw entries matching no forced
-/// lemma are dropped. Each card is tagged `WarmupKind::New` when the lemma
-/// hasn't been evaluated yet (`STATUS_NEW`) or `WarmupKind::Review`
-/// otherwise (see `new_word_items` for words with no `Lemma` row at all,
-/// tagged `New` the same way).
+/// of its known forms (matched via `normalize_key` against the tokens of the
+/// exercises' expected/acceptable translations) shows up in a target-language
+/// sentence. A lemma with no known forms is also included when the LLM
+/// returned a warm-up entry for it (a new word whose inflections cannot be
+/// verified yet). Cards follow the forced-lemma order and are not capped:
+/// every word the learner has never answered correctly gets a card. A raw
+/// entry whose lemma matches supplies the translation and example; otherwise
+/// the stored translation is used with no example. Lemmas without any
+/// translation are skipped (there is nothing to teach), and raw entries
+/// matching no forced lemma are dropped. Each card is tagged
+/// `WarmupKind::New` when the lemma hasn't been evaluated yet (`STATUS_NEW`)
+/// or `WarmupKind::Review` otherwise (see `new_word_items` for words the
+/// learner has never answered correctly, tagged `New` the same way).
 pub fn match_warmup_items(
     forced: &[Lemma],
     forms: &[Form],
@@ -303,34 +308,35 @@ pub fn match_warmup_items(
                 Some(item)
             }
         })
-        // Cap cards, not candidate lemmas: a translation-less lemma must not
-        // eat a slot that a later translated lemma could have filled.
-        .take(MAX_WARMUP_ITEMS)
         .collect()
 }
 
-/// Builds warm-up preview cards for genuinely new words: content words the
-/// LLM reports using in the session's exercises (`raw`, the `"vocabulary"`
-/// array from `Exercises`) that have no `Lemma` row at all yet in
-/// `existing_lemmas`, regardless of that lemma's status — a word already in
-/// the table (even `STATUS_NEW`) is `match_warmup_items`'s job, not this
-/// one. Same invariants as `match_warmup_items`: the word must actually
-/// appear in a generated exercise (no hallucinated vocabulary) — checked
-/// against `surface` (the inflected form actually used), not `lemma` itself,
-/// since an inflected verb's dictionary headword usually never appears
-/// verbatim (falls back to `lemma` when the LLM omits `surface`) — and
-/// non-content POS and empty translations are skipped. Every card is tagged
-/// `WarmupKind::New`.
+/// Builds warm-up preview cards for words the learner does not know yet:
+/// content words the LLM reports using in the session's exercises (`raw`,
+/// the `"vocabulary"` array from `Exercises`) that either have no `Lemma`
+/// row at all in `existing_lemmas` or whose existing row has
+/// `correct_uses == 0` — never answered correctly, which covers both
+/// `STATUS_NEW` and a word the learner has only ever gotten wrong. A word
+/// with `correct_uses > 0` counts as known and gets no card. Same invariants
+/// as `match_warmup_items`: the word must actually appear in a generated
+/// exercise's target-language sentence (no hallucinated vocabulary) —
+/// checked against `surface` (the inflected form actually used), not
+/// `lemma` itself, since an inflected verb's dictionary headword usually
+/// never appears verbatim (falls back to `lemma` when the LLM omits
+/// `surface`) — and non-content POS and empty translations are skipped.
+/// For a word with an existing row the card carries that row's id and falls
+/// back to the stored `pos`/`cefr_level`/`translation` when the raw item's
+/// are empty. Every card is tagged `WarmupKind::New`.
 pub fn new_word_items(
     existing_lemmas: &[Lemma],
     exercises: &[crate::session::Exercise],
     raw: Vec<crate::llm::parse::RawVocabularyItem>,
 ) -> Vec<crate::session::WarmupItem> {
-    use std::collections::HashSet;
+    use std::collections::HashMap;
 
-    let known_keys: HashSet<String> = existing_lemmas
+    let by_key: HashMap<String, &Lemma> = existing_lemmas
         .iter()
-        .map(|l| normalize_key(&l.lemma))
+        .map(|lemma| (normalize_key(&lemma.lemma), lemma))
         .collect();
     let tokens = exercise_tokens(exercises);
 
@@ -338,7 +344,11 @@ pub fn new_word_items(
     raw.into_iter()
         .filter_map(|item| {
             let key = normalize_key(item.lemma.trim());
-            if key.is_empty() || known_keys.contains(&key) || !seen_keys.insert(key.clone()) {
+            if key.is_empty() || !seen_keys.insert(key.clone()) {
+                return None;
+            }
+            let existing = by_key.get(&key).copied();
+            if existing.is_some_and(|lemma| lemma.correct_uses > 0) {
                 return None;
             }
             let pos = item.pos.clone().unwrap_or_default();
@@ -354,12 +364,16 @@ pub fn new_word_items(
             if !appears {
                 return None;
             }
-            let translation = non_empty(item.translation)?;
+            let translation = non_empty(item.translation).or_else(|| {
+                existing.and_then(|lemma| non_empty(Some(lemma.translation.clone())))
+            })?;
             Some(crate::session::WarmupItem {
-                lemma_id: None,
+                lemma_id: existing.map(|lemma| lemma.id.clone()),
                 lemma: item.lemma,
-                pos: non_empty(item.pos),
-                cefr_level: non_empty(item.cefr_level),
+                pos: non_empty(item.pos)
+                    .or_else(|| existing.and_then(|lemma| non_empty(Some(lemma.pos.clone())))),
+                cefr_level: non_empty(item.cefr_level)
+                    .or_else(|| existing.and_then(|lemma| lemma.cefr_level.clone())),
                 translation,
                 example: None,
                 kind: crate::session::WarmupKind::New,
@@ -928,11 +942,14 @@ mod tests {
         }
     }
 
-    fn exercise(target_sentence: &str) -> crate::session::Exercise {
+    /// Exercise whose expected (target-language) translation contains the
+    /// given sentence; the native-language `target_sentence` is irrelevant
+    /// for warm-up matching.
+    fn exercise(expected_translation: &str) -> crate::session::Exercise {
         crate::session::Exercise {
             id: "ex1".to_string(),
-            target_sentence: target_sentence.to_string(),
-            expected_translation: String::new(),
+            target_sentence: String::new(),
+            expected_translation: expected_translation.to_string(),
             acceptable_translations: vec![],
             target_topic_ids: vec![],
             side_topic_ids: vec![],
@@ -1087,36 +1104,38 @@ mod tests {
     }
 
     #[test]
-    fn warmup_preserves_forced_order_and_caps_at_eight() {
+    fn warmup_preserves_forced_order_without_cap() {
         let forced: Vec<Lemma> = (0..10)
             .map(|i| forced_lemma(&format!("es-w{i}"), &format!("w{i}"), "t"))
             .collect();
         // Raw order is the reverse of the forced order; output must still
-        // follow the forced order.
+        // follow the forced order, and every qualifying lemma gets a card
+        // (no cap).
         let raw: Vec<_> = (0..10)
             .rev()
             .map(|i| raw_warmup(&format!("w{i}"), None, None))
             .collect();
         let items = match_warmup_items(&forced, &[], &[], raw);
-        assert_eq!(items.len(), MAX_WARMUP_ITEMS);
         let lemmas: Vec<&str> = items.iter().map(|i| i.lemma.as_str()).collect();
-        assert_eq!(lemmas, ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"]);
+        assert_eq!(
+            lemmas,
+            ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8", "w9"]
+        );
     }
 
     #[test]
-    fn warmup_cap_applies_after_skipping_untranslated() {
-        // Ten qualifying lemmas, the first without a translation: the cap
-        // applies to cards, not to candidate lemmas, so the list still fills
-        // up to eight (w1..w8) instead of stopping at seven.
+    fn warmup_skips_untranslated_lemmas_without_cap() {
+        // Ten qualifying lemmas, the first without a translation: it is
+        // skipped and all nine translated lemmas get cards.
         let mut forced = vec![forced_lemma("es-w0", "w0", "")];
         forced.extend((1..10).map(|i| forced_lemma(&format!("es-w{i}"), &format!("w{i}"), "t")));
         let raw: Vec<_> = (0..10)
             .map(|i| raw_warmup(&format!("w{i}"), None, None))
             .collect();
         let items = match_warmup_items(&forced, &[], &[], raw);
-        assert_eq!(items.len(), MAX_WARMUP_ITEMS);
+        assert_eq!(items.len(), 9);
         assert_eq!(items[0].lemma, "w1");
-        assert_eq!(items[MAX_WARMUP_ITEMS - 1].lemma, "w8");
+        assert_eq!(items[8].lemma, "w9");
     }
 
     #[test]
@@ -1154,22 +1173,65 @@ mod tests {
     }
 
     #[test]
-    fn new_word_items_excludes_existing_lemmas() {
-        let existing = vec![forced_lemma("es-comer", "comer", "есть")];
+    fn new_word_items_excludes_lemmas_answered_correctly() {
+        let mut known = forced_lemma("es-comer", "comer", "есть");
+        known.correct_uses = 3;
+        let existing = vec![known];
         // "comer" appears via its exact headword form here, so the surface
-        // check wouldn't be what excludes it — the existing-lemma check is.
+        // check wouldn't be what excludes it — the correct_uses check is.
         let exercises = vec![exercise("Quiero comer y beber.")];
         let raw = vec![
             raw_vocabulary("comer", "comer", "VERB", Some("кушать")),
             raw_vocabulary("beber", "beber", "VERB", Some("пить")),
         ];
         let items = new_word_items(&existing, &exercises, raw);
-        // "comer" already has a Lemma row (any status) — not new, even
-        // though the LLM reported it too; only "beber" is genuinely new.
+        // "comer" was answered correctly before — known, no card; only
+        // "beber" (no Lemma row at all) qualifies.
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].lemma, "beber");
         assert_eq!(items[0].lemma_id, None);
         assert_eq!(items[0].kind, crate::session::WarmupKind::New);
+    }
+
+    #[test]
+    fn new_word_items_includes_existing_lemma_never_answered_correctly() {
+        // A Lemma row exists but the word was never answered correctly
+        // (correct_uses == 0) — whether STATUS_NEW or PRACTICING with only
+        // errors — so it still gets a warm-up card, now linked to the row.
+        let mut never_used = forced_lemma("es-comer", "comer", "");
+        never_used.cefr_level = Some("A1".to_string());
+        let mut only_errors = forced_lemma("es-beber", "beber", "пить");
+        only_errors.status = STATUS_PRACTICING;
+        only_errors.incorrect_uses = 2;
+        let existing = vec![never_used, only_errors];
+        let exercises = vec![exercise("Quiero comer y beber.")];
+        let raw = vec![
+            // Raw translation empty: falls back to the stored one — but
+            // "comer" has none stored either, so it is still skipped.
+            raw_vocabulary("comer", "comer", "VERB", None),
+            // Raw pos/cefr/translation present: used verbatim.
+            raw_vocabulary("beber", "beber", "VERB", Some("выпивать")),
+        ];
+        let items = new_word_items(&existing, &exercises, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "beber");
+        assert_eq!(items[0].lemma_id.as_deref(), Some("es-beber"));
+        assert_eq!(items[0].translation, "выпивать");
+        assert_eq!(items[0].kind, crate::session::WarmupKind::New);
+
+        // Stored fields fill gaps in the raw item.
+        let raw = vec![crate::llm::parse::RawVocabularyItem {
+            lemma: "beber".to_string(),
+            surface: "beber".to_string(),
+            pos: None,
+            cefr_level: None,
+            translation: None,
+        }];
+        let items = new_word_items(&existing, &exercises, raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma_id.as_deref(), Some("es-beber"));
+        assert_eq!(items[0].pos.as_deref(), Some("VERB"));
+        assert_eq!(items[0].translation, "пить");
     }
 
     #[test]
@@ -1241,5 +1303,36 @@ mod tests {
         let items = new_word_items(&[], &exercises, raw);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].translation, "кушать");
+    }
+
+    #[test]
+    fn appearance_check_matches_translations_not_target_sentence() {
+        // "bread" appears only in the native-language target_sentence: no
+        // card. "como" appears in the expected translation: card. "fruta"
+        // appears only in an acceptable alternative: card too.
+        let exercises = vec![crate::session::Exercise {
+            target_sentence: "I eat bread.".to_string(),
+            ..exercise("Como pan.")
+        }];
+        let mut with_acceptable = exercises.clone();
+        with_acceptable[0].acceptable_translations = vec!["Yo como fruta.".to_string()];
+        let raw = vec![
+            raw_vocabulary("bread", "bread", "NOUN", Some("хлеб")),
+            raw_vocabulary("comer", "como", "VERB", Some("кушать")),
+            raw_vocabulary("fruta", "fruta", "NOUN", Some("фрукт")),
+        ];
+        let items = new_word_items(&[], &with_acceptable, raw);
+        let lemmas: Vec<&str> = items.iter().map(|i| i.lemma.as_str()).collect();
+        assert_eq!(lemmas, ["comer", "fruta"]);
+    }
+
+    #[test]
+    fn new_word_items_are_not_capped() {
+        let exercises = vec![exercise("w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11.")];
+        let raw: Vec<_> = (0..12)
+            .map(|i| raw_vocabulary(&format!("w{i}"), &format!("w{i}"), "NOUN", Some("t")))
+            .collect();
+        let items = new_word_items(&[], &exercises, raw);
+        assert_eq!(items.len(), 12);
     }
 }
