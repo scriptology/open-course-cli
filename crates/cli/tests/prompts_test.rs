@@ -136,6 +136,20 @@ fn exercise_prompt_always_requests_vocabulary_extraction() {
 }
 
 #[test]
+fn exercise_prompt_anchors_vocabulary_extraction_to_expected_translation() {
+    let p = profile();
+    let all = vec![topic("t1")];
+    let target = vec![topic("t1")];
+    let prompt = build_exercise_prompt(&p, &target, &[], &all, &[], &[], 3, 0.75);
+
+    // `targetSentence` holds the native-language sentence; the vocabulary
+    // instructions must name `expectedTranslation` explicitly so the model
+    // extracts target-language words instead.
+    assert!(prompt.contains("appears in the expectedTranslation fields"));
+    assert!(prompt.contains("never extract words from targetSentence"));
+}
+
+#[test]
 fn analysis_prompt_includes_answers() {
     use open_course_cli::core::session::Exercise;
 

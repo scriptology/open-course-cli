@@ -175,13 +175,18 @@ pub fn build_exercise_prompt(
         )
     };
 
+    // "Target sentences" alone is ambiguous: the exercise field
+    // `targetSentence` holds the NATIVE-language sentence, so models read it
+    // as a field reference and extract native words (with a same-language
+    // "translation"). Name the exact field to extract from instead.
     let vocabulary_extraction_note = format!(
         "\nIn addition to the exercises{warmup_ref}, return a top-level \"vocabulary\" array \
          listing every CONTENT word (NOUN, VERB, ADJ, ADV, PROPN, SCONJ, CCONJ only — skip \
-         articles, prepositions, pronouns, auxiliaries) that appears in the target sentences \
-         you just wrote, one entry per distinct word, each with these fields:\n\
-         - lemma: the dictionary headword\n\
-         - surface: the exact inflected form as it appears in the sentence\n\
+         articles, prepositions, pronouns, auxiliaries) that appears in the expectedTranslation \
+         fields you just wrote (the {target} sentences — never extract words from \
+         targetSentence, which is {native}), one entry per distinct word, each with these fields:\n\
+         - lemma: the dictionary headword in {target}\n\
+         - surface: the exact inflected form as it appears in the expectedTranslation\n\
          - pos: part of speech (Universal Dependencies tag)\n\
          - cefrLevel: approximate CEFR level (\"A1\"–\"C2\")\n\
          - translation: the translation in {native}\n",
@@ -191,6 +196,7 @@ pub fn build_exercise_prompt(
             " and the requested \"warmup\" array"
         },
         native = native_name,
+        target = target_name,
     );
 
     format!(
