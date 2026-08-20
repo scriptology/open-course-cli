@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.1](https://github.com/scriptology/open-course-cli/compare/v0.18.0...v0.18.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **prompts:** anchor vocabulary extraction to expectedTranslation ([98fb496](https://github.com/scriptology/open-course-cli/commit/98fb496c0ee46222a79cb92bf3f0f84a578f7376))
+* **prompts:** anchor vocabulary extraction to expectedTranslation ([5e153a6](https://github.com/scriptology/open-course-cli/commit/5e153a600177a5ca38e9e6c3abdb5390823844b4))
+
 ## [0.18.0](https://github.com/scriptology/open-course-cli/compare/v0.17.0...v0.18.0) (2026-08-20)
 
 
