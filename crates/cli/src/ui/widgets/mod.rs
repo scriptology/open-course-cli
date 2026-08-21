@@ -5,6 +5,7 @@ pub mod error_box;
 pub mod footer;
 pub mod help_overlay;
 pub mod hint_bar;
+pub mod line_edit;
 pub mod markdown_style;
 pub mod model_picker;
 pub mod progress_bar;

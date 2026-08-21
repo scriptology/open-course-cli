@@ -23,7 +23,7 @@ use crate::ui::views::{
     ReportState, SessionState, SettingsState, SyncAllState, UpdateState, curriculum, dashboard,
     docs, model_check, onboarding, pairs, report, session, settings, sync_all, update,
 };
-use crate::ui::widgets::{ErrorBox, HelpOverlay, Spinner, Toast, ToastWidget};
+use crate::ui::widgets::{ErrorBox, HelpOverlay, Spinner, Toast, ToastWidget, line_edit};
 use open_course_config::{OpenCourseConfig, pair_db_path, write_config};
 use open_course_core::error::{AppError, Result};
 use open_course_db::Database;
@@ -347,6 +347,15 @@ async fn handle_event(state: &mut AppState, event: Event) -> Result<()> {
                 if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
                     state.help_open = false;
                 }
+                return Ok(());
+            }
+
+            // Terminal-style kill shortcuts (Ctrl+U/W/K) for text inputs.
+            // Handled here because view handlers only receive the KeyCode and
+            // would otherwise insert a literal 'u'/'w'/'k'.
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && line_edit::handle_kill_shortcut(state, key.code)
+            {
                 return Ok(());
             }
 
