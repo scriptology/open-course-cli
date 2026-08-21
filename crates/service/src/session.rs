@@ -45,8 +45,9 @@ pub struct ExercisePreparation {
     /// cards against the words the exercises actually contain.
     pub forced_forms: Vec<Form>,
     /// The learner's full existing vocabulary (all statuses, this pair's
-    /// target language) — used to tell genuinely new words (previewed via
-    /// `vocabulary::new_word_items`) apart from ones already in the table.
+    /// target language) — used to tell words the learner has never answered
+    /// correctly (previewed via `vocabulary::new_word_items`) apart from
+    /// ones they already know.
     pub existing_lemmas: Vec<Lemma>,
 }
 
@@ -154,9 +155,12 @@ pub async fn prepare_exercises(
 /// Runs the exercise-generation LLM call for a prepared prompt and builds
 /// the warm-up phase from two sources: the returned `warmup` entries matched
 /// against the session's forced lemmas (review cards, only for words the
-/// generated exercises actually contain), and genuinely new words the LLM
-/// reports using that aren't in `existing_lemmas` yet (preview cards, see
-/// `vocabulary::new_word_items`). Combined and capped at `MAX_WARMUP_ITEMS`.
+/// generated exercises actually contain), and words the LLM reports using
+/// that the learner has never answered correctly (see
+/// `vocabulary::new_word_items`). Review/forced cards come first, then the
+/// never-correct/new words; duplicates (same normalized lemma) are removed,
+/// keeping the earlier card. There is no cap: every unknown content word in
+/// the session gets a card.
 pub async fn generate_session_exercises(
     config: &OpenCourseConfig,
     prompt: &str,
@@ -179,7 +183,11 @@ pub async fn generate_session_exercises(
         &parsed.exercises,
         parsed.vocabulary,
     ));
-    warmup.truncate(open_course_core::vocabulary::MAX_WARMUP_ITEMS);
+    // A word the learner never answered correctly can show up both as a
+    // forced lemma and in the LLM's vocabulary list; the earlier
+    // (forced/review) card wins.
+    let mut seen: HashSet<String> = HashSet::new();
+    warmup.retain(|item| seen.insert(open_course_core::vocabulary::normalize_key(&item.lemma)));
     Ok(GeneratedSession {
         exercises: parsed.exercises,
         warmup,
