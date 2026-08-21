@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.2](https://github.com/scriptology/open-course-cli/compare/v0.18.1...v0.18.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **cli:** support Ctrl+U/W/K kill shortcuts in text inputs ([cc69ae6](https://github.com/scriptology/open-course-cli/commit/cc69ae64b5b99748f872e01a6a2eb494733c4b35))
+* **cli:** support Ctrl+U/W/K kill shortcuts in text inputs ([878d9ca](https://github.com/scriptology/open-course-cli/commit/878d9caca43809f7022e9ba97f5c83cb138169d3))
+
 ## [0.18.1](https://github.com/scriptology/open-course-cli/compare/v0.18.0...v0.18.1) (2026-08-20)
 
 
