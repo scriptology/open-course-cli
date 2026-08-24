@@ -1,6 +1,6 @@
 [package]
 name = "open-course-cli"
-version = "0.18.2" # x-release-please-version
+version = "0.18.3" # x-release-please-version
 edition = "2024"
 license = "MIT OR Apache-2.0"
 

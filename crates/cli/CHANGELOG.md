@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.3](https://github.com/scriptology/open-course-cli/compare/v0.18.2...v0.18.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* **llm:** use max_completion_tokens for the OpenAI provider ([b4da17f](https://github.com/scriptology/open-course-cli/commit/b4da17f9099b78b2a5dbf98da85a66d0af957193))
+* **llm:** use max_completion_tokens for the OpenAI provider ([ecfe14f](https://github.com/scriptology/open-course-cli/commit/ecfe14f3f0c894c938e9b313a3307418b44732f5))
+
 ## [0.18.2](https://github.com/scriptology/open-course-cli/compare/v0.18.1...v0.18.2) (2026-08-21)
 
 
