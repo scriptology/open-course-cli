@@ -152,6 +152,7 @@ fn build_openai_request_body(
     reasoning_effort: Option<&str>,
     enable_thinking: Option<bool>,
     max_tokens: u32,
+    openai_native: bool,
 ) -> serde_json::Value {
     let mut messages = Vec::new();
     if let Some(system) = system {
@@ -162,12 +163,20 @@ fn build_openai_request_body(
         "model": model,
         "messages": messages,
         "stream": true,
-        "max_tokens": max_tokens,
     });
+    // OpenAI's gpt-5/o-series models reject `max_tokens` and require
+    // `max_completion_tokens`; OpenAI-compatible gateways expect
+    // `max_tokens`.
+    if openai_native {
+        body["max_completion_tokens"] = json!(max_tokens);
+    } else {
+        body["max_tokens"] = json!(max_tokens);
+    }
     if let Some(effort) = reasoning_effort {
         body["reasoning_effort"] = json!(effort);
     }
-    if let Some(enable_thinking) = enable_thinking {
+    // OpenAI rejects the Qwen/Aliyun `enable_thinking` extension with a 400.
+    if !openai_native && let Some(enable_thinking) = enable_thinking {
         body["enable_thinking"] = json!(enable_thinking);
     }
     body
@@ -183,6 +192,7 @@ pub async fn stream_openai_compatible(
     reasoning_effort: Option<&str>,
     enable_thinking: Option<bool>,
     max_tokens: u32,
+    openai_native: bool,
 ) -> Result<LlmStream> {
     let client = Client::new();
     let body = build_openai_request_body(
@@ -192,6 +202,7 @@ pub async fn stream_openai_compatible(
         reasoning_effort,
         enable_thinking,
         max_tokens,
+        openai_native,
     );
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
@@ -275,18 +286,29 @@ mod tests {
 
     #[test]
     fn request_body_omits_enable_thinking_when_unset() {
-        let body = build_openai_request_body("m", None, "hi", None, None, 100);
+        let body = build_openai_request_body("m", None, "hi", None, None, 100, false);
         assert!(body.get("enable_thinking").is_none());
         assert!(body.get("reasoning_effort").is_none());
     }
 
     #[test]
     fn request_body_includes_enable_thinking_when_set() {
-        let body = build_openai_request_body("m", Some("sys"), "hi", Some("low"), Some(false), 100);
+        let body =
+            build_openai_request_body("m", Some("sys"), "hi", Some("low"), Some(false), 100, false);
         assert_eq!(body["enable_thinking"], json!(false));
         assert_eq!(body["reasoning_effort"], json!("low"));
         assert_eq!(body["stream"], json!(true));
         assert_eq!(body["max_tokens"], json!(100));
         assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn openai_native_body_uses_max_completion_tokens_and_drops_enable_thinking() {
+        let body =
+            build_openai_request_body("m", None, "hi", Some("low"), Some(false), 100, true);
+        assert_eq!(body["max_completion_tokens"], json!(100));
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["reasoning_effort"], json!("low"));
+        assert!(body.get("enable_thinking").is_none());
     }
 }

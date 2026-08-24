@@ -104,6 +104,10 @@ pub struct RigClient {
     api_key: String,
     reasoning_effort: Option<String>,
     enable_thinking: Option<bool>,
+    /// True for the real OpenAI API (not OpenAI-compatible gateways):
+    /// requires `max_completion_tokens` and rejects unknown parameters such
+    /// as the Qwen/Aliyun `enable_thinking` extension.
+    openai_native: bool,
 }
 
 impl RigClient {
@@ -121,7 +125,14 @@ impl RigClient {
 
         let api_key = api_key.unwrap_or_default();
         let reasoning_effort = config.reasoning_effort().map(|s| s.to_string());
-        let enable_thinking = config.enable_thinking();
+        let openai_native = provider_id == ProviderId::OpenAi;
+        // OpenAI rejects unknown parameters with a 400, and enable_thinking
+        // is a Qwen/Aliyun extension — drop it for the real OpenAI API.
+        let enable_thinking = if openai_native {
+            None
+        } else {
+            config.enable_thinking()
+        };
 
         let (inner, base_url) = match provider_id {
             ProviderId::Anthropic => {
@@ -177,6 +188,7 @@ impl RigClient {
             api_key,
             reasoning_effort,
             enable_thinking,
+            openai_native,
         })
     }
 
@@ -363,6 +375,7 @@ impl LlmClient for RigClient {
                     self.reasoning_effort.as_deref(),
                     self.enable_thinking,
                     max_tokens,
+                    self.openai_native,
                 )
                 .await
             }
@@ -475,5 +488,27 @@ mod tests {
         let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
         assert_eq!(client.base_url, "https://generativelanguage.googleapis.com");
         assert!(matches!(client.inner, RigClientInner::Gemini(_)));
+    }
+
+    #[test]
+    fn openai_drops_enable_thinking_and_marks_native_api() {
+        let mut cfg = config(Some("openai-key"), None, None);
+        let ProviderConfig::ApiKey {
+            enable_thinking, ..
+        } = &mut cfg;
+        *enable_thinking = Some(false);
+        let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
+        assert!(client.openai_native);
+        assert_eq!(client.enable_thinking, None);
+
+        // Custom gateways keep the configured enable_thinking.
+        let mut custom_cfg = config(Some("key"), Some("https://example.com/v1"), None);
+        let ProviderConfig::ApiKey {
+            enable_thinking, ..
+        } = &mut custom_cfg;
+        *enable_thinking = Some(false);
+        let custom = RigClient::from_config(&custom_cfg, ProviderId::Custom).expect("should build");
+        assert!(!custom.openai_native);
+        assert_eq!(custom.enable_thinking, Some(false));
     }
 }
