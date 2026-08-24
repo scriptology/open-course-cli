@@ -304,8 +304,7 @@ mod tests {
 
     #[test]
     fn openai_native_body_uses_max_completion_tokens_and_drops_enable_thinking() {
-        let body =
-            build_openai_request_body("m", None, "hi", Some("low"), Some(false), 100, true);
+        let body = build_openai_request_body("m", None, "hi", Some("low"), Some(false), 100, true);
         assert_eq!(body["max_completion_tokens"], json!(100));
         assert!(body.get("max_tokens").is_none());
         assert_eq!(body["reasoning_effort"], json!("low"));
