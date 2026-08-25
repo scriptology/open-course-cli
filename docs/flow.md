@@ -121,6 +121,14 @@ Curriculum generation runs in parallel by CEFR level. The screen shows per-level
 5. A batch of exercises is generated for the selected topic (using `batch_size` from preferences). All exercises in the batch are generated in a single LLM request.
 6. The user sees translation sentences one by one, types the translation, and presses `Enter` to move to the next exercise.
 
+### Session stages
+
+A session runs up to three stages in order:
+
+1. **Warm-up** — flashcards for content words the learner has never answered correctly (no `Lemma` row, or a row with `correct_uses == 0`): forced vocabulary being reinforced plus new words previewed from the freshly generated exercises.
+2. **Cloze with word bank** — for every content word without positive learning progress (same `correct_uses == 0` predicate), one simple target-language sentence with the target word blanked out (`_____`) and 3–4 options: the correct inflected form plus 2–3 distractors of similar grammatical shape. Scoring is deterministic right/wrong (the chosen option either is the answer or not) and is counted into word progress server-side.
+3. **Translation exercises** — the main batch described above, analyzed by the LLM after the last answer.
+
 During a session:
 
 - `Enter` submits the answer and advances.

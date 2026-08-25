@@ -21,6 +21,11 @@ pub struct Exercises {
     /// prompts and bare-array responses have none.
     #[serde(default)]
     pub vocabulary: Vec<RawVocabularyItem>,
+    /// Cloze (word-bank) items, one per word of `vocabulary`, for words
+    /// without positive learning progress (see `vocabulary::cloze_items`).
+    /// Optional: older prompts and bare-array responses have none.
+    #[serde(default)]
+    pub cloze: Vec<RawClozeItem>,
 }
 
 /// Warm-up entry as returned by the LLM, before it is matched against the
@@ -62,6 +67,30 @@ pub struct RawVocabularyItem {
     pub cefr_level: Option<String>,
     #[serde(default)]
     pub translation: Option<String>,
+}
+
+/// Cloze (fill-in-the-blank with a word bank) entry as returned by the LLM,
+/// before it is validated and matched against the learner's vocabulary (see
+/// `vocabulary::cloze_items`). Every field is optional so a partial entry
+/// never breaks parsing of the whole response. The sentence is returned
+/// complete — the pipeline blanks the answer out itself.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawClozeItem {
+    #[serde(default)]
+    pub lemma: String,
+    #[serde(default)]
+    pub sentence: String,
+    #[serde(default)]
+    pub answer: String,
+    #[serde(default)]
+    pub distractors: Vec<String>,
+    #[serde(default)]
+    pub translation: Option<String>,
+    #[serde(default)]
+    pub pos: Option<String>,
+    #[serde(default)]
+    pub cefr_level: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -107,6 +136,7 @@ pub fn parse_session_exercises(
             exercises: vec,
             warmup: vec![],
             vocabulary: vec![],
+            cloze: vec![],
         });
     }
 
@@ -595,6 +625,45 @@ mod tests {
         let result = parse_session_exercises(&cleaned, 0, 0).unwrap();
         assert_eq!(result.exercises.len(), 1);
         assert!(result.warmup.is_empty());
+        assert!(result.cloze.is_empty());
+    }
+
+    // --- cloze parsing ---
+
+    #[test]
+    fn parse_session_exercises_defaults_cloze_when_absent() {
+        let cleaned = format!(r#"{{"exercises": [{}]}}"#, exercise_json("ex1"));
+        let result = parse_session_exercises(&cleaned, 0, 0).unwrap();
+        assert_eq!(result.exercises.len(), 1);
+        assert!(result.cloze.is_empty());
+    }
+
+    #[test]
+    fn parse_session_exercises_parses_cloze() {
+        let cleaned = format!(
+            r#"{{"exercises": [{}], "cloze": [
+                {{"lemma": "comer", "sentence": "Como pan cada día.", "answer": "Como", "distractors": ["Comes", "Comer"], "translation": "Я ем хлеб каждый день.", "pos": "VERB", "cefrLevel": "A1"}},
+                {{"lemma": "pequeño"}}
+            ]}}"#,
+            exercise_json("ex1")
+        );
+        let result = parse_session_exercises(&cleaned, 0, 0).unwrap();
+        assert_eq!(result.cloze.len(), 2);
+        assert_eq!(result.cloze[0].lemma, "comer");
+        assert_eq!(result.cloze[0].sentence, "Como pan cada día.");
+        assert_eq!(result.cloze[0].answer, "Como");
+        assert_eq!(result.cloze[0].distractors, ["Comes", "Comer"]);
+        assert_eq!(
+            result.cloze[0].translation.as_deref(),
+            Some("Я ем хлеб каждый день.")
+        );
+        assert_eq!(result.cloze[0].pos.as_deref(), Some("VERB"));
+        assert_eq!(result.cloze[0].cefr_level.as_deref(), Some("A1"));
+        // Partial entries parse too: missing fields fall back to defaults.
+        assert_eq!(result.cloze[1].lemma, "pequeño");
+        assert!(result.cloze[1].sentence.is_empty());
+        assert!(result.cloze[1].distractors.is_empty());
+        assert_eq!(result.cloze[1].translation, None);
     }
 
     // --- parse_analysis ---

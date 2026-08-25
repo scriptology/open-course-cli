@@ -382,6 +382,120 @@ pub fn new_word_items(
         .collect()
 }
 
+/// Placeholder replacing the answer in a cloze sentence. Inserted by
+/// `cloze_items` at the real char boundaries of the matched token, never by
+/// the LLM, so every item shares the exact same marker.
+pub const CLOZE_BLANK: &str = "_____";
+
+/// Replaces the first word token of `sentence` whose normalized form equals
+/// `answer_key` with `CLOZE_BLANK`, returning the rewritten sentence.
+/// Matching is case- and Unicode-normalized (via `normalize_key`) but the
+/// replacement happens at the real char boundaries of the original text.
+/// `None` when the answer does not appear as a token — the item must be
+/// dropped as a probable hallucination.
+fn blank_answer(sentence: &str, answer_key: &str) -> Option<String> {
+    let mut token_start: Option<usize> = None;
+    let check = |start: usize, end: usize| {
+        (normalize_key(&sentence[start..end]) == answer_key)
+            .then(|| format!("{}{}{}", &sentence[..start], CLOZE_BLANK, &sentence[end..]))
+    };
+    for (i, c) in sentence.char_indices() {
+        if c.is_alphanumeric() {
+            if token_start.is_none() {
+                token_start = Some(i);
+            }
+        } else if let Some(start) = token_start.take()
+            && let Some(blanked) = check(start, i)
+        {
+            return Some(blanked);
+        }
+    }
+    if let Some(start) = token_start {
+        return check(start, sentence.len());
+    }
+    None
+}
+
+/// Builds cloze (word-bank) items for a session from the LLM's raw `cloze`
+/// output (the `"cloze"` array from `Exercises`). Only words without
+/// positive learning progress get an item: those with no `Lemma` row at all
+/// (matched by `normalize_key(lemma)`, same as `new_word_items`) or whose
+/// existing row has `correct_uses == 0`; forced-vocabulary lemmas count as
+/// existing rows too, so a forced lemma with `correct_uses == 0` is kept and
+/// linked even when it is absent from `existing_lemmas`. Anti-hallucination
+/// validation: the `answer` (compared via `normalize_key`) must appear in
+/// `sentence`; the first matching token is replaced with `CLOZE_BLANK` at
+/// the real char boundaries, so the placeholder is guaranteed consistent —
+/// the item is dropped otherwise. `options` is the answer plus distractors,
+/// deduped via `normalize_key`; items that do not end up with 3–4 unique
+/// options are dropped. Items are deduped by `normalize_key(lemma)` (first
+/// wins). For a word with an existing row the item carries that row's id
+/// and falls back to the stored `pos`/`cefr_level` when the raw item's are
+/// empty.
+pub fn cloze_items(
+    existing_lemmas: &[Lemma],
+    forced_vocabulary: &[Lemma],
+    raw: Vec<crate::llm::parse::RawClozeItem>,
+) -> Vec<crate::session::ClozeItem> {
+    use std::collections::HashMap;
+
+    let mut by_key: HashMap<String, &Lemma> = HashMap::new();
+    for lemma in forced_vocabulary {
+        by_key.insert(normalize_key(&lemma.lemma), lemma);
+    }
+    // Existing rows win over forced duplicates: they are the fuller record.
+    for lemma in existing_lemmas {
+        by_key.insert(normalize_key(&lemma.lemma), lemma);
+    }
+
+    let mut seen_keys: HashSet<String> = HashSet::new();
+    raw.into_iter()
+        .filter_map(|item| {
+            let key = normalize_key(item.lemma.trim());
+            if key.is_empty() || !seen_keys.insert(key.clone()) {
+                return None;
+            }
+            let existing = by_key.get(&key).copied();
+            if existing.is_some_and(|lemma| lemma.correct_uses > 0) {
+                return None;
+            }
+            let answer = item.answer.trim();
+            let answer_key = normalize_key(answer);
+            if answer_key.is_empty() {
+                return None;
+            }
+            let sentence = blank_answer(item.sentence.trim(), &answer_key)?;
+            let mut options: Vec<String> = Vec::new();
+            let mut option_keys: HashSet<String> = HashSet::new();
+            options.push(answer.to_string());
+            option_keys.insert(answer_key);
+            for distractor in &item.distractors {
+                let distractor = distractor.trim();
+                let distractor_key = normalize_key(distractor);
+                if distractor_key.is_empty() || !option_keys.insert(distractor_key) {
+                    continue;
+                }
+                options.push(distractor.to_string());
+            }
+            if !(3..=4).contains(&options.len()) {
+                return None;
+            }
+            Some(crate::session::ClozeItem {
+                lemma_id: existing.map(|lemma| lemma.id.clone()),
+                lemma: item.lemma,
+                pos: non_empty(item.pos)
+                    .or_else(|| existing.and_then(|lemma| non_empty(Some(lemma.pos.clone())))),
+                cefr_level: non_empty(item.cefr_level)
+                    .or_else(|| existing.and_then(|lemma| lemma.cefr_level.clone())),
+                sentence,
+                answer: answer.to_string(),
+                options,
+                translation: non_empty(item.translation).unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
 /// Priority rank of a CEFR source: user-curated data ("manual"/"list") is 4,
 /// curriculum topics ("topic") 3, LLM estimates ("llm") 2, and anything else
 /// or `None` is 0.
@@ -1334,5 +1448,140 @@ mod tests {
             .collect();
         let items = new_word_items(&[], &exercises, raw);
         assert_eq!(items.len(), 12);
+    }
+
+    // --- cloze_items ---
+
+    fn raw_cloze(
+        lemma: &str,
+        sentence: &str,
+        answer: &str,
+        distractors: &[&str],
+    ) -> crate::llm::parse::RawClozeItem {
+        crate::llm::parse::RawClozeItem {
+            lemma: lemma.to_string(),
+            sentence: sentence.to_string(),
+            answer: answer.to_string(),
+            distractors: distractors.iter().map(|s| s.to_string()).collect(),
+            translation: Some("t".to_string()),
+            pos: None,
+            cefr_level: None,
+        }
+    }
+
+    #[test]
+    fn cloze_items_excludes_lemmas_answered_correctly() {
+        let mut known = forced_lemma("es-comer", "comer", "есть");
+        known.correct_uses = 3;
+        let existing = vec![known];
+        let raw = vec![
+            raw_cloze("comer", "Como pan.", "Como", &["Comes", "Comen"]),
+            raw_cloze("beber", "Bebo agua.", "Bebo", &["Bebes", "Beber"]),
+        ];
+        let items = cloze_items(&existing, &[], raw);
+        // "comer" was answered correctly before — no item; "beber" has no
+        // Lemma row at all and qualifies.
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma, "beber");
+        assert_eq!(items[0].lemma_id, None);
+    }
+
+    #[test]
+    fn cloze_items_links_existing_lemma_never_answered_correctly() {
+        let mut only_errors = forced_lemma("es-comer", "comer", "есть");
+        only_errors.status = STATUS_PRACTICING;
+        only_errors.incorrect_uses = 2;
+        only_errors.cefr_level = Some("A1".to_string());
+        let raw = vec![raw_cloze("Comer", "Como pan.", "Como", &["Comes", "Comen"])];
+        let items = cloze_items(&[only_errors], &[], raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma_id.as_deref(), Some("es-comer"));
+        // Stored pos/cefr fill the raw item's gaps.
+        assert_eq!(items[0].pos.as_deref(), Some("VERB"));
+        assert_eq!(items[0].cefr_level.as_deref(), Some("A1"));
+        // The display form comes from the raw item, not the stored lemma.
+        assert_eq!(items[0].lemma, "Comer");
+    }
+
+    #[test]
+    fn cloze_items_keeps_forced_lemma_with_zero_correct_uses() {
+        // A forced lemma whose row is not in `existing_lemmas` still counts
+        // as an existing row: kept while correct_uses == 0, dropped once it
+        // has positive progress.
+        let forced = vec![forced_lemma("es-comer", "comer", "есть")];
+        let items = cloze_items(
+            &[],
+            &forced,
+            vec![raw_cloze("comer", "Como pan.", "Como", &["Comes", "Comen"])],
+        );
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].lemma_id.as_deref(), Some("es-comer"));
+
+        let mut practiced = forced_lemma("es-comer", "comer", "есть");
+        practiced.correct_uses = 1;
+        let items = cloze_items(
+            &[],
+            &[practiced],
+            vec![raw_cloze("comer", "Como pan.", "Como", &["Comes", "Comen"])],
+        );
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn cloze_items_drops_answer_absent_from_sentence() {
+        // The LLM claims "comes" but the sentence says "como" — probable
+        // hallucination, dropped.
+        let raw = vec![raw_cloze("comer", "Como pan.", "Comes", &["Comen", "Comer"])];
+        assert!(cloze_items(&[], &[], raw).is_empty());
+    }
+
+    #[test]
+    fn cloze_items_blanks_answer_case_insensitively_at_real_boundaries() {
+        // Answer casing differs from the sentence; the match is normalized,
+        // the replacement keeps the rest of the sentence untouched.
+        let raw = vec![raw_cloze("comer", "Yo como pan cada día.", "Como", &["comes", "comen"])];
+        let items = cloze_items(&[], &[], raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].sentence, "Yo _____ pan cada día.");
+        assert_eq!(items[0].answer, "Como");
+    }
+
+    #[test]
+    fn cloze_items_options_dedup_and_count() {
+        // A distractor duplicating the answer (different case) is deduped;
+        // two remaining distractors give exactly 3 options.
+        let raw = vec![raw_cloze(
+            "comer",
+            "Como pan.",
+            "Como",
+            &["como", "Comes", "Comen"],
+        )];
+        let items = cloze_items(&[], &[], raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].options, ["Como", "Comes", "Comen"]);
+
+        // Fewer than 3 unique options: dropped.
+        let raw = vec![raw_cloze("comer", "Como pan.", "Como", &["como"])];
+        assert!(cloze_items(&[], &[], raw).is_empty());
+
+        // More than 4 unique options: contract violation, dropped.
+        let raw = vec![raw_cloze(
+            "comer",
+            "Como pan.",
+            "Como",
+            &["comes", "comen", "comer", "comed"],
+        )];
+        assert!(cloze_items(&[], &[], raw).is_empty());
+    }
+
+    #[test]
+    fn cloze_items_dedups_repeated_lemmas() {
+        let raw = vec![
+            raw_cloze("Comer", "Como pan.", "Como", &["Comes", "Comen"]),
+            raw_cloze("comer", "Como fruta.", "Como", &["Comes", "Comen"]),
+        ];
+        let items = cloze_items(&[], &[], raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].sentence, "_____ pan.");
     }
 }

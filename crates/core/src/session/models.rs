@@ -101,6 +101,40 @@ pub struct WarmupItem {
     pub kind: WarmupKind,
 }
 
+/// One cloze (fill-in-the-blank with a word bank) item shown after the
+/// warm-up and before the translation exercises: a simple target-language
+/// sentence with the target word blanked out and 3–4 options to choose
+/// from. Built by matching the LLM's `cloze` output against the learner's
+/// vocabulary (see `vocabulary::cloze_items`) for content words without
+/// positive learning progress; never persisted.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ClozeItem {
+    /// Id of the lemma this item was built from; `None` for a word that has
+    /// no `Lemma` row yet (same convention as `WarmupItem`).
+    #[serde(default)]
+    pub lemma_id: Option<String>,
+    pub lemma: String,
+    /// Universal Dependencies part-of-speech tag ("NOUN", "VERB", ...).
+    #[serde(default)]
+    pub pos: Option<String>,
+    /// Approximate CEFR level ("A1"–"C2").
+    #[serde(default)]
+    pub cefr_level: Option<String>,
+    /// Full target-language sentence with the target word replaced by a
+    /// single `_____` placeholder (inserted by the pipeline, not the LLM).
+    pub sentence: String,
+    /// The correct word form as it appears in the sentence.
+    pub answer: String,
+    /// 3–4 choices including `answer`; order is shuffled by the caller.
+    pub options: Vec<String>,
+    /// Translation of the sentence in the learner's native language
+    /// (learner support).
+    #[serde(default)]
+    pub translation: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
