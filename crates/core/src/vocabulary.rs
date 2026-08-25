@@ -1531,7 +1531,12 @@ mod tests {
     fn cloze_items_drops_answer_absent_from_sentence() {
         // The LLM claims "comes" but the sentence says "como" — probable
         // hallucination, dropped.
-        let raw = vec![raw_cloze("comer", "Como pan.", "Comes", &["Comen", "Comer"])];
+        let raw = vec![raw_cloze(
+            "comer",
+            "Como pan.",
+            "Comes",
+            &["Comen", "Comer"],
+        )];
         assert!(cloze_items(&[], &[], raw).is_empty());
     }
 
@@ -1539,7 +1544,12 @@ mod tests {
     fn cloze_items_blanks_answer_case_insensitively_at_real_boundaries() {
         // Answer casing differs from the sentence; the match is normalized,
         // the replacement keeps the rest of the sentence untouched.
-        let raw = vec![raw_cloze("comer", "Yo como pan cada día.", "Como", &["comes", "comen"])];
+        let raw = vec![raw_cloze(
+            "comer",
+            "Yo como pan cada día.",
+            "Como",
+            &["comes", "comen"],
+        )];
         let items = cloze_items(&[], &[], raw);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].sentence, "Yo _____ pan cada día.");
