@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/scriptology/open-course-cli/compare/v0.18.3...v0.19.0) (2026-08-25)
+
+
+### Features
+
+* **core:** add cloze-with-word-bank session stage to the LLM contract ([1863039](https://github.com/scriptology/open-course-cli/commit/1863039a8d1425d00a68c076982f1f390e308c3c))
+* **core:** add cloze-with-word-bank session stage to the LLM contract ([c3f5c1c](https://github.com/scriptology/open-course-cli/commit/c3f5c1ce25a4903a7250da66f4113f7695e234f4))
+
 ## [0.18.3](https://github.com/scriptology/open-course-cli/compare/v0.18.2...v0.18.3) (2026-08-24)
 
 
