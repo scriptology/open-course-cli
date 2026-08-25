@@ -8,6 +8,7 @@ pub enum ProviderId {
     DeepSeek,
     Mistral,
     OpenRouter,
+    MiniMax,
     Ollama,
     Custom,
 }
@@ -25,6 +26,7 @@ impl<'de> Deserialize<'de> for ProviderId {
             "deepseek" => Ok(ProviderId::DeepSeek),
             "mistral" => Ok(ProviderId::Mistral),
             "openrouter" => Ok(ProviderId::OpenRouter),
+            "minimax" => Ok(ProviderId::MiniMax),
             "ollama" => Ok(ProviderId::Ollama),
             "custom" | "opencode" => Ok(ProviderId::Custom),
             _ => Err(serde::de::Error::custom(format!("unknown provider: {s}"))),
@@ -50,6 +52,7 @@ impl ProviderId {
             ProviderId::DeepSeek => "deepseek",
             ProviderId::Mistral => "mistral",
             ProviderId::OpenRouter => "openrouter",
+            ProviderId::MiniMax => "minimax",
             ProviderId::Ollama => "ollama",
             ProviderId::Custom => "custom",
         }
@@ -63,6 +66,7 @@ impl ProviderId {
             ProviderId::DeepSeek => "DeepSeek",
             ProviderId::Mistral => "Mistral",
             ProviderId::OpenRouter => "OpenRouter",
+            ProviderId::MiniMax => "MiniMax",
             ProviderId::Ollama => "Ollama",
             ProviderId::Custom => "Custom OpenAI-compatible",
         }
@@ -79,6 +83,7 @@ impl ProviderId {
     pub fn default_base_url(&self) -> Option<&'static str> {
         match self {
             ProviderId::OpenRouter => Some("https://openrouter.ai/api/v1"),
+            ProviderId::MiniMax => Some("https://api.minimax.io/v1"),
             ProviderId::Ollama => Some("http://localhost:11434/v1"),
             ProviderId::Custom => None,
             _ => None,
@@ -93,6 +98,7 @@ impl ProviderId {
             ProviderId::DeepSeek,
             ProviderId::Mistral,
             ProviderId::OpenRouter,
+            ProviderId::MiniMax,
             ProviderId::Ollama,
             ProviderId::Custom,
         ]

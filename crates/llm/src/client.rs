@@ -108,6 +108,10 @@ pub struct RigClient {
     /// requires `max_completion_tokens` and rejects unknown parameters such
     /// as the Qwen/Aliyun `enable_thinking` extension.
     openai_native: bool,
+    /// MiniMax thinking models return reasoning inline in `content` wrapped
+    /// in `<think>` tags unless the request asks for `reasoning_split`,
+    /// which would break JSON parsing downstream.
+    reasoning_split: bool,
 }
 
 impl RigClient {
@@ -189,7 +193,26 @@ impl RigClient {
             reasoning_effort,
             enable_thinking,
             openai_native,
+            reasoning_split: provider_id == ProviderId::MiniMax,
         })
+    }
+
+    /// Extra request fields for OpenAI-compatible providers: the
+    /// Qwen/Aliyun `enable_thinking` toggle and MiniMax's `reasoning_split`,
+    /// merged into one object (rig's `additional_params` is set once).
+    fn openai_additional_params(&self) -> Option<serde_json::Value> {
+        let mut params = serde_json::Map::new();
+        if self.enable_thinking == Some(false) {
+            params.insert("enable_thinking".to_string(), serde_json::json!(false));
+        }
+        if self.reasoning_split {
+            params.insert("reasoning_split".to_string(), serde_json::json!(true));
+        }
+        if params.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::Object(params))
+        }
     }
 
     pub(crate) async fn extract_typed_impl<
@@ -207,9 +230,8 @@ impl RigClient {
                         openai::completion::CompletionModel::new(client.clone(), &self.model),
                     )
                     .max_tokens(max_tokens as u64);
-                    if self.enable_thinking == Some(false) {
-                        extractor = extractor
-                            .additional_params(serde_json::json!({"enable_thinking": false}));
+                    if let Some(params) = self.openai_additional_params() {
+                        extractor = extractor.additional_params(params);
                     }
                     extractor.build().extract(prompt).await
                 }
@@ -260,13 +282,13 @@ impl RigClient {
         model: &str,
         system: Option<&str>,
         max_tokens: u32,
-        enable_thinking: Option<bool>,
+        additional_params: Option<serde_json::Value>,
     ) -> Agent<openai::completion::CompletionModel> {
         let builder =
             openai::completion::CompletionModel::new(client.clone(), model).into_agent_builder();
         let builder = builder.max_tokens(max_tokens as u64);
-        let builder = if enable_thinking == Some(false) {
-            builder.additional_params(serde_json::json!({"enable_thinking": false}))
+        let builder = if let Some(params) = additional_params {
+            builder.additional_params(params)
         } else {
             builder
         };
@@ -321,7 +343,7 @@ impl LlmClient for RigClient {
                         &self.model,
                         system,
                         max_tokens,
-                        self.enable_thinking,
+                        self.openai_additional_params(),
                     )
                     .prompt(prompt)
                     .await
@@ -510,5 +532,29 @@ mod tests {
         let custom = RigClient::from_config(&custom_cfg, ProviderId::Custom).expect("should build");
         assert!(!custom.openai_native);
         assert_eq!(custom.enable_thinking, Some(false));
+    }
+
+    #[test]
+    fn minimax_builds_with_default_base_url_and_reasoning_split() {
+        with_env_var("MINIMAX_API_KEY", None, || {
+            let cfg = config(Some("minimax-key"), None, None);
+            let client = RigClient::from_config(&cfg, ProviderId::MiniMax).expect("should build");
+            assert_eq!(client.base_url, "https://api.minimax.io/v1");
+            assert!(matches!(client.inner, RigClientInner::OpenAi(_)));
+            let params = client
+                .openai_additional_params()
+                .expect("minimax always requests reasoning_split");
+            assert_eq!(
+                params.get("reasoning_split"),
+                Some(&serde_json::json!(true))
+            );
+        });
+    }
+
+    #[test]
+    fn other_providers_have_no_additional_params_by_default() {
+        let cfg = config(Some("key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::DeepSeek).expect("should build");
+        assert_eq!(client.openai_additional_params(), None);
     }
 }
