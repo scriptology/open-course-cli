@@ -60,6 +60,14 @@ impl ProviderMeta {
                 default_base_url: Some("https://openrouter.ai/api/v1"),
                 env_key: Some("OPENROUTER_API_KEY"),
             },
+            ProviderId::MiniMax => ProviderMeta {
+                id,
+                label: "MiniMax",
+                requires_api_key: true,
+                api_key_optional: false,
+                default_base_url: Some("https://api.minimax.io/v1"),
+                env_key: Some("MINIMAX_API_KEY"),
+            },
             ProviderId::Ollama => ProviderMeta {
                 id,
                 label: "Ollama",
@@ -106,6 +114,7 @@ pub fn all_providers() -> &'static [ProviderId] {
         ProviderId::DeepSeek,
         ProviderId::Mistral,
         ProviderId::OpenRouter,
+        ProviderId::MiniMax,
         ProviderId::Ollama,
         ProviderId::Custom,
     ]
