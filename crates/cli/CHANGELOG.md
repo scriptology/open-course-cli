@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/scriptology/open-course-cli/compare/v0.19.0...v0.20.0) (2026-08-25)
+
+
+### Features
+
+* add MiniMax as a built-in provider ([18cdd94](https://github.com/scriptology/open-course-cli/commit/18cdd94cff5450bee34549286742c442d555e36e))
+* trigger release for the MiniMax provider ([b77a7cd](https://github.com/scriptology/open-course-cli/commit/b77a7cd650768f53e5d14477b462640e6c28934a))
+
 ## [0.19.0](https://github.com/scriptology/open-course-cli/compare/v0.18.3...v0.19.0) (2026-08-25)
 
 
