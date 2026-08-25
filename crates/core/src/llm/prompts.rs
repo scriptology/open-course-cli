@@ -199,6 +199,25 @@ pub fn build_exercise_prompt(
         target = target_name,
     );
 
+    // The cloze stage drills the same content words the vocabulary array
+    // reports, so it is always requested — independent of forced vocabulary.
+    let cloze_extraction_note = format!(
+        "\nIn addition, return a top-level \"cloze\" array with ONE entry per word of the \
+         \"vocabulary\" array above, each with these fields:\n\
+         - lemma: the dictionary headword, exactly as in the \"vocabulary\" array\n\
+         - sentence: one NEW short, simple sentence in {target} containing the exact inflected \
+         form of the word. It MUST obey the same sentence-shape limits stated above, it must \
+         NOT be any sentence used in the exercises or warm-up examples, and it must be written \
+         ENTIRELY in {target}\n\
+         - answer: the exact inflected form of the word as it appears in sentence\n\
+         - distractors: array of 2–3 plausible but incorrect options for the blank — similar \
+         grammatical forms (other inflections of the same lemma or the same part of speech) \
+         that are grammatically or lexically wrong in this sentence\n\
+         - translation: the translation of sentence in {native}\n",
+        native = native_name,
+        target = target_name,
+    );
+
     format!(
         "You are a language tutor. Generate {count} connected translation exercises from {native} to {target}.
 
@@ -226,7 +245,7 @@ For each exercise output a JSON object with these fields:
 - expectedPatterns: grammar patterns the student should use
 - hint: optional short hint
 
-Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}{vocabulary_extraction_note}
+Output a JSON object with the key \"exercises\" containing an array of the exercise objects.{warmup_output_note}{vocabulary_extraction_note}{cloze_extraction_note}
 
 CRITICAL: language separation. Each targetSentence must be 100% {native} and each translation (expectedTranslation, acceptableTranslations) must be 100% {target}. Never mix both languages within one sentence. If a sentence would naturally borrow a {target} word, translate that word into {native} instead.",
         native = native_name,
@@ -733,6 +752,25 @@ mod tests {
         assert!(prompt.contains("the translation in Russian"));
         assert!(prompt.contains("example sentence in Spanish"));
         assert!(prompt.contains("must NOT appear in any exercise"));
+        // The cloze contract is requested once per vocabulary word, always.
+        assert!(prompt.contains("\"cloze\""));
+        assert!(prompt.contains("ONE entry per word of the \"vocabulary\" array"));
+        assert!(prompt.contains("exactly as in the \"vocabulary\" array"));
+        assert!(prompt.contains("distractors"));
+        assert!(prompt.contains("the translation of sentence in Russian"));
+    }
+
+    #[test]
+    fn exercise_prompt_requests_cloze_per_vocabulary_word() {
+        // Requested even without forced vocabulary, and constrained by the
+        // same sentence-shape limits and novelty rules as exercises.
+        let prompt = build_exercise_prompt(&profile(), &[], &[], &[], &[], &[], 3, 0.8);
+        assert!(prompt.contains("\"cloze\""));
+        assert!(prompt.contains("ONE entry per word of the \"vocabulary\" array"));
+        assert!(prompt.contains("sentence-shape limits"));
+        assert!(prompt.contains("must NOT be any sentence used in the exercises or warm-up"));
+        assert!(prompt.contains("ENTIRELY in Spanish"));
+        assert!(prompt.contains("2–3 plausible but incorrect options"));
     }
 
     #[test]
@@ -758,6 +796,8 @@ mod tests {
         let prompt = build_exercise_prompt(&profile(), &[], &[], &[], &[], &[], 3, 0.8);
         assert!(!prompt.contains("need extra practice"));
         assert!(!prompt.contains("\"warmup\""));
+        // Cloze is independent of forced vocabulary: always requested.
+        assert!(prompt.contains("\"cloze\""));
     }
 
     #[test]

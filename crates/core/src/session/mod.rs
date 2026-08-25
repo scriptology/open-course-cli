@@ -5,8 +5,9 @@ pub mod topic_selection;
 use std::collections::{HashMap, HashSet};
 
 pub use models::{
-    AnalysisResult, EvaluatedTopic, Exercise, FeedbackComment, GrammarError, GrammarErrorType,
-    NewTopicRef, SemanticVerdict, SentenceAnalysis, VocabularyUse, WarmupItem, WarmupKind,
+    AnalysisResult, ClozeItem, EvaluatedTopic, Exercise, FeedbackComment, GrammarError,
+    GrammarErrorType, NewTopicRef, SemanticVerdict, SentenceAnalysis, VocabularyUse, WarmupItem,
+    WarmupKind,
 };
 pub use scoring::{
     average, clamp_score, collect_topic_errors, count_topic_occurrences, error_based_score,
