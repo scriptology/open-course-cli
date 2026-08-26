@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.1](https://github.com/scriptology/open-course-cli/compare/v0.20.0...v0.20.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **llm:** route minimax through the Anthropic-compatible API ([e762e28](https://github.com/scriptology/open-course-cli/commit/e762e288e22705143c62012e7b1daa0b8a4d4584))
+* **llm:** route minimax through the Anthropic-compatible API ([fe31287](https://github.com/scriptology/open-course-cli/commit/fe31287bf2cc6f1e615416ed5bbfdcdcbe98e165))
+
 ## [0.20.0](https://github.com/scriptology/open-course-cli/compare/v0.19.0...v0.20.0) (2026-08-25)
 
 
