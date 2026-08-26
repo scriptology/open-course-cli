@@ -232,15 +232,13 @@ pub async fn stream_openai_compatible(
     }))
 }
 
-pub async fn stream_anthropic_messages(
-    base_url: &str,
-    api_key: &str,
+fn build_anthropic_request_body(
     model: &str,
     system: Option<&str>,
     prompt: &str,
     max_tokens: u32,
-) -> Result<LlmStream> {
-    let client = Client::new();
+    disable_thinking: bool,
+) -> serde_json::Value {
     let mut body = json!({
         "model": model,
         "max_tokens": max_tokens,
@@ -250,6 +248,27 @@ pub async fn stream_anthropic_messages(
     if let Some(system) = system {
         body["system"] = json!(system);
     }
+    // MiniMax-M3 keeps thinking off by default on its Anthropic-compatible
+    // API; the explicit `disabled` guards against a default change. M2.x
+    // models accept but ignore it (thinking stays on).
+    if disable_thinking {
+        body["thinking"] = json!({"type": "disabled"});
+    }
+    body
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn stream_anthropic_messages(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    system: Option<&str>,
+    prompt: &str,
+    max_tokens: u32,
+    disable_thinking: bool,
+) -> Result<LlmStream> {
+    let client = Client::new();
+    let body = build_anthropic_request_body(model, system, prompt, max_tokens, disable_thinking);
     let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
 
     let response = client
@@ -309,5 +328,20 @@ mod tests {
         assert!(body.get("max_tokens").is_none());
         assert_eq!(body["reasoning_effort"], json!("low"));
         assert!(body.get("enable_thinking").is_none());
+    }
+
+    #[test]
+    fn anthropic_body_omits_thinking_by_default() {
+        let body = build_anthropic_request_body("m", Some("sys"), "hi", 100, false);
+        assert!(body.get("thinking").is_none());
+        assert_eq!(body["max_tokens"], json!(100));
+        assert_eq!(body["system"], json!("sys"));
+    }
+
+    #[test]
+    fn anthropic_body_disables_thinking_when_requested() {
+        let body = build_anthropic_request_body("m", None, "hi", 100, true);
+        assert_eq!(body["thinking"], json!({"type": "disabled"}));
+        assert_eq!(body["stream"], json!(true));
     }
 }

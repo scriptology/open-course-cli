@@ -1,5 +1,15 @@
 use open_course_config::provider::ProviderId;
 
+/// MiniMax's Anthropic-compatible API: MiniMax-M3 keeps thinking off by
+/// default there, unlike the OpenAI-compatible endpoint where reasoning
+/// burns the completion budget and the answer comes back empty.
+pub const MINIMAX_DEFAULT_BASE_URL: &str = "https://api.minimax.io/anthropic";
+
+/// MiniMax's OpenAI-compatible API: the pre-Anthropic chat default. Chat
+/// configs carrying it are migrated to `MINIMAX_DEFAULT_BASE_URL`; model
+/// listing still uses it (the `/anthropic` path serves messages only).
+pub const MINIMAX_LEGACY_BASE_URL: &str = "https://api.minimax.io/v1";
+
 pub struct ProviderMeta {
     pub id: ProviderId,
     pub label: &'static str,
@@ -65,7 +75,7 @@ impl ProviderMeta {
                 label: "MiniMax",
                 requires_api_key: true,
                 api_key_optional: false,
-                default_base_url: Some("https://api.minimax.io/v1"),
+                default_base_url: Some(MINIMAX_DEFAULT_BASE_URL),
                 env_key: Some("MINIMAX_API_KEY"),
             },
             ProviderId::Ollama => ProviderMeta {

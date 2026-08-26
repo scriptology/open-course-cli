@@ -18,7 +18,24 @@ pub async fn list_models(
     match provider_id {
         ProviderId::Anthropic => list_anthropic_models(api_key, base_url).await,
         ProviderId::Google => list_gemini_models(api_key, base_url).await,
+        ProviderId::MiniMax => {
+            // Chat moved to the Anthropic-compatible API, which serves
+            // messages only; model listing stays on the OpenAI-compatible
+            // endpoint. Configs carrying either known default map to it.
+            let base_url = minimax_listing_base_url(base_url);
+            list_openai_models_at(base_url, api_key).await
+        }
         _ => list_openai_compatible_models(provider_id, api_key, base_url).await,
+    }
+}
+
+/// Base URL for MiniMax model listing: known chat defaults (old and new)
+/// map to the OpenAI-compatible endpoint, custom URLs are kept as-is.
+fn minimax_listing_base_url(base_url: Option<&str>) -> &str {
+    use crate::provider::{MINIMAX_DEFAULT_BASE_URL, MINIMAX_LEGACY_BASE_URL};
+    match base_url.map(|u| u.trim_end_matches('/')) {
+        None | Some("") | Some(MINIMAX_DEFAULT_BASE_URL) => MINIMAX_LEGACY_BASE_URL,
+        Some(custom) => custom,
     }
 }
 
@@ -125,8 +142,12 @@ async fn list_openai_compatible_models(
     let meta = ProviderMeta::for_provider(provider_id);
     let base_url = base_url
         .or(meta.default_base_url)
-        .ok_or_else(|| AppError::ProviderConfig(format!("{provider_id:?} requires a base URL")))?
-        .trim_end_matches('/');
+        .ok_or_else(|| AppError::ProviderConfig(format!("{provider_id:?} requires a base URL")))?;
+    list_openai_models_at(base_url, api_key).await
+}
+
+async fn list_openai_models_at(base_url: &str, api_key: Option<&str>) -> Result<Vec<ModelInfo>> {
+    let base_url = base_url.trim_end_matches('/');
     let url = format!("{base_url}/models");
 
     let client = http_client()?;
@@ -211,5 +232,23 @@ mod tests {
     #[test]
     fn http_client_builds() {
         let _client = http_client().unwrap();
+    }
+
+    #[test]
+    fn minimax_listing_uses_openai_compatible_endpoint_for_known_defaults() {
+        use crate::provider::{MINIMAX_DEFAULT_BASE_URL, MINIMAX_LEGACY_BASE_URL};
+        assert_eq!(minimax_listing_base_url(None), MINIMAX_LEGACY_BASE_URL);
+        assert_eq!(
+            minimax_listing_base_url(Some(MINIMAX_DEFAULT_BASE_URL)),
+            MINIMAX_LEGACY_BASE_URL
+        );
+        assert_eq!(
+            minimax_listing_base_url(Some("https://api.minimax.io/v1/")),
+            MINIMAX_LEGACY_BASE_URL
+        );
+        assert_eq!(
+            minimax_listing_base_url(Some("https://proxy.example.com/v1")),
+            "https://proxy.example.com/v1"
+        );
     }
 }
