@@ -52,6 +52,12 @@ fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
     }
 }
 
+/// `additional_params` that keep MiniMax-M3 thinking off on its
+/// Anthropic-compatible API (M2.x models accept but ignore this).
+fn anthropic_disable_thinking_params() -> serde_json::Value {
+    serde_json::json!({ "thinking": { "type": "disabled" } })
+}
+
 #[async_trait]
 pub trait LlmClient: Send + Sync + Any {
     async fn prompt(&self, prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String>;
@@ -108,10 +114,11 @@ pub struct RigClient {
     /// requires `max_completion_tokens` and rejects unknown parameters such
     /// as the Qwen/Aliyun `enable_thinking` extension.
     openai_native: bool,
-    /// MiniMax thinking models return reasoning inline in `content` wrapped
-    /// in `<think>` tags unless the request asks for `reasoning_split`,
-    /// which would break JSON parsing downstream.
-    reasoning_split: bool,
+    /// MiniMax is called through its Anthropic-compatible API where
+    /// MiniMax-M3 keeps thinking off by default; the explicit
+    /// `thinking: {"type": "disabled"}` additional param guards against a
+    /// default change (M2.x models accept but ignore it).
+    disable_thinking: bool,
 }
 
 impl RigClient {
@@ -171,6 +178,22 @@ impl RigClient {
                     anthropic_base.to_string(),
                 )
             }
+            ProviderId::MiniMax => {
+                // Rows saved before the move to the Anthropic-compatible
+                // API still carry the old OpenAI-compatible default; treat
+                // it as unset so they follow the new default.
+                let base_url = match config.base_url().map(|u| u.trim_end_matches('/')) {
+                    None | Some("") | Some(crate::provider::MINIMAX_LEGACY_BASE_URL) => {
+                        crate::provider::MINIMAX_DEFAULT_BASE_URL
+                    }
+                    Some(custom) => custom,
+                };
+                let client = anthropic::ClientBuilder::new(&api_key)
+                    .base_url(base_url)
+                    .build()
+                    .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
+                (RigClientInner::Anthropic(client), base_url.to_string())
+            }
             _ => {
                 let base_url = base_url.ok_or_else(|| {
                     AppError::ProviderConfig(format!(
@@ -193,25 +216,18 @@ impl RigClient {
             reasoning_effort,
             enable_thinking,
             openai_native,
-            reasoning_split: provider_id == ProviderId::MiniMax,
+            disable_thinking: provider_id == ProviderId::MiniMax,
         })
     }
 
     /// Extra request fields for OpenAI-compatible providers: the
-    /// Qwen/Aliyun `enable_thinking` toggle and MiniMax's `reasoning_split`,
-    /// merged into one object (rig's `additional_params` is set once).
+    /// Qwen/Aliyun `enable_thinking` toggle (rig's `additional_params` is
+    /// set once).
     fn openai_additional_params(&self) -> Option<serde_json::Value> {
-        let mut params = serde_json::Map::new();
         if self.enable_thinking == Some(false) {
-            params.insert("enable_thinking".to_string(), serde_json::json!(false));
-        }
-        if self.reasoning_split {
-            params.insert("reasoning_split".to_string(), serde_json::json!(true));
-        }
-        if params.is_empty() {
-            None
+            Some(serde_json::json!({ "enable_thinking": false }))
         } else {
-            Some(serde_json::Value::Object(params))
+            None
         }
     }
 
@@ -236,12 +252,14 @@ impl RigClient {
                     extractor.build().extract(prompt).await
                 }
                 RigClientInner::Anthropic(client) => {
-                    client
+                    let mut extractor = client
                         .extractor::<T>(&self.model)
-                        .max_tokens(max_tokens as u64)
-                        .build()
-                        .extract(prompt)
-                        .await
+                        .max_tokens(max_tokens as u64);
+                    if self.disable_thinking {
+                        extractor =
+                            extractor.additional_params(anthropic_disable_thinking_params());
+                    }
+                    extractor.build().extract(prompt).await
                 }
                 RigClientInner::Gemini(client) => {
                     let mut extractor = client
@@ -305,8 +323,12 @@ impl RigClient {
         model: &str,
         system: Option<&str>,
         max_tokens: u32,
+        disable_thinking: bool,
     ) -> Agent<anthropic::completion::CompletionModel> {
         let mut builder = client.agent(model).max_tokens(max_tokens as u64);
+        if disable_thinking {
+            builder = builder.additional_params(anthropic_disable_thinking_params());
+        }
         if let Some(system) = system {
             builder = builder.preamble(system);
         }
@@ -349,9 +371,15 @@ impl LlmClient for RigClient {
                     .await
                 }
                 RigClientInner::Anthropic(client) => {
-                    Self::anthropic_agent(client, &self.model, system, max_tokens)
-                        .prompt(prompt)
-                        .await
+                    Self::anthropic_agent(
+                        client,
+                        &self.model,
+                        system,
+                        max_tokens,
+                        self.disable_thinking,
+                    )
+                    .prompt(prompt)
+                    .await
                 }
                 RigClientInner::Gemini(client) => {
                     Self::gemini_agent(client, &self.model, system, max_tokens)
@@ -409,6 +437,7 @@ impl LlmClient for RigClient {
                     system,
                     prompt,
                     max_tokens,
+                    self.disable_thinking,
                 )
                 .await
             }
@@ -535,19 +564,41 @@ mod tests {
     }
 
     #[test]
-    fn minimax_builds_with_default_base_url_and_reasoning_split() {
+    fn minimax_uses_anthropic_api_with_thinking_disabled() {
         with_env_var("MINIMAX_API_KEY", None, || {
             let cfg = config(Some("minimax-key"), None, None);
             let client = RigClient::from_config(&cfg, ProviderId::MiniMax).expect("should build");
-            assert_eq!(client.base_url, "https://api.minimax.io/v1");
-            assert!(matches!(client.inner, RigClientInner::OpenAi(_)));
-            let params = client
-                .openai_additional_params()
-                .expect("minimax always requests reasoning_split");
-            assert_eq!(
-                params.get("reasoning_split"),
-                Some(&serde_json::json!(true))
+            assert_eq!(client.base_url, crate::provider::MINIMAX_DEFAULT_BASE_URL);
+            assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
+            assert!(client.disable_thinking);
+        });
+    }
+
+    #[test]
+    fn minimax_legacy_base_url_migrates_to_anthropic_endpoint() {
+        with_env_var("MINIMAX_API_KEY", None, || {
+            for stored in [
+                None,
+                Some("https://api.minimax.io/v1"),
+                Some("https://api.minimax.io/v1/"),
+            ] {
+                let cfg = config(Some("minimax-key"), stored, None);
+                let client =
+                    RigClient::from_config(&cfg, ProviderId::MiniMax).expect("should build");
+                assert_eq!(
+                    client.base_url,
+                    crate::provider::MINIMAX_DEFAULT_BASE_URL,
+                    "stored base_url {stored:?}"
+                );
+            }
+            // A genuinely custom base URL is kept.
+            let cfg = config(
+                Some("minimax-key"),
+                Some("https://proxy.example.com/anthropic"),
+                None,
             );
+            let client = RigClient::from_config(&cfg, ProviderId::MiniMax).expect("should build");
+            assert_eq!(client.base_url, "https://proxy.example.com/anthropic");
         });
     }
 

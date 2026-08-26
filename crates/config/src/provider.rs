@@ -83,7 +83,7 @@ impl ProviderId {
     pub fn default_base_url(&self) -> Option<&'static str> {
         match self {
             ProviderId::OpenRouter => Some("https://openrouter.ai/api/v1"),
-            ProviderId::MiniMax => Some("https://api.minimax.io/v1"),
+            ProviderId::MiniMax => Some("https://api.minimax.io/anthropic"),
             ProviderId::Ollama => Some("http://localhost:11434/v1"),
             ProviderId::Custom => None,
             _ => None,
