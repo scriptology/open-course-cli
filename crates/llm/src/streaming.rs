@@ -248,9 +248,10 @@ fn build_anthropic_request_body(
     if let Some(system) = system {
         body["system"] = json!(system);
     }
-    // MiniMax-M3 keeps thinking off by default on its Anthropic-compatible
-    // API; the explicit `disabled` guards against a default change. M2.x
-    // models accept but ignore it (thinking stays on).
+    // Anthropic-family providers are asked to keep thinking off for speed:
+    // newer Claude models (e.g. claude-sonnet-5) enable adaptive thinking by
+    // default, and the explicit `disabled` guards MiniMax-M3 against a
+    // default change. Older models accept but ignore the field.
     if disable_thinking {
         body["thinking"] = json!({"type": "disabled"});
     }

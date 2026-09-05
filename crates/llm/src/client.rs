@@ -52,8 +52,11 @@ fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
     }
 }
 
-/// `additional_params` that keep MiniMax-M3 thinking off on its
-/// Anthropic-compatible API (M2.x models accept but ignore this).
+/// `additional_params` that keep reasoning off on Anthropic-family APIs:
+/// newer Claude models (e.g. claude-sonnet-5) enable adaptive thinking by
+/// default, which adds latency and burns output tokens, and MiniMax-M3 is
+/// guarded against a thinking-on default change (older models accept but
+/// ignore this field).
 fn anthropic_disable_thinking_params() -> serde_json::Value {
     serde_json::json!({ "thinking": { "type": "disabled" } })
 }
@@ -114,10 +117,11 @@ pub struct RigClient {
     /// requires `max_completion_tokens` and rejects unknown parameters such
     /// as the Qwen/Aliyun `enable_thinking` extension.
     openai_native: bool,
-    /// MiniMax is called through its Anthropic-compatible API where
-    /// MiniMax-M3 keeps thinking off by default; the explicit
-    /// `thinking: {"type": "disabled"}` additional param guards against a
-    /// default change (M2.x models accept but ignore it).
+    /// Anthropic-family providers (Anthropic, MiniMax, and custom
+    /// `messages` endpoints) are asked to keep thinking off for speed via
+    /// the `thinking: {"type": "disabled"}` request field; newer Claude
+    /// models enable adaptive thinking by default, and the explicit field
+    /// guards MiniMax-M3 against a default change.
     disable_thinking: bool,
 }
 
@@ -125,7 +129,16 @@ impl RigClient {
     pub fn from_config(config: &ProviderConfig, provider_id: ProviderId) -> Result<Self> {
         let meta = ProviderMeta::for_provider(provider_id);
         let api_key = meta.resolve_api_key(config.api_key());
-        let model = config.model().to_string();
+        // Configs saved before Google retired gemini-2.5-flash now 404
+        // ("Please update your code to use models/gemini-3.6-flash");
+        // silently follow the replacement instead of failing at runtime.
+        let model = if provider_id == ProviderId::Google
+            && crate::provider::GOOGLE_RETIRED_MODELS.contains(&config.model())
+        {
+            crate::provider::GOOGLE_RETIRED_MODEL_REPLACEMENT.to_string()
+        } else {
+            config.model().to_string()
+        };
         let base_url = config.base_url().or(meta.default_base_url);
 
         if meta.requires_api_key && !meta.api_key_optional && api_key.is_none() {
@@ -208,6 +221,8 @@ impl RigClient {
             }
         };
 
+        let disable_thinking = matches!(inner, RigClientInner::Anthropic(_));
+
         Ok(Self {
             inner,
             model,
@@ -216,7 +231,7 @@ impl RigClient {
             reasoning_effort,
             enable_thinking,
             openai_native,
-            disable_thinking: provider_id == ProviderId::MiniMax,
+            disable_thinking,
         })
     }
 
@@ -575,6 +590,31 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_uses_thinking_disabled() {
+        let cfg = config(Some("anthropic-key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::Anthropic).expect("should build");
+        assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
+        assert!(client.disable_thinking);
+    }
+
+    #[test]
+    fn custom_messages_endpoint_uses_thinking_disabled() {
+        let mut cfg = config(Some("key"), Some("https://example.com/v1"), None);
+        let ProviderConfig::ApiKey { endpoint, .. } = &mut cfg;
+        *endpoint = Some("messages".to_string());
+        let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
+        assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
+        assert!(client.disable_thinking);
+    }
+
+    #[test]
+    fn openai_compatible_providers_keep_thinking_untouched() {
+        let cfg = config(Some("key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::DeepSeek).expect("should build");
+        assert!(!client.disable_thinking);
+    }
+
+    #[test]
     fn minimax_legacy_base_url_migrates_to_anthropic_endpoint() {
         with_env_var("MINIMAX_API_KEY", None, || {
             for stored in [
@@ -607,5 +647,42 @@ mod tests {
         let cfg = config(Some("key"), None, None);
         let client = RigClient::from_config(&cfg, ProviderId::DeepSeek).expect("should build");
         assert_eq!(client.openai_additional_params(), None);
+    }
+
+    #[test]
+    fn google_retired_models_remap_to_replacement() {
+        for retired in crate::provider::GOOGLE_RETIRED_MODELS {
+            let mut cfg = config(Some("gemini-key"), None, None);
+            let ProviderConfig::ApiKey { model, .. } = &mut cfg;
+            *model = retired.to_string();
+            let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+            assert_eq!(
+                client.model,
+                crate::provider::GOOGLE_RETIRED_MODEL_REPLACEMENT,
+                "stored model {retired:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn google_other_models_are_untouched() {
+        for kept in ["gemini-3.6-flash", "gemini-3-pro", "test-model"] {
+            let mut cfg = config(Some("gemini-key"), None, None);
+            let ProviderConfig::ApiKey { model, .. } = &mut cfg;
+            *model = kept.to_string();
+            let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+            assert_eq!(client.model, kept, "model {kept:?}");
+        }
+    }
+
+    #[test]
+    fn retired_google_model_ids_do_not_affect_other_providers() {
+        // A non-Google provider configured with a retired Google model id
+        // (e.g. an OpenAI-compatible gateway proxying Gemini) keeps it.
+        let mut cfg = config(Some("key"), Some("https://proxy.example.com/v1"), None);
+        let ProviderConfig::ApiKey { model, .. } = &mut cfg;
+        *model = "gemini-2.5-flash".to_string();
+        let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
+        assert_eq!(client.model, "gemini-2.5-flash");
     }
 }

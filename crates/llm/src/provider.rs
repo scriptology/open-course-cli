@@ -10,6 +10,15 @@ pub const MINIMAX_DEFAULT_BASE_URL: &str = "https://api.minimax.io/anthropic";
 /// listing still uses it (the `/anthropic` path serves messages only).
 pub const MINIMAX_LEGACY_BASE_URL: &str = "https://api.minimax.io/v1";
 
+/// Google model ids retired from the Gemini API: requests 404 with
+/// "Please update your code to use models/gemini-3.6-flash". Configs still
+/// carrying one of these ids are remapped to `GOOGLE_RETIRED_MODEL_REPLACEMENT`
+/// at client construction time.
+pub const GOOGLE_RETIRED_MODELS: [&str; 2] = ["gemini-2.5-flash", "models/gemini-2.5-flash"];
+
+/// Replacement served for every id in `GOOGLE_RETIRED_MODELS`.
+pub const GOOGLE_RETIRED_MODEL_REPLACEMENT: &str = "gemini-3.6-flash";
+
 pub struct ProviderMeta {
     pub id: ProviderId,
     pub label: &'static str,
