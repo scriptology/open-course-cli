@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/scriptology/open-course-cli/compare/v0.20.1...v0.21.0) (2026-09-05)
+
+
+### Features
+
+* **llm:** disable thinking for all Anthropic-family providers ([9c28fb9](https://github.com/scriptology/open-course-cli/commit/9c28fb943d0f0726d3711c58272d7eba164e49e4))
+
 ## [0.20.1](https://github.com/scriptology/open-course-cli/compare/v0.20.0...v0.20.1) (2026-08-26)
 
 
