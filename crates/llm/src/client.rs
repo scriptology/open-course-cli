@@ -52,8 +52,11 @@ fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
     }
 }
 
-/// `additional_params` that keep MiniMax-M3 thinking off on its
-/// Anthropic-compatible API (M2.x models accept but ignore this).
+/// `additional_params` that keep reasoning off on Anthropic-family APIs:
+/// newer Claude models (e.g. claude-sonnet-5) enable adaptive thinking by
+/// default, which adds latency and burns output tokens, and MiniMax-M3 is
+/// guarded against a thinking-on default change (older models accept but
+/// ignore this field).
 fn anthropic_disable_thinking_params() -> serde_json::Value {
     serde_json::json!({ "thinking": { "type": "disabled" } })
 }
@@ -114,10 +117,11 @@ pub struct RigClient {
     /// requires `max_completion_tokens` and rejects unknown parameters such
     /// as the Qwen/Aliyun `enable_thinking` extension.
     openai_native: bool,
-    /// MiniMax is called through its Anthropic-compatible API where
-    /// MiniMax-M3 keeps thinking off by default; the explicit
-    /// `thinking: {"type": "disabled"}` additional param guards against a
-    /// default change (M2.x models accept but ignore it).
+    /// Anthropic-family providers (Anthropic, MiniMax, and custom
+    /// `messages` endpoints) are asked to keep thinking off for speed via
+    /// the `thinking: {"type": "disabled"}` request field; newer Claude
+    /// models enable adaptive thinking by default, and the explicit field
+    /// guards MiniMax-M3 against a default change.
     disable_thinking: bool,
 }
 
@@ -208,6 +212,8 @@ impl RigClient {
             }
         };
 
+        let disable_thinking = matches!(inner, RigClientInner::Anthropic(_));
+
         Ok(Self {
             inner,
             model,
@@ -216,7 +222,7 @@ impl RigClient {
             reasoning_effort,
             enable_thinking,
             openai_native,
-            disable_thinking: provider_id == ProviderId::MiniMax,
+            disable_thinking,
         })
     }
 
@@ -572,6 +578,31 @@ mod tests {
             assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
             assert!(client.disable_thinking);
         });
+    }
+
+    #[test]
+    fn anthropic_uses_thinking_disabled() {
+        let cfg = config(Some("anthropic-key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::Anthropic).expect("should build");
+        assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
+        assert!(client.disable_thinking);
+    }
+
+    #[test]
+    fn custom_messages_endpoint_uses_thinking_disabled() {
+        let mut cfg = config(Some("key"), Some("https://example.com/v1"), None);
+        let ProviderConfig::ApiKey { endpoint, .. } = &mut cfg;
+        *endpoint = Some("messages".to_string());
+        let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
+        assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
+        assert!(client.disable_thinking);
+    }
+
+    #[test]
+    fn openai_compatible_providers_keep_thinking_untouched() {
+        let cfg = config(Some("key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::DeepSeek).expect("should build");
+        assert!(!client.disable_thinking);
     }
 
     #[test]
