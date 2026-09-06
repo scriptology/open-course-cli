@@ -164,10 +164,14 @@ fn handle_exercises(state: &mut AppState, res: Result<GeneratedSession>) {
             state.session.warmup_items = generated.warmup;
             state.session.warmup_index = 0;
             state.session.warmup_revealed = false;
-            state.session.mode = if state.session.warmup_items.is_empty() {
-                session::Mode::Practicing
-            } else {
+            state.session.cloze_items = generated.cloze;
+            state.session.cloze_index = 0;
+            state.session.mode = if !state.session.warmup_items.is_empty() {
                 session::Mode::WarmUp
+            } else if !state.session.cloze_items.is_empty() {
+                session::Mode::Cloze
+            } else {
+                session::Mode::Practicing
             };
             state.session.input.clear();
             state.session.cursor = 0;

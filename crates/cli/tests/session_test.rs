@@ -1,12 +1,14 @@
 use chrono::Utc;
 use tempfile::TempDir;
 
+use open_course_cli::core::llm::parse::RawClozeItem;
 use open_course_cli::core::session::{
-    AnalysisResult, EvaluatedTopic, Exercise, FeedbackComment, GrammarError, GrammarErrorType,
-    MentorSession, NextSessionTopic, SemanticVerdict, SentenceAnalysis, VocabularyUse,
-    create_session, get_due_review_topics, get_weak_review_topics, pick_next_session_topic,
-    select_side_topics, select_target_topics,
+    AnalysisResult, EvaluatedTopic, Exercise, FeedbackComment, GeneratedSession, GrammarError,
+    GrammarErrorType, MentorSession, NextSessionTopic, SemanticVerdict, SentenceAnalysis,
+    VocabularyUse, create_session, get_due_review_topics, get_weak_review_topics,
+    pick_next_session_topic, select_side_topics, select_target_topics,
 };
+use open_course_cli::core::vocabulary::{CLOZE_BLANK, Lemma as CoreLemma, cloze_items};
 use open_course_cli::db::Database;
 use open_course_cli::db::apply::{apply_analysis, apply_analysis_to_db};
 use open_course_cli::db::curriculum::{Curriculum, Difficulty, Topic};
@@ -1599,4 +1601,55 @@ async fn forced_lemma_with_evidence_scores_as_before() {
     assert_eq!(stored[0].practice_count, 3);
     assert_eq!(stored[0].correct_uses, 2);
     assert_ne!(stored[0].last_seen.as_deref(), Some("2024-01-01T00:00:00Z"));
+}
+
+fn make_raw_cloze(lemma: &str, sentence: &str, answer: &str, distractors: &[&str]) -> RawClozeItem {
+    RawClozeItem {
+        lemma: lemma.to_string(),
+        sentence: sentence.to_string(),
+        answer: answer.to_string(),
+        distractors: distractors.iter().map(|s| s.to_string()).collect(),
+        translation: None,
+        pos: None,
+        cefr_level: None,
+    }
+}
+
+#[test]
+fn cloze_items_blank_sentence_and_word_bank() {
+    // Words already used correctly get no cloze item; the rest become
+    // word-bank items with a single blank and 3-4 options including the
+    // answer — the contract the cloze stage renders.
+    let mut mastered = CoreLemma {
+        id: "es-comer".to_string(),
+        lemma: "comer".to_string(),
+        pos: "VERB".to_string(),
+        translation: "есть".to_string(),
+        ..Default::default()
+    };
+    mastered.correct_uses = 2;
+
+    let raw = vec![
+        make_raw_cloze("comer", "Como pan.", "Como", &["Comes", "Comen"]),
+        make_raw_cloze("beber", "Yo bebo agua.", "bebo", &["bebes", "beben"]),
+    ];
+    let cloze = cloze_items(&[mastered], &[], raw);
+
+    assert_eq!(cloze.len(), 1);
+    let item = &cloze[0];
+    assert_eq!(item.lemma, "beber");
+    assert_eq!(item.sentence, format!("Yo {CLOZE_BLANK} agua."));
+    assert_eq!(item.answer, "bebo");
+    assert!(item.options.len() >= 3 && item.options.len() <= 4);
+    assert!(item.options.contains(&item.answer));
+
+    // A generated session carries the cloze items alongside the warm-up and
+    // the exercises; the session screen walks warm-up -> cloze -> practicing.
+    let generated = GeneratedSession {
+        exercises: vec![make_exercise(&["t1"], &[])],
+        warmup: vec![],
+        cloze,
+    };
+    assert_eq!(generated.cloze.len(), 1);
+    assert_eq!(generated.exercises.len(), 1);
 }

@@ -22,6 +22,7 @@ pub enum Mode {
     #[default]
     TopicSelection,
     WarmUp,
+    Cloze,
     Practicing,
     /// Exercise generation failed: show the error with retry/settings/home
     /// actions instead of silently returning to topic selection.
@@ -48,6 +49,10 @@ pub struct SessionState {
     pub warmup_index: usize,
     /// Whether the current warm-up card's translation is visible.
     pub warmup_revealed: bool,
+    /// Cloze (fill-in-the-blank) items shown between the warm-up and the
+    /// exercises; empty when the session has no cloze stage.
+    pub cloze_items: Vec<open_course_core::session::ClozeItem>,
+    pub cloze_index: usize,
     /// Set when exercise generation fails; shown in `Mode::Error`.
     pub generation_error: Option<String>,
 }
@@ -134,6 +139,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 width,
             )
         }
+        Mode::Cloze => build_footer_wrapped(
+            &[
+                ("1-4", labels.choose),
+                ("s", labels.skip_item),
+                ("Esc", labels.back),
+            ],
+            width,
+        ),
         Mode::Practicing => {
             build_footer_wrapped(&[("Enter", labels.submit), ("Esc", labels.back)], width)
         }
@@ -238,6 +251,62 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 chunks[2],
             );
         }
+        Mode::Cloze => {
+            let total = state.session.cloze_items.len();
+            let idx = state.session.cloze_index.min(total.saturating_sub(1));
+            let title = format!("{} {}/{}", labels.cloze_title, idx + 1, total);
+
+            let mut card = Card::new(title);
+            if let Some(item) = state.session.cloze_items.get(idx) {
+                let (before, after) = item
+                    .sentence
+                    .split_once("_____")
+                    .map(|(b, a)| (b.to_string(), a.to_string()))
+                    .unwrap_or_else(|| (item.sentence.clone(), String::new()));
+                card = card.line(Line::from(vec![
+                    Span::raw(before),
+                    Span::styled(
+                        "_____",
+                        Style::default()
+                            .fg(colors::YELLOW)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(after),
+                ]));
+                card = card.line(Line::default());
+                if !item.translation.is_empty() {
+                    card = card.line(Line::from(Span::styled(
+                        item.translation.clone(),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+            }
+            frame.render_widget(card, chunks[0]);
+
+            if let Some(item) = state.session.cloze_items.get(idx) {
+                let mut option_lines = vec![Line::default()];
+                for (n, option) in item.options.iter().enumerate() {
+                    if n > 0 {
+                        option_lines.push(Line::default());
+                    }
+                    option_lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {}  ", n + 1),
+                            Style::default()
+                                .fg(colors::YELLOW)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(option.clone()),
+                    ]));
+                }
+                frame.render_widget(Paragraph::new(option_lines), chunks[1]);
+            }
+
+            frame.render_widget(
+                Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
+                chunks[2],
+            );
+        }
         Mode::Practicing => {
             let title;
             let prompt = if let Some(session) = state.session.mentor_session.as_ref() {
@@ -292,6 +361,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     match state.session.mode {
         Mode::TopicSelection => handle_topic_selection(state, code).await,
         Mode::WarmUp => handle_warmup(state, code).await,
+        Mode::Cloze => handle_cloze(state, code).await,
         Mode::Practicing => handle_practicing(state, code).await,
         Mode::Error => handle_generation_error(state, code).await,
     }
@@ -327,7 +397,7 @@ async fn handle_generation_error(state: &mut AppState, code: KeyCode) -> Result<
 
 /// Warm-up phase: forward-only flashcards. Enter (or Space) reveals the
 /// translation, then advances to the next card; after the last card the
-/// session moves on to the exercises. `s` skips the rest of the warm-up.
+/// session moves on to the next stage. `s` skips the rest of the warm-up.
 async fn handle_warmup(state: &mut AppState, code: KeyCode) -> Result<()> {
     match code {
         KeyCode::Esc => {
@@ -338,7 +408,7 @@ async fn handle_warmup(state: &mut AppState, code: KeyCode) -> Result<()> {
             state.view = View::Dashboard;
         }
         KeyCode::Char('s') => {
-            state.session.mode = Mode::Practicing;
+            advance_after_warmup(&mut state.session);
         }
         KeyCode::Enter | KeyCode::Char(' ') => {
             if !state.session.warmup_revealed {
@@ -347,6 +417,54 @@ async fn handle_warmup(state: &mut AppState, code: KeyCode) -> Result<()> {
                 state.session.warmup_index += 1;
                 state.session.warmup_revealed = false;
                 if state.session.warmup_index >= state.session.warmup_items.len() {
+                    advance_after_warmup(&mut state.session);
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// After the warm-up, go through the cloze stage when it has items,
+/// otherwise straight to the exercises.
+fn advance_after_warmup(session: &mut SessionState) {
+    session.mode = if session.cloze_items.is_empty() {
+        Mode::Practicing
+    } else {
+        Mode::Cloze
+    };
+}
+
+/// Cloze phase: pick a word from the bank with a single keypress (`1`-`9`),
+/// which immediately advances to the next item; `s` skips the current item.
+/// After the last item the session moves on to the exercises.
+async fn handle_cloze(state: &mut AppState, code: KeyCode) -> Result<()> {
+    match code {
+        KeyCode::Esc => {
+            if state.session.loading {
+                state.cancelled = true;
+            }
+            reset_session(&mut state.session);
+            state.view = View::Dashboard;
+        }
+        KeyCode::Char('s') => {
+            state.session.cloze_index += 1;
+            if state.session.cloze_index >= state.session.cloze_items.len() {
+                state.session.mode = Mode::Practicing;
+            }
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+            let option_index = c as usize - '1' as usize;
+            let valid = state
+                .session
+                .cloze_items
+                .get(state.session.cloze_index)
+                .map(|item| option_index < item.options.len())
+                .unwrap_or(false);
+            if valid {
+                state.session.cloze_index += 1;
+                if state.session.cloze_index >= state.session.cloze_items.len() {
                     state.session.mode = Mode::Practicing;
                 }
             }
@@ -694,6 +812,8 @@ pub(crate) fn reset_session(session: &mut SessionState) {
     session.warmup_items.clear();
     session.warmup_index = 0;
     session.warmup_revealed = false;
+    session.cloze_items.clear();
+    session.cloze_index = 0;
     session.generation_error = None;
 }
 

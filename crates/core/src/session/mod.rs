@@ -25,13 +25,16 @@ pub const COMPLETED_THRESHOLD: f64 = 80.0;
 /// Average target score below which a session raises a low-score alert.
 pub const LOW_SESSION_SCORE_THRESHOLD: f64 = 60.0;
 
-/// The exercises and warm-up cards generated for one study session. The
-/// warm-up is derived from the session's forced vocabulary and is shown
-/// before the exercises; neither part is persisted as-is.
+/// The exercises, warm-up cards, and cloze items generated for one study
+/// session. The warm-up is derived from the session's forced vocabulary and
+/// the cloze items from content words without positive learning progress;
+/// they are shown before the exercises (warm-up first, then cloze); no part
+/// is persisted as-is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneratedSession {
     pub exercises: Vec<Exercise>,
     pub warmup: Vec<WarmupItem>,
+    pub cloze: Vec<ClozeItem>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
