@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.22.0](https://github.com/scriptology/open-course-cli/compare/v0.21.0...v0.22.0) (2026-09-07)
+
+
+### Features
+
+* **cli:** add cloze fill-in-the-gap stage to the TUI session flow ([6206afe](https://github.com/scriptology/open-course-cli/commit/6206afeed06faada1da35923ffd3537dfc0642e1))
+* **cli:** show cloze pick feedback before advancing ([84bbaeb](https://github.com/scriptology/open-course-cli/commit/84bbaebe17698fa5497d1a64934612592c3f63a7))
+* **llm:** disable thinking by default for custom OpenAI-compatible providers ([51eaae4](https://github.com/scriptology/open-course-cli/commit/51eaae47504fc9729b1c84efcca122277e6bc379))
+
+
+### Bug Fixes
+
+* **llm:** don't let empty reasoning_content swallow streamed content ([5da69b8](https://github.com/scriptology/open-course-cli/commit/5da69b88086f69cef6620af629e7dec61cd69740))
+
 ## [0.21.0](https://github.com/scriptology/open-course-cli/compare/v0.20.1...v0.21.0) (2026-09-05)
 
 
