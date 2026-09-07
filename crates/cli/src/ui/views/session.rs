@@ -9,6 +9,7 @@ use crate::ui::colors;
 use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
+    wrapped_line_count,
 };
 use crate::ui::views::{curriculum, settings};
 use crate::ui::widgets::{Card, build_footer_wrapped, error_lines};
@@ -259,8 +260,11 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             let total = state.session.cloze_items.len();
             let idx = state.session.cloze_index.min(total.saturating_sub(1));
             let title = format!("{} {}/{}", labels.cloze_title, idx + 1, total);
+            // Inner text column width: borders (2) + horizontal padding (2+2).
+            let text_width = (area.width as usize).saturating_sub(6);
 
             let mut card = Card::new(title).padding(Padding::new(2, 2, 1, 1));
+            let mut content_lines = 0usize;
             if let Some(item) = state.session.cloze_items.get(idx) {
                 let (before, after) = item
                     .sentence
@@ -277,22 +281,31 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     ),
                     Span::raw(after),
                 ]));
-                card = card.line(Line::default());
+                content_lines += wrapped_line_count(&item.sentence, text_width);
                 if !item.translation.is_empty() {
+                    card = card.line(Line::default());
                     card = card.line(Line::from(Span::styled(
                         item.translation.clone(),
                         Style::default().fg(Color::DarkGray),
                     )));
+                    content_lines += 1 + wrapped_line_count(&item.translation, text_width);
                 }
             }
-            frame.render_widget(card, chunks[0]);
+
+            // The card hugs its content instead of stretching across the
+            // screen; the options sit right below it.
+            let card_height = content_lines as u16 + 4; // borders + vertical padding
+            let cloze_chunks = Layout::vertical([
+                Constraint::Length(card_height.max(4)),
+                Constraint::Min(1),
+                Constraint::Length(chunks[2].height),
+            ])
+            .split(area);
+            frame.render_widget(card, cloze_chunks[0]);
 
             if let Some(item) = state.session.cloze_items.get(idx) {
                 let mut option_lines = vec![Line::default()];
                 for (n, option) in item.options.iter().enumerate() {
-                    if n > 0 {
-                        option_lines.push(Line::default());
-                    }
                     option_lines.push(Line::from(vec![
                         // Aligned with the card's inner text column
                         // (border 1 + horizontal padding 2).
@@ -305,12 +318,12 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                         Span::raw(option.clone()),
                     ]));
                 }
-                frame.render_widget(Paragraph::new(option_lines), chunks[1]);
+                frame.render_widget(Paragraph::new(option_lines), cloze_chunks[1]);
             }
 
             frame.render_widget(
                 Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
-                chunks[2],
+                cloze_chunks[2],
             );
         }
         Mode::Practicing => {
