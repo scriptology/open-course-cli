@@ -216,31 +216,17 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     Style::default().add_modifier(Modifier::BOLD),
                 )));
 
-                let mut badge_spans = Vec::new();
-                if item.kind == WarmupKind::New {
-                    badge_spans.push(Span::styled(
-                        "NEW",
-                        Style::default()
-                            .fg(colors::GREEN)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-                let meta: Vec<&str> = [item.pos.as_deref(), item.cefr_level.as_deref()]
-                    .into_iter()
-                    .flatten()
-                    .collect();
-                if !meta.is_empty() {
-                    if !badge_spans.is_empty() {
-                        badge_spans
-                            .push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
-                    }
-                    badge_spans.push(Span::styled(
-                        meta.join(" · "),
+                let new_badge = (item.kind == WarmupKind::New).then_some("NEW");
+                let badges: Vec<&str> =
+                    [new_badge, item.pos.as_deref(), item.cefr_level.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                if !badges.is_empty() {
+                    card = card.line(Line::from(Span::styled(
+                        badges.join(" · "),
                         Style::default().fg(Color::DarkGray),
-                    ));
-                }
-                if !badge_spans.is_empty() {
-                    card = card.line(Line::from(badge_spans));
+                    )));
                 }
 
                 card = card.line(Line::default());
