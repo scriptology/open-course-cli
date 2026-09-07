@@ -17,9 +17,7 @@ use open_course_core::session::{
     NextSessionTopic, pick_next_session_topic, recent_success_rate, select_side_topics,
     unique_topic_ids,
 };
-use open_course_core::vocabulary::{
-    Form, Lemma, cloze_items, match_warmup_items, new_word_items,
-};
+use open_course_core::vocabulary::{Form, Lemma, cloze_items, match_warmup_items, new_word_items};
 use open_course_db::Database;
 use open_course_db::apply::apply_analysis_to_db;
 use open_course_db::curriculum::{Topic, cefr_to_numeric};
