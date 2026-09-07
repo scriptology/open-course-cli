@@ -101,21 +101,23 @@ fn parse_sse_content(
 
 fn parse_openai_frame(frame: &str) -> Option<StreamChunk> {
     parse_sse_content(frame, |value| {
-        if let Some(content) = value
+        let delta = value
             .get("choices")
             .and_then(|c| c.as_array())
             .and_then(|c| c.first())
-            .and_then(|c| c.get("delta"))
+            .and_then(|c| c.get("delta"));
+        // Some gateways (e.g. Aliyun Model Studio's compatible mode) put
+        // both keys in every delta, with `reasoning_content: ""` once the
+        // real content starts — an empty reasoning string must not swallow
+        // the content in the same frame.
+        if let Some(content) = delta
             .and_then(|d| d.get("reasoning_content"))
             .and_then(|c| c.as_str())
+            && !content.is_empty()
         {
             return Some(StreamChunk::Reasoning(content.to_string()));
         }
-        if let Some(content) = value
-            .get("choices")
-            .and_then(|c| c.as_array())
-            .and_then(|c| c.first())
-            .and_then(|c| c.get("delta"))
+        if let Some(content) = delta
             .and_then(|d| d.get("content"))
             .and_then(|c| c.as_str())
         {
@@ -329,6 +331,27 @@ mod tests {
         assert!(body.get("max_tokens").is_none());
         assert_eq!(body["reasoning_effort"], json!("low"));
         assert!(body.get("enable_thinking").is_none());
+    }
+
+    #[test]
+    fn openai_frame_prefers_non_empty_reasoning() {
+        let frame =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"","reasoning_content":"We"}}]}"#;
+        match parse_openai_frame(frame) {
+            Some(StreamChunk::Reasoning(text)) => assert_eq!(text, "We"),
+            other => panic!("expected reasoning chunk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn openai_frame_empty_reasoning_does_not_swallow_content() {
+        // Aliyun-compatible gateways emit both keys in one delta, with
+        // `reasoning_content: ""` once the answer content starts.
+        let frame = r#"data: {"choices":[{"index":0,"delta":{"content":"STREAM_OK","reasoning_content":""}}]}"#;
+        match parse_openai_frame(frame) {
+            Some(StreamChunk::Content(text)) => assert_eq!(text, "STREAM_OK"),
+            other => panic!("expected content chunk, got {other:?}"),
+        }
     }
 
     #[test]
