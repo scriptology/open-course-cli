@@ -27,6 +27,30 @@ pub fn screen_chunks(area: Rect, footer_height: u16) -> [Rect; 3] {
     .areas(area)
 }
 
+/// Greedy word-wrap line count for `text` at `width` columns; at least 1.
+/// Used to size content-height cards before rendering them.
+pub fn wrapped_line_count(text: &str, width: usize) -> usize {
+    let width = width.max(1);
+    let mut lines = 1;
+    let mut col = 0usize;
+    for word in text.split_whitespace() {
+        let w = word.chars().count();
+        if col == 0 {
+            col = w;
+        } else if col + 1 + w <= width {
+            col += 1 + w;
+        } else {
+            lines += 1;
+            col = w;
+        }
+        while col > width {
+            lines += 1;
+            col -= width;
+        }
+    }
+    lines
+}
+
 /// Wraps a single-line text input to fit the given width and places the cursor
 /// highlight on the correct wrapped line.
 pub fn wrapped_input_text(input: &str, cursor: usize, width: usize) -> Text<'static> {

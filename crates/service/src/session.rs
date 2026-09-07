@@ -8,6 +8,8 @@ use std::path::Path;
 
 use tokio::sync::mpsc;
 
+use rand::seq::SliceRandom;
+
 use open_course_config::OpenCourseConfig;
 use open_course_core::error::{AppError, Result};
 use open_course_core::session::{
@@ -15,7 +17,7 @@ use open_course_core::session::{
     NextSessionTopic, pick_next_session_topic, recent_success_rate, select_side_topics,
     unique_topic_ids,
 };
-use open_course_core::vocabulary::{Form, Lemma, match_warmup_items, new_word_items};
+use open_course_core::vocabulary::{Form, Lemma, cloze_items, match_warmup_items, new_word_items};
 use open_course_db::Database;
 use open_course_db::apply::apply_analysis_to_db;
 use open_course_db::curriculum::{Topic, cefr_to_numeric};
@@ -188,9 +190,14 @@ pub async fn generate_session_exercises(
     // (forced/review) card wins.
     let mut seen: HashSet<String> = HashSet::new();
     warmup.retain(|item| seen.insert(open_course_core::vocabulary::normalize_key(&item.lemma)));
+    let mut cloze = cloze_items(existing_lemmas, forced_lemmas, parsed.cloze);
+    for item in &mut cloze {
+        item.options.shuffle(&mut rand::rng());
+    }
     Ok(GeneratedSession {
         exercises: parsed.exercises,
         warmup,
+        cloze,
     })
 }
 

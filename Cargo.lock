@@ -4550,7 +4550,7 @@ dependencies = [
 
 [[package]]
 name = "open-course-cli"
-version = "0.18.2"
+version = "0.21.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4646,6 +4646,7 @@ dependencies = [
  "open-course-core",
  "open-course-db",
  "open-course-llm",
+ "rand 0.9.5",
  "schemars 1.2.1",
  "serde",
  "serde_json",

@@ -148,14 +148,26 @@ impl RigClient {
         }
 
         let api_key = api_key.unwrap_or_default();
-        let reasoning_effort = config.reasoning_effort().map(|s| s.to_string());
         let openai_native = provider_id == ProviderId::OpenAi;
+        // Custom OpenAI-compatible gateways (Aliyun MaaS, DashScope, ...)
+        // default many of their models to thinking mode, which burns the
+        // token budget on reasoning and multiplies latency. The server
+        // always sends thinking controls to custom providers
+        // (open-course-server `openai_chat_body`); the CLI defaults them
+        // the same way unless the config overrides either field. Named
+        // providers keep the plain request by default: some reject unknown
+        // fields, and the server only adds controls on retry there.
+        let custom_openai = provider_id == ProviderId::Custom && config.endpoint() != "messages";
+        let reasoning_effort = config
+            .reasoning_effort()
+            .map(|s| s.to_string())
+            .or_else(|| custom_openai.then(|| "low".to_string()));
         // OpenAI rejects unknown parameters with a 400, and enable_thinking
         // is a Qwen/Aliyun extension — drop it for the real OpenAI API.
         let enable_thinking = if openai_native {
             None
         } else {
-            config.enable_thinking()
+            config.enable_thinking().or(custom_openai.then_some(false))
         };
 
         let (inner, base_url) = match provider_id {
@@ -235,14 +247,22 @@ impl RigClient {
         })
     }
 
-    /// Extra request fields for OpenAI-compatible providers: the
-    /// Qwen/Aliyun `enable_thinking` toggle (rig's `additional_params` is
-    /// set once).
+    /// Extra request fields for OpenAI-compatible providers on the rig
+    /// (non-streaming) paths: the Qwen/Aliyun `enable_thinking` toggle and
+    /// the `reasoning_effort` control. The manual streaming body carries
+    /// the same fields (`streaming::build_openai_request_body`).
     fn openai_additional_params(&self) -> Option<serde_json::Value> {
+        let mut params = serde_json::Map::new();
         if self.enable_thinking == Some(false) {
-            Some(serde_json::json!({ "enable_thinking": false }))
-        } else {
+            params.insert("enable_thinking".to_string(), serde_json::json!(false));
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            params.insert("reasoning_effort".to_string(), serde_json::json!(effort));
+        }
+        if params.is_empty() {
             None
+        } else {
+            Some(serde_json::Value::Object(params))
         }
     }
 
@@ -546,6 +566,71 @@ mod tests {
             let result = RigClient::from_config(&cfg, ProviderId::Custom);
             assert!(result.is_err());
         });
+    }
+
+    #[test]
+    fn custom_openai_provider_disables_thinking_by_default() {
+        // Mirrors the server: custom OpenAI-compatible gateways always get
+        // thinking controls, because their models often default to thinking
+        // mode (Aliyun MaaS, DashScope).
+        let cfg = config(Some("key"), Some("https://example.com/v1"), None);
+        let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
+        assert_eq!(client.enable_thinking, Some(false));
+        assert_eq!(client.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(
+            client.openai_additional_params(),
+            Some(serde_json::json!({
+                "enable_thinking": false,
+                "reasoning_effort": "low",
+            }))
+        );
+    }
+
+    #[test]
+    fn custom_openai_provider_respects_config_overrides() {
+        let mut cfg = config(Some("key"), Some("https://example.com/v1"), None);
+        let ProviderConfig::ApiKey {
+            enable_thinking,
+            reasoning_effort,
+            ..
+        } = &mut cfg;
+        *enable_thinking = Some(true);
+        *reasoning_effort = Some("high".to_string());
+        let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
+        assert_eq!(client.enable_thinking, Some(true));
+        assert_eq!(client.reasoning_effort.as_deref(), Some("high"));
+        // enable_thinking=true is the provider default anyway; only the
+        // reasoning_effort override is forwarded.
+        assert_eq!(
+            client.openai_additional_params(),
+            Some(serde_json::json!({ "reasoning_effort": "high" }))
+        );
+    }
+
+    #[test]
+    fn custom_messages_endpoint_gets_no_openai_thinking_defaults() {
+        let cfg = config(
+            Some("key"),
+            Some("https://example.com/anthropic"),
+            Some("messages"),
+        );
+        let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
+        assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
+        assert!(client.disable_thinking);
+        assert_eq!(client.enable_thinking, None);
+        assert_eq!(client.reasoning_effort, None);
+    }
+
+    #[test]
+    fn named_openai_compatible_providers_get_no_thinking_defaults() {
+        // Named providers keep plain requests by default (some reject
+        // unknown fields); the server only adds thinking controls on retry
+        // there, so config remains the opt-in.
+        let cfg = config(Some("key"), None, None);
+        let client = RigClient::from_config(&cfg, ProviderId::DeepSeek).expect("should build");
+        assert_eq!(client.enable_thinking, None);
+        assert_eq!(client.reasoning_effort, None);
+        assert_eq!(client.openai_additional_params(), None);
     }
 
     #[test]

@@ -2,18 +2,20 @@ use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Widget};
 
 use crate::app::{AppState, LlmResult, View};
 use crate::ui::colors;
 use crate::ui::labels::{get_common_labels, get_report_labels, native_language_code};
 use crate::ui::views::utils::{
     screen_chunks, select_next_wrapping, select_previous_wrapping, wrapped_input_text,
+    wrapped_line_count,
 };
 use crate::ui::views::{curriculum, settings};
 use crate::ui::widgets::{Card, build_footer_wrapped, error_lines};
 use open_course_core::error::{AppError, Result};
 use open_course_core::session::{MentorSession, NextSessionTopic, WarmupItem, WarmupKind};
+use open_course_core::vocabulary::normalize_key;
 use open_course_db::curriculum::Topic;
 use open_course_llm::pipeline::log_debug_event;
 
@@ -22,6 +24,7 @@ pub enum Mode {
     #[default]
     TopicSelection,
     WarmUp,
+    Cloze,
     Practicing,
     /// Exercise generation failed: show the error with retry/settings/home
     /// actions instead of silently returning to topic selection.
@@ -48,6 +51,13 @@ pub struct SessionState {
     pub warmup_index: usize,
     /// Whether the current warm-up card's translation is visible.
     pub warmup_revealed: bool,
+    /// Cloze (fill-in-the-blank) items shown between the warm-up and the
+    /// exercises; empty when the session has no cloze stage.
+    pub cloze_items: Vec<open_course_core::session::ClozeItem>,
+    pub cloze_index: usize,
+    /// The option picked for the current cloze item; `Some` while the
+    /// correct/incorrect feedback is shown, before advancing.
+    pub cloze_selected: Option<usize>,
     /// Set when exercise generation fails; shown in `Mode::Error`.
     pub generation_error: Option<String>,
 }
@@ -134,6 +144,23 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                 width,
             )
         }
+        Mode::Cloze => {
+            if state.session.cloze_selected.is_some() {
+                build_footer_wrapped(
+                    &[(labels.any_key, common.next), ("Esc", labels.back)],
+                    width,
+                )
+            } else {
+                build_footer_wrapped(
+                    &[
+                        ("1-4", labels.choose),
+                        ("s", labels.skip_item),
+                        ("Esc", labels.back),
+                    ],
+                    width,
+                )
+            }
+        }
         Mode::Practicing => {
             build_footer_wrapped(&[("Enter", labels.submit), ("Esc", labels.back)], width)
         }
@@ -196,12 +223,13 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             let idx = state.session.warmup_index.min(total.saturating_sub(1));
             let title = format!("{} {}/{}", labels.warmup_title, idx + 1, total);
 
-            let mut card = Card::new(title);
+            let mut card = Card::new(title).padding(Padding::new(2, 2, 1, 1));
             if let Some(item) = state.session.warmup_items.get(idx) {
-                let mut word_spans = vec![Span::styled(
+                card = card.line(Line::from(Span::styled(
                     item.lemma.clone(),
                     Style::default().add_modifier(Modifier::BOLD),
-                )];
+                )));
+
                 let new_badge = (item.kind == WarmupKind::New).then_some("NEW");
                 let badges: Vec<&str> =
                     [new_badge, item.pos.as_deref(), item.cefr_level.as_deref()]
@@ -209,19 +237,22 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                         .flatten()
                         .collect();
                 if !badges.is_empty() {
-                    word_spans.push(Span::styled(
-                        format!("  {}", badges.join(" · ")),
+                    card = card.line(Line::from(Span::styled(
+                        badges.join(" · "),
                         Style::default().fg(Color::DarkGray),
-                    ));
+                    )));
                 }
-                card = card.line(Line::from(word_spans));
 
+                card = card.line(Line::default());
                 if state.session.warmup_revealed {
                     card = card.line(Line::from(item.translation.clone()));
                     if let Some(example) = item.example.as_ref() {
+                        card = card.line(Line::default());
                         card = card.line(Line::from(Span::styled(
                             example.clone(),
-                            Style::default().fg(colors::YELLOW),
+                            Style::default()
+                                .fg(colors::YELLOW)
+                                .add_modifier(Modifier::ITALIC),
                         )));
                     }
                 } else {
@@ -236,6 +267,120 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             frame.render_widget(
                 Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
                 chunks[2],
+            );
+        }
+        Mode::Cloze => {
+            let total = state.session.cloze_items.len();
+            let idx = state.session.cloze_index.min(total.saturating_sub(1));
+            let title = format!("{} {}/{}", labels.cloze_title, idx + 1, total);
+            // Inner text column width: borders (2) + horizontal padding (2+2).
+            let text_width = (area.width as usize).saturating_sub(6);
+
+            let mut card = Card::new(title).padding(Padding::new(2, 2, 1, 1));
+            let mut content_lines = 0usize;
+            if let Some(item) = state.session.cloze_items.get(idx) {
+                let picked = state
+                    .session
+                    .cloze_selected
+                    .and_then(|n| item.options.get(n))
+                    .cloned();
+                let picked_correct = picked
+                    .as_ref()
+                    .map(|word| normalize_key(word) == normalize_key(&item.answer));
+                let gap_span = match (&picked, picked_correct) {
+                    (Some(word), Some(true)) => Span::styled(
+                        word.clone(),
+                        Style::default()
+                            .fg(colors::GREEN)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    (Some(word), _) => Span::styled(
+                        word.clone(),
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
+                    (None, _) => Span::styled(
+                        "_____",
+                        Style::default()
+                            .fg(colors::YELLOW)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                };
+                let (before, after) = item
+                    .sentence
+                    .split_once("_____")
+                    .map(|(b, a)| (b.to_string(), a.to_string()))
+                    .unwrap_or_else(|| (item.sentence.clone(), String::new()));
+                card = card.line(Line::from(vec![
+                    Span::raw(before),
+                    gap_span,
+                    Span::raw(after),
+                ]));
+                content_lines += wrapped_line_count(&item.sentence, text_width);
+                if !item.translation.is_empty() {
+                    card = card.line(Line::default());
+                    card = card.line(Line::from(Span::styled(
+                        item.translation.clone(),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                    content_lines += 1 + wrapped_line_count(&item.translation, text_width);
+                }
+            }
+
+            // The card hugs its content instead of stretching across the
+            // screen; the options sit right below it.
+            let card_height = content_lines as u16 + 4; // borders + vertical padding
+            let cloze_chunks = Layout::vertical([
+                Constraint::Length(card_height.max(4)),
+                Constraint::Min(1),
+                Constraint::Length(chunks[2].height),
+            ])
+            .split(area);
+            frame.render_widget(card, cloze_chunks[0]);
+
+            if let Some(item) = state.session.cloze_items.get(idx) {
+                let selected = state.session.cloze_selected;
+                let selected_correct = selected
+                    .and_then(|n| item.options.get(n))
+                    .map(|word| normalize_key(word) == normalize_key(&item.answer))
+                    .unwrap_or(false);
+                let mut option_lines = vec![Line::default()];
+                for (n, option) in item.options.iter().enumerate() {
+                    // Once answered, the pick is colored like on the web:
+                    // green when correct, red when wrong — and the right
+                    // answer is shown in green after a wrong pick.
+                    let word_style = match selected {
+                        Some(s) if s == n && selected_correct => Style::default()
+                            .fg(colors::GREEN)
+                            .add_modifier(Modifier::BOLD),
+                        Some(s) if s == n => {
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                        }
+                        Some(_)
+                            if !selected_correct
+                                && normalize_key(option) == normalize_key(&item.answer) =>
+                        {
+                            Style::default().fg(colors::GREEN)
+                        }
+                        _ => Style::default(),
+                    };
+                    option_lines.push(Line::from(vec![
+                        // Aligned with the card's inner text column
+                        // (border 1 + horizontal padding 2).
+                        Span::styled(
+                            format!("   {}  ", n + 1),
+                            Style::default()
+                                .fg(colors::YELLOW)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(option.clone(), word_style),
+                    ]));
+                }
+                frame.render_widget(Paragraph::new(option_lines), cloze_chunks[1]);
+            }
+
+            frame.render_widget(
+                Paragraph::new(footer_text.clone()).style(Style::default().fg(Color::DarkGray)),
+                cloze_chunks[2],
             );
         }
         Mode::Practicing => {
@@ -292,6 +437,7 @@ pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     match state.session.mode {
         Mode::TopicSelection => handle_topic_selection(state, code).await,
         Mode::WarmUp => handle_warmup(state, code).await,
+        Mode::Cloze => handle_cloze(state, code).await,
         Mode::Practicing => handle_practicing(state, code).await,
         Mode::Error => handle_generation_error(state, code).await,
     }
@@ -327,7 +473,7 @@ async fn handle_generation_error(state: &mut AppState, code: KeyCode) -> Result<
 
 /// Warm-up phase: forward-only flashcards. Enter (or Space) reveals the
 /// translation, then advances to the next card; after the last card the
-/// session moves on to the exercises. `s` skips the rest of the warm-up.
+/// session moves on to the next stage. `s` skips the rest of the warm-up.
 async fn handle_warmup(state: &mut AppState, code: KeyCode) -> Result<()> {
     match code {
         KeyCode::Esc => {
@@ -338,7 +484,7 @@ async fn handle_warmup(state: &mut AppState, code: KeyCode) -> Result<()> {
             state.view = View::Dashboard;
         }
         KeyCode::Char('s') => {
-            state.session.mode = Mode::Practicing;
+            advance_after_warmup(&mut state.session);
         }
         KeyCode::Enter | KeyCode::Char(' ') => {
             if !state.session.warmup_revealed {
@@ -347,8 +493,62 @@ async fn handle_warmup(state: &mut AppState, code: KeyCode) -> Result<()> {
                 state.session.warmup_index += 1;
                 state.session.warmup_revealed = false;
                 if state.session.warmup_index >= state.session.warmup_items.len() {
-                    state.session.mode = Mode::Practicing;
+                    advance_after_warmup(&mut state.session);
                 }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// After the warm-up, go through the cloze stage when it has items,
+/// otherwise straight to the exercises.
+fn advance_after_warmup(session: &mut SessionState) {
+    session.mode = if session.cloze_items.is_empty() {
+        Mode::Practicing
+    } else {
+        Mode::Cloze
+    };
+}
+
+/// Cloze phase: pick a word from the bank with a digit (`1`-`9`) — the
+/// pick fills the gap and is highlighted green (correct) or red (wrong)
+/// like on the web; any following keypress advances to the next item.
+/// `s` skips the current item unanswered. After the last item the
+/// session moves on to the exercises.
+async fn handle_cloze(state: &mut AppState, code: KeyCode) -> Result<()> {
+    match code {
+        KeyCode::Esc => {
+            if state.session.loading {
+                state.cancelled = true;
+            }
+            reset_session(&mut state.session);
+            state.view = View::Dashboard;
+        }
+        _ if state.session.cloze_selected.is_some() => {
+            state.session.cloze_selected = None;
+            state.session.cloze_index += 1;
+            if state.session.cloze_index >= state.session.cloze_items.len() {
+                state.session.mode = Mode::Practicing;
+            }
+        }
+        KeyCode::Char('s') => {
+            state.session.cloze_index += 1;
+            if state.session.cloze_index >= state.session.cloze_items.len() {
+                state.session.mode = Mode::Practicing;
+            }
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+            let option_index = c as usize - '1' as usize;
+            let valid = state
+                .session
+                .cloze_items
+                .get(state.session.cloze_index)
+                .map(|item| option_index < item.options.len())
+                .unwrap_or(false);
+            if valid {
+                state.session.cloze_selected = Some(option_index);
             }
         }
         _ => {}
@@ -694,6 +894,9 @@ pub(crate) fn reset_session(session: &mut SessionState) {
     session.warmup_items.clear();
     session.warmup_index = 0;
     session.warmup_revealed = false;
+    session.cloze_items.clear();
+    session.cloze_index = 0;
+    session.cloze_selected = None;
     session.generation_error = None;
 }
 

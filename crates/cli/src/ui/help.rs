@@ -187,6 +187,17 @@ fn session_groups(state: &AppState, labels: ReportLabels, common: CommonLabels) 
             ),
             group(common.group_exit, vec![entry("Esc", labels.back)]),
         ],
+        SessionMode::Cloze => vec![
+            group(
+                common.group_actions,
+                vec![
+                    entry("1-4", labels.choose),
+                    entry(labels.any_key, common.next),
+                    entry("s", labels.skip_item),
+                ],
+            ),
+            group(common.group_exit, vec![entry("Esc", labels.back)]),
+        ],
         SessionMode::Practicing => vec![
             group(
                 common.group_actions,
