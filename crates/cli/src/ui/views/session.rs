@@ -2,7 +2,7 @@ use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Widget};
 
 use crate::app::{AppState, LlmResult, View};
 use crate::ui::colors;
@@ -209,32 +209,50 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             let idx = state.session.warmup_index.min(total.saturating_sub(1));
             let title = format!("{} {}/{}", labels.warmup_title, idx + 1, total);
 
-            let mut card = Card::new(title);
+            let mut card = Card::new(title).padding(Padding::new(2, 2, 1, 1));
             if let Some(item) = state.session.warmup_items.get(idx) {
-                let mut word_spans = vec![Span::styled(
+                card = card.line(Line::from(Span::styled(
                     item.lemma.clone(),
                     Style::default().add_modifier(Modifier::BOLD),
-                )];
-                let new_badge = (item.kind == WarmupKind::New).then_some("NEW");
-                let badges: Vec<&str> =
-                    [new_badge, item.pos.as_deref(), item.cefr_level.as_deref()]
-                        .into_iter()
-                        .flatten()
-                        .collect();
-                if !badges.is_empty() {
-                    word_spans.push(Span::styled(
-                        format!("  {}", badges.join(" · ")),
+                )));
+
+                let mut badge_spans = Vec::new();
+                if item.kind == WarmupKind::New {
+                    badge_spans.push(Span::styled(
+                        "NEW",
+                        Style::default()
+                            .fg(colors::GREEN)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+                let meta: Vec<&str> = [item.pos.as_deref(), item.cefr_level.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                if !meta.is_empty() {
+                    if !badge_spans.is_empty() {
+                        badge_spans
+                            .push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
+                    }
+                    badge_spans.push(Span::styled(
+                        meta.join(" · "),
                         Style::default().fg(Color::DarkGray),
                     ));
                 }
-                card = card.line(Line::from(word_spans));
+                if !badge_spans.is_empty() {
+                    card = card.line(Line::from(badge_spans));
+                }
 
+                card = card.line(Line::default());
                 if state.session.warmup_revealed {
                     card = card.line(Line::from(item.translation.clone()));
                     if let Some(example) = item.example.as_ref() {
+                        card = card.line(Line::default());
                         card = card.line(Line::from(Span::styled(
                             example.clone(),
-                            Style::default().fg(colors::YELLOW),
+                            Style::default()
+                                .fg(colors::YELLOW)
+                                .add_modifier(Modifier::ITALIC),
                         )));
                     }
                 } else {
@@ -256,7 +274,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
             let idx = state.session.cloze_index.min(total.saturating_sub(1));
             let title = format!("{} {}/{}", labels.cloze_title, idx + 1, total);
 
-            let mut card = Card::new(title);
+            let mut card = Card::new(title).padding(Padding::new(2, 2, 1, 1));
             if let Some(item) = state.session.cloze_items.get(idx) {
                 let (before, after) = item
                     .sentence
@@ -290,8 +308,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                         option_lines.push(Line::default());
                     }
                     option_lines.push(Line::from(vec![
+                        // Aligned with the card's inner text column
+                        // (border 1 + horizontal padding 2).
                         Span::styled(
-                            format!("  {}  ", n + 1),
+                            format!("   {}  ", n + 1),
                             Style::default()
                                 .fg(colors::YELLOW)
                                 .add_modifier(Modifier::BOLD),
