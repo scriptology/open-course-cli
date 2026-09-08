@@ -120,14 +120,17 @@ async fn discover_pairs(state: &mut AppState) {
     if state.view == View::SyncAll && !state.sync_all.done {
         for pair in &config.pairs {
             if added.contains(&pair.id) {
-                state.sync_all.rows.push(crate::ui::views::sync_all::PairSyncRow {
-                    pair_id: pair.id.clone(),
-                    title: format!(
-                        "{} → {}",
-                        pair.profile.native_language, pair.profile.target_language
-                    ),
-                    status: None,
-                });
+                state
+                    .sync_all
+                    .rows
+                    .push(crate::ui::views::sync_all::PairSyncRow {
+                        pair_id: pair.id.clone(),
+                        title: format!(
+                            "{} → {}",
+                            pair.profile.native_language, pair.profile.target_language
+                        ),
+                        status: None,
+                    });
             }
         }
     }
