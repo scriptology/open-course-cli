@@ -123,10 +123,13 @@ impl SyncClient {
     }
 
     /// `GET {base}/v1/pairs` — every pair owned by the account, including
-    /// pairs created on other surfaces (web, other devices).
+    /// pairs created on other surfaces (web, other devices). Uses the short
+    /// timeout and no retries: discovery is best-effort and runs on the
+    /// event loop, so it must fail fast when the server is unreachable.
     pub async fn list_pairs(&self) -> Result<Vec<PairInfoResponse>, SyncError> {
         let resp = self
-            .send_with_retry(|| self.authorized(self.http.get(self.url("/v1/pairs"))))
+            .authorized(self.http_short.get(self.url("/v1/pairs")))
+            .send()
             .await?;
         let resp = check_status(resp).await?;
         Ok(resp.json().await?)

@@ -47,8 +47,10 @@ pub enum SyncMessage {
         status: PairSyncStatus,
     },
     /// The sync-all run finished; `failed` counts pairs that did not sync.
+    /// `cancelled` marks a run interrupted by the user (Esc).
     SyncAllFinished {
         failed: usize,
+        cancelled: bool,
     },
     /// A background task skipped silently (signed out / toggle off); only
     /// releases the sync scheduler.
@@ -65,6 +67,9 @@ pub enum PairSyncStatus {
     Merged(open_course_sync::MergeReport),
     Failed(String),
     Unauthorized,
+    /// The user interrupted the run (Esc) before this pair was reached or
+    /// while it was running.
+    Cancelled,
 }
 
 #[derive(Debug)]
@@ -549,7 +554,7 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
         SyncMessage::SyncAllProgress { pair_id, status } => {
             crate::ui::views::sync_all::apply_progress(state, &pair_id, status);
         }
-        SyncMessage::SyncAllFinished { failed } => {
+        SyncMessage::SyncAllFinished { failed, cancelled } => {
             // The rows are still populated here (cleared when the view is
             // dismissed): an all-around "unauthorized" means the login is
             // gone — surface it like the old single-pair manual sync did.
@@ -563,7 +568,7 @@ pub async fn apply_sync_message(state: &mut AppState, message: SyncMessage) {
             if unauthorized {
                 account.relogin_required = true;
             }
-            crate::ui::views::sync_all::apply_finished(state, failed).await;
+            crate::ui::views::sync_all::apply_finished(state, failed, cancelled).await;
             crate::app::sync::finish(state).await;
         }
         SyncMessage::SchedulerIdle => {

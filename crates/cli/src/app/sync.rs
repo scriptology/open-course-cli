@@ -247,7 +247,8 @@ pub(crate) fn map_sync_err(e: SyncError) -> SyncFailure {
 
 /// App start: a quiet pull of every pair with sync enabled. Only a rejected
 /// token is surfaced (offline-first); per-pair network failures are
-/// swallowed. Always terminates with a message so the scheduler idles.
+/// swallowed. A supervisor sends the terminating message even when the pull
+/// task panics, so the scheduler never wedges.
 fn spawn_pull_all(state: &AppState) {
     let data_dir = state.data_dir.clone();
     let base_url = resolve_sync_server_url(state.config.as_ref());
@@ -259,21 +260,15 @@ fn spawn_pull_all(state: &AppState) {
         .unwrap_or_default();
     let active_db = Arc::clone(&state.db);
     let tx = state.sync_tx.clone();
-    tokio::spawn(async move {
+    let inner = tokio::spawn(async move {
         let token = match TokenStore::new(data_dir.clone()).load().await {
             Ok(Some(token)) => token,
             // Signed out (or an unreadable store): nothing to pull.
-            _ => {
-                let _ = tx.send(SyncMessage::SchedulerIdle).await;
-                return;
-            }
+            _ => return None,
         };
         let client = match SyncClient::new(&base_url) {
             Ok(client) => client.with_access_token(token.access_token),
-            Err(_) => {
-                let _ = tx.send(SyncMessage::SchedulerIdle).await;
-                return;
-            }
+            Err(_) => return None,
         };
         let mut unauthorized = false;
         for pair_id in &pair_ids {
@@ -298,12 +293,17 @@ fn spawn_pull_all(state: &AppState) {
                 Err(_) => {}
             }
         }
-        let msg = if unauthorized {
-            SyncMessage::PullOnStartFinished(Err(SyncFailure::unauthorized()))
-        } else {
+        Some(unauthorized)
+    });
+    tokio::spawn(async move {
+        let msg = match inner.await {
             // The report's revision is unused by the handler; it only
             // triggers a status refresh.
-            SyncMessage::PullOnStartFinished(Ok(SyncReport::sync(0)))
+            Ok(Some(false)) => SyncMessage::PullOnStartFinished(Ok(SyncReport::sync(0))),
+            Ok(Some(true)) => SyncMessage::PullOnStartFinished(Err(SyncFailure::unauthorized())),
+            // Signed out, no client, or the pull task panicked: release the
+            // scheduler quietly.
+            Ok(None) | Err(_) => SyncMessage::SchedulerIdle,
         };
         let _ = tx.send(msg).await;
     });
@@ -322,7 +322,12 @@ enum SyncAllMode {
 /// Binds and syncs EVERY pair, reporting per-pair progress to the SyncAll
 /// view. Conflicts are resolved by `merge_bind` (last-writer-wins by
 /// `updated_at`), no dialogs.
-fn spawn_sync_all(state: &AppState, mode: SyncAllMode) {
+///
+/// The run lives in an inner task whose abort handle the SyncAll view uses
+/// for Esc-cancellation; a supervisor awaits it and ALWAYS sends the
+/// terminating `SyncAllFinished` — a panic in the sync code must never leave
+/// the view spinning forever (and the scheduler wedged) again.
+fn spawn_sync_all(state: &mut AppState, mode: SyncAllMode) {
     let data_dir = state.data_dir.clone();
     let base_url = resolve_sync_server_url(state.config.as_ref());
     let pair_ids = pair_ids(state);
@@ -333,94 +338,123 @@ fn spawn_sync_all(state: &AppState, mode: SyncAllMode) {
         .unwrap_or_default();
     let active_db = Arc::clone(&state.db);
     let tx = state.sync_tx.clone();
-    tokio::spawn(async move {
-        let token = match TokenStore::new(data_dir.clone()).load().await {
-            Ok(Some(token)) => token,
-            Ok(None) => {
-                for pair_id in &pair_ids {
-                    let _ = tx
-                        .send(SyncMessage::SyncAllProgress {
-                            pair_id: pair_id.clone(),
-                            status: PairSyncStatus::Unauthorized,
-                        })
-                        .await;
+    let total = pair_ids.len();
+    // (index of the pair currently syncing, its id) — for panic reporting.
+    let current = Arc::new(std::sync::Mutex::new((0usize, String::new())));
+    let inner = {
+        let current = Arc::clone(&current);
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let token = match TokenStore::new(data_dir.clone()).load().await {
+                Ok(Some(token)) => token,
+                Ok(None) => {
+                    for pair_id in &pair_ids {
+                        let _ = tx
+                            .send(SyncMessage::SyncAllProgress {
+                                pair_id: pair_id.clone(),
+                                status: PairSyncStatus::Unauthorized,
+                            })
+                            .await;
+                    }
+                    return pair_ids.len();
                 }
-                let _ = tx
-                    .send(SyncMessage::SyncAllFinished {
-                        failed: pair_ids.len(),
-                    })
-                    .await;
-                return;
-            }
-            Err(e) => {
-                let message = e.to_string();
-                for pair_id in &pair_ids {
-                    let _ = tx
-                        .send(SyncMessage::SyncAllProgress {
-                            pair_id: pair_id.clone(),
-                            status: PairSyncStatus::Failed(message.clone()),
-                        })
-                        .await;
+                Err(e) => {
+                    let message = e.to_string();
+                    for pair_id in &pair_ids {
+                        let _ = tx
+                            .send(SyncMessage::SyncAllProgress {
+                                pair_id: pair_id.clone(),
+                                status: PairSyncStatus::Failed(message.clone()),
+                            })
+                            .await;
+                    }
+                    return pair_ids.len();
                 }
-                let _ = tx
-                    .send(SyncMessage::SyncAllFinished {
-                        failed: pair_ids.len(),
-                    })
-                    .await;
-                return;
-            }
-        };
-        let client = match SyncClient::new(&base_url) {
-            Ok(client) => client.with_access_token(token.access_token),
-            Err(e) => {
-                let message = e.to_string();
-                for pair_id in &pair_ids {
-                    let _ = tx
-                        .send(SyncMessage::SyncAllProgress {
-                            pair_id: pair_id.clone(),
-                            status: PairSyncStatus::Failed(message.clone()),
-                        })
-                        .await;
-                }
-                let _ = tx
-                    .send(SyncMessage::SyncAllFinished {
-                        failed: pair_ids.len(),
-                    })
-                    .await;
-                return;
-            }
-        };
-
-        let mut failed = 0usize;
-        for pair_id in &pair_ids {
-            let _ = tx
-                .send(SyncMessage::SyncAllProgress {
-                    pair_id: pair_id.clone(),
-                    status: PairSyncStatus::Running,
-                })
-                .await;
-            let status = match open_pair_db(&data_dir, &active_db, &active_pair, pair_id).await {
-                Some(db) => match mode {
-                    SyncAllMode::AfterLogin => bind_and_sync(&client, &db, pair_id).await,
-                    SyncAllMode::Manual => manual_sync_pair(&client, &db, pair_id).await,
-                },
-                None => PairSyncStatus::Failed("database unavailable".to_string()),
             };
-            if matches!(
-                status,
-                PairSyncStatus::Failed(_) | PairSyncStatus::Unauthorized
-            ) {
-                failed += 1;
-            }
-            let _ = tx
-                .send(SyncMessage::SyncAllProgress {
-                    pair_id: pair_id.clone(),
+            let client = match SyncClient::new(&base_url) {
+                Ok(client) => client.with_access_token(token.access_token),
+                Err(e) => {
+                    let message = e.to_string();
+                    for pair_id in &pair_ids {
+                        let _ = tx
+                            .send(SyncMessage::SyncAllProgress {
+                                pair_id: pair_id.clone(),
+                                status: PairSyncStatus::Failed(message.clone()),
+                            })
+                            .await;
+                    }
+                    return pair_ids.len();
+                }
+            };
+
+            let mut failed = 0usize;
+            for (index, pair_id) in pair_ids.iter().enumerate() {
+                *current.lock().unwrap() = (index, pair_id.clone());
+                let _ = tx
+                    .send(SyncMessage::SyncAllProgress {
+                        pair_id: pair_id.clone(),
+                        status: PairSyncStatus::Running,
+                    })
+                    .await;
+                let status = match open_pair_db(&data_dir, &active_db, &active_pair, pair_id).await
+                {
+                    Some(db) => match mode {
+                        SyncAllMode::AfterLogin => bind_and_sync(&client, &db, pair_id).await,
+                        SyncAllMode::Manual => manual_sync_pair(&client, &db, pair_id).await,
+                    },
+                    None => PairSyncStatus::Failed("database unavailable".to_string()),
+                };
+                if matches!(
                     status,
-                })
-                .await;
-        }
-        let _ = tx.send(SyncMessage::SyncAllFinished { failed }).await;
+                    PairSyncStatus::Failed(_) | PairSyncStatus::Unauthorized
+                ) {
+                    failed += 1;
+                }
+                let _ = tx
+                    .send(SyncMessage::SyncAllProgress {
+                        pair_id: pair_id.clone(),
+                        status,
+                    })
+                    .await;
+            }
+            failed
+        })
+    };
+    state.sync_all.abort = Some(inner.abort_handle());
+    tokio::spawn(async move {
+        let (failed, cancelled) = match inner.await {
+            Ok(failed) => (failed, false),
+            Err(e) if e.is_cancelled() => (0, true),
+            Err(e) => {
+                // The sync task panicked: report the pair it was on and
+                // count every unfinished pair as failed.
+                let (index, pair_id) = current.lock().unwrap().clone();
+                let message = panic_message(&e);
+                if !pair_id.is_empty() {
+                    let _ = tx
+                        .send(SyncMessage::SyncAllProgress {
+                            pair_id,
+                            status: PairSyncStatus::Failed(format!("internal error: {message}")),
+                        })
+                        .await;
+                }
+                (total.saturating_sub(index), false)
+            }
+        };
+        let _ = tx
+            .send(SyncMessage::SyncAllFinished { failed, cancelled })
+            .await;
     });
+}
+
+/// Extracts the panic message from a join error for the failure row.
+fn panic_message(e: &tokio::task::JoinError) -> String {
+    let panic = e.to_string();
+    panic
+        .strip_prefix("task panicked")
+        .map(str::trim)
+        .unwrap_or(&panic)
+        .to_string()
 }
 
 /// Manual "Sync now" for one pair. A never-bound pair (created after the
@@ -479,19 +513,24 @@ async fn bind_and_sync(client: &SyncClient, db: &Database, pair_id: &str) -> Pai
             let version = db.curriculum().read_all().await.ok().map(|c| c.version);
             match backfill_outbox(db, true).await.map_err(sync_err_status) {
                 Err(status) => Err(status),
-                Ok(()) => {
-                    let pushed = client
-                        .push(db, pair_id)
-                        .await
-                        .map(|_| PairSyncStatus::Done)
-                        .map_err(push_err_status);
-                    if pushed.is_ok()
-                        && let Some(version) = version
-                    {
-                        let _ = db.metadata().set_cloud_curriculum_version(version).await;
+                Ok(()) => match client.push(db, pair_id).await {
+                    Ok(_) => {
+                        if let Some(version) = version {
+                            let _ = db.metadata().set_cloud_curriculum_version(version).await;
+                        }
+                        Ok(PairSyncStatus::Done)
                     }
-                    pushed
-                }
+                    // The pair may already exist in the cloud with an
+                    // empty canon (created on the web): the first topic
+                    // push is a 409 by design — merge instead of failing.
+                    // `merge_bind` stamps the cloud version itself.
+                    Err(PushError::CurriculumConflict(_)) => client
+                        .merge_bind(db, pair_id)
+                        .await
+                        .map(PairSyncStatus::Merged)
+                        .map_err(push_err_status),
+                    Err(e) => Err(push_err_status(e)),
+                },
             }
         }
         BindScenario::FreshCloud => client
