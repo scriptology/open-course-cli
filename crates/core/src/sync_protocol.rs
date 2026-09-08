@@ -127,6 +127,24 @@ pub struct MeResponse {
     pub subscription_status: String,
 }
 
+/// `GET {base}/v1/pairs` response item: one pair owned by the account,
+/// created on any surface (CLI, web).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct PairInfoResponse {
+    pub pair_id: String,
+    pub native_lang: String,
+    pub target_lang: String,
+    pub revision: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_assessed_cefr: Option<String>,
+    pub batch_size: i32,
+    pub topic_count: i64,
+}
+
 /// Outbox op strings (snake_case) to wire strings (camelCase).
 pub fn op_to_wire(op: &str) -> &str {
     match op {

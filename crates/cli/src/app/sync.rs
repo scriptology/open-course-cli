@@ -7,13 +7,13 @@
 
 use std::sync::Arc;
 
-use open_course_config::{pair_db_path, resolve_sync_server_url};
+use open_course_config::{merge_remote_pairs, pair_db_path, resolve_sync_server_url, write_config};
 use open_course_db::Database;
 use open_course_sync::{
     BindScenario, PushError, SyncClient, SyncError, TokenStore, backfill_outbox,
 };
 
-use crate::app::AppState;
+use crate::app::{AppState, View};
 use crate::ui::views::settings::account::{PairSyncStatus, SyncFailure, SyncMessage, SyncReport};
 
 /// Why a background sync was scheduled.
@@ -75,12 +75,60 @@ pub async fn schedule(state: &mut AppState, trigger: SyncTrigger) {
             spawn_pull_all(state);
         }
         SyncTrigger::AfterLogin => {
+            discover_pairs(state).await;
             state.sync.active = true;
             spawn_sync_all(state, SyncAllMode::AfterLogin);
         }
         SyncTrigger::Manual => {
+            discover_pairs(state).await;
             state.sync.active = true;
             spawn_sync_all(state, SyncAllMode::Manual);
+        }
+    }
+}
+
+/// Fetches the account's pair list from the server and merges pairs the
+/// config does not know yet (created on the web or another device) into it,
+/// so the sync-all run that follows binds and pulls them. Best-effort: any
+/// failure (signed out, offline) keeps the local pair list.
+async fn discover_pairs(state: &mut AppState) {
+    let base_url = resolve_sync_server_url(state.config.as_ref());
+    let token = match TokenStore::new(state.data_dir.clone()).load().await {
+        Ok(Some(token)) => token,
+        _ => return,
+    };
+    let client = match SyncClient::new(&base_url) {
+        Ok(client) => client.with_access_token(token.access_token),
+        Err(_) => return,
+    };
+    let remote = match client.list_pairs().await {
+        Ok(pairs) => pairs,
+        Err(_) => return,
+    };
+    let Some(config) = state.config.as_mut() else {
+        return;
+    };
+    let added = merge_remote_pairs(config, &remote);
+    if added.is_empty() {
+        return;
+    }
+    if write_config(config, &state.data_dir).is_err() {
+        return;
+    }
+    // The SyncAll view seeded its rows before the orchestrator ran; add rows
+    // for the discovered pairs so their progress is visible too.
+    if state.view == View::SyncAll && !state.sync_all.done {
+        for pair in &config.pairs {
+            if added.contains(&pair.id) {
+                state.sync_all.rows.push(crate::ui::views::sync_all::PairSyncRow {
+                    pair_id: pair.id.clone(),
+                    title: format!(
+                        "{} → {}",
+                        pair.profile.native_language, pair.profile.target_language
+                    ),
+                    status: None,
+                });
+            }
         }
     }
 }
