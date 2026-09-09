@@ -679,6 +679,50 @@ async fn pull_with_timeout_fails_fast_on_slow_server() {
     );
 }
 
+/// A first full pull replays the whole history. Applying it must be linear
+/// (each table is read once), not a full table scan per change — the
+/// quadratic version looked like an infinite hang on real datasets.
+#[tokio::test]
+async fn pull_bulk_history_applies_linearly() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+    const CHANGES: i64 = 2_000;
+    {
+        let mut st = state.lock().unwrap();
+        for seq in 1..=CHANGES {
+            let t = topic(
+                &format!("topic-{seq}"),
+                &format!("Topic {seq}"),
+                Some("2024-01-01T00:00:00Z"),
+            );
+            st.changes.push(wire_upsert_topic(seq, &t));
+        }
+        st.revision = CHANGES;
+    }
+
+    let start = std::time::Instant::now();
+    let revision = client(&base).pull(&db, "ru-es").await.unwrap();
+    assert_eq!(revision, CHANGES);
+    assert_eq!(
+        db.curriculum().read_all().await.unwrap().topics.len(),
+        CHANGES as usize
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(30),
+        "bulk pull of {CHANGES} changes took {:?} (regression: quadratic apply)",
+        start.elapsed()
+    );
+
+    // Re-applying the same full feed is a no-op (LWW against the preloaded
+    // caches).
+    db.metadata().set_last_pulled_seq(0).await.unwrap();
+    client(&base).pull(&db, "ru-es").await.unwrap();
+    assert_eq!(
+        db.curriculum().read_all().await.unwrap().topics.len(),
+        CHANGES as usize
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Roundtrip: two clients against one server
 // ---------------------------------------------------------------------------

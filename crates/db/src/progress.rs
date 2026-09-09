@@ -206,6 +206,32 @@ impl ProgressTable {
         Ok(())
     }
 
+    /// Bulk upsert: one delete + one add for the whole batch — applying a
+    /// sync pull row by row (two commits per row) is prohibitively slow on
+    /// real datasets.
+    pub async fn upsert_many_with_timestamps(&self, topics: &[ProgressTopic]) -> Result<()> {
+        if topics.is_empty() {
+            return Ok(());
+        }
+        self.table
+            .delete(&crate::util::in_predicate(
+                "topic_id",
+                topics.iter().map(|t| t.topic_id.as_str()),
+            ))
+            .await
+            .map_err(crate::error::DbError::from)?;
+        let batches = topics
+            .iter()
+            .map(progress_topic_to_record_batch)
+            .collect::<Result<Vec<_>>>()?;
+        self.table
+            .add(batches)
+            .execute()
+            .await
+            .map_err(crate::error::DbError::from)?;
+        Ok(())
+    }
+
     pub async fn write_all(&self, data: &ProgressData) -> Result<()> {
         let mut data = data.clone();
         let now = crate::util::now_rfc3339();

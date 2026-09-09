@@ -13,6 +13,19 @@ pub fn eq_predicate(column: &str, value: &str) -> String {
     format!("{} = '{}'", column, sql_escape(value))
 }
 
+/// `column IN ('a', 'b', ...)` for bulk operations. Empty input yields
+/// `1 = 0` (matches nothing).
+pub fn in_predicate<'a>(column: &str, values: impl Iterator<Item = &'a str>) -> String {
+    let list = values
+        .map(|v| format!("'{}'", sql_escape(v)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if list.is_empty() {
+        return "1 = 0".to_string();
+    }
+    format!("{column} IN ({list})")
+}
+
 /// Current time as RFC3339 — the timestamp format of `updated_at` /
 /// `deleted_at` columns.
 pub(crate) fn now_rfc3339() -> String {

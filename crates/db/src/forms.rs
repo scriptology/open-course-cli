@@ -89,6 +89,32 @@ impl FormsTable {
         Ok(())
     }
 
+    /// Bulk upsert: one delete + one add for the whole batch — applying a
+    /// sync pull row by row (two commits per row) is prohibitively slow on
+    /// real datasets.
+    pub async fn upsert_many_with_timestamps(&self, forms: &[Form]) -> Result<()> {
+        if forms.is_empty() {
+            return Ok(());
+        }
+        self.table
+            .delete(&crate::util::in_predicate(
+                "id",
+                forms.iter().map(|f| f.id.as_str()),
+            ))
+            .await
+            .map_err(crate::error::DbError::from)?;
+        let batches = forms
+            .iter()
+            .map(form_to_record_batch)
+            .collect::<Result<Vec<_>>>()?;
+        self.table
+            .add(batches)
+            .execute()
+            .await
+            .map_err(crate::error::DbError::from)?;
+        Ok(())
+    }
+
     /// Soft-delete: the row stays as a tombstone so sync can propagate the
     /// deletion; reads filter it out.
     pub async fn delete_by_id(&self, id: &str) -> Result<()> {
