@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use rig::agent::Agent;
-use rig::client::CompletionClient;
+use rig::client::{AgentClientExt, AgentModelExt};
 use rig::completion::Prompt;
 use rig::extractor::ExtractorBuilder;
 use rig::providers::{anthropic, gemini, openai};
@@ -101,7 +101,7 @@ fn as_rig_client(client: &dyn LlmClient) -> Option<&RigClient> {
 }
 
 enum RigClientInner {
-    OpenAi(openai::Client),
+    OpenAi(openai::CompletionsClient),
     Anthropic(anthropic::Client),
     Gemini(gemini::Client),
 }
@@ -173,7 +173,8 @@ impl RigClient {
         let (inner, base_url) = match provider_id {
             ProviderId::Anthropic => {
                 let base_url = base_url.unwrap_or("https://api.anthropic.com");
-                let client = anthropic::ClientBuilder::new(&api_key)
+                let client = anthropic::Client::builder()
+                    .api_key(&api_key)
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
@@ -181,7 +182,8 @@ impl RigClient {
             }
             ProviderId::Google => {
                 let base_url = base_url.unwrap_or("https://generativelanguage.googleapis.com");
-                let client = gemini::client::ClientBuilder::new(&api_key)
+                let client = gemini::Client::builder()
+                    .api_key(&api_key)
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
@@ -194,7 +196,8 @@ impl RigClient {
                     ))
                 })?;
                 let anthropic_base = base_url.trim_end_matches("/v1").trim_end_matches('/');
-                let client = anthropic::ClientBuilder::new(&api_key)
+                let client = anthropic::Client::builder()
+                    .api_key(&api_key)
                     .base_url(anthropic_base)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
@@ -213,7 +216,8 @@ impl RigClient {
                     }
                     Some(custom) => custom,
                 };
-                let client = anthropic::ClientBuilder::new(&api_key)
+                let client = anthropic::Client::builder()
+                    .api_key(&api_key)
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
@@ -225,7 +229,8 @@ impl RigClient {
                         "Provider {provider_id:?} requires a base URL"
                     ))
                 })?;
-                let client = openai::ClientBuilder::new(&api_key)
+                let client = openai::CompletionsClient::builder()
+                    .api_key(&api_key)
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
@@ -277,7 +282,7 @@ impl RigClient {
         for attempt in 1..=LLM_MAX_RETRIES {
             let result = match &self.inner {
                 RigClientInner::OpenAi(client) => {
-                    let mut extractor = ExtractorBuilder::<_, T>::new(
+                    let mut extractor = ExtractorBuilder::<T>::new(
                         openai::completion::CompletionModel::new(client.clone(), &self.model),
                     )
                     .max_tokens(max_tokens as u64);
@@ -331,12 +336,12 @@ impl RigClient {
     }
 
     fn openai_agent(
-        client: &openai::Client,
+        client: &openai::CompletionsClient,
         model: &str,
         system: Option<&str>,
         max_tokens: u32,
         additional_params: Option<serde_json::Value>,
-    ) -> Agent<openai::completion::CompletionModel> {
+    ) -> Agent {
         let builder =
             openai::completion::CompletionModel::new(client.clone(), model).into_agent_builder();
         let builder = builder.max_tokens(max_tokens as u64);
@@ -359,7 +364,7 @@ impl RigClient {
         system: Option<&str>,
         max_tokens: u32,
         disable_thinking: bool,
-    ) -> Agent<anthropic::completion::CompletionModel> {
+    ) -> Agent {
         let mut builder = client.agent(model).max_tokens(max_tokens as u64);
         if disable_thinking {
             builder = builder.additional_params(anthropic_disable_thinking_params());
@@ -375,7 +380,7 @@ impl RigClient {
         model: &str,
         system: Option<&str>,
         max_tokens: u32,
-    ) -> Agent<gemini::completion::CompletionModel> {
+    ) -> Agent {
         let mut builder = client.agent(model).max_tokens(max_tokens as u64);
         if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params()
         {
