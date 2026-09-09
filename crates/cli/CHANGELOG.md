@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.23.0](https://github.com/scriptology/open-course-cli/compare/v0.22.0...v0.23.0) (2026-09-09)
+
+
+### Features
+
+* **cli:** cancellable sync-all, panic-proof supervisor, empty-canon merge ([888561d](https://github.com/scriptology/open-course-cli/commit/888561d130111db166937436c734ccb93f109e19))
+* **cli:** discover server-side pairs on sync ([90eabf3](https://github.com/scriptology/open-course-cli/commit/90eabf3612441a45db9c2ffbaadbd46ca4ac3aed))
+* **cli:** discover server-side pairs on sync ([36e661f](https://github.com/scriptology/open-course-cli/commit/36e661f01f117d7b0bcb01e530bc88767247e778))
+
+
+### Bug Fixes
+
+* **cli:** bound every sync step, add sync-debug.log diagnostics ([cd44626](https://github.com/scriptology/open-course-cli/commit/cd44626704f2e7a5fe6b7aedc44517b23f47c2f1))
+
+
+### Performance Improvements
+
+* **sync:** apply pulls in bulk instead of per-row table scans ([eb49025](https://github.com/scriptology/open-course-cli/commit/eb490258f1e4c2c15ba3c5b45c6abeeae9b7ab53))
+
 ## [0.22.0](https://github.com/scriptology/open-course-cli/compare/v0.21.0...v0.22.0) (2026-09-07)
 
 
