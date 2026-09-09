@@ -7,8 +7,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use rig::agent::Agent;
-use rig::client::{AgentClientExt, AgentModelExt};
-use rig::completion::Prompt;
+use rig::client::{AgentClientExt, AgentModelExt, CompletionClient};
+use rig::completion::{CompletionModel, Prompt};
 use rig::extractor::ExtractorBuilder;
 use rig::providers::{anthropic, gemini, openai};
 
@@ -43,7 +43,7 @@ fn provider_error_message(msg: &str) -> String {
     msg.to_string()
 }
 
-fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
+pub(crate) fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
     let msg = e.to_string();
     if is_provider_unavailable(&msg) {
         AppError::ProviderUnavailable(provider_error_message(&msg))
@@ -109,14 +109,8 @@ enum RigClientInner {
 pub struct RigClient {
     inner: RigClientInner,
     model: String,
-    base_url: String,
-    api_key: String,
     reasoning_effort: Option<String>,
     enable_thinking: Option<bool>,
-    /// True for the real OpenAI API (not OpenAI-compatible gateways):
-    /// requires `max_completion_tokens` and rejects unknown parameters such
-    /// as the Qwen/Aliyun `enable_thinking` extension.
-    openai_native: bool,
     /// Anthropic-family providers (Anthropic, MiniMax, and custom
     /// `messages` endpoints) are asked to keep thinking off for speed via
     /// the `thinking: {"type": "disabled"}` request field; newer Claude
@@ -170,7 +164,7 @@ impl RigClient {
             config.enable_thinking().or(custom_openai.then_some(false))
         };
 
-        let (inner, base_url) = match provider_id {
+        let inner = match provider_id {
             ProviderId::Anthropic => {
                 let base_url = base_url.unwrap_or("https://api.anthropic.com");
                 let client = anthropic::Client::builder()
@@ -178,7 +172,7 @@ impl RigClient {
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
-                (RigClientInner::Anthropic(client), base_url.to_string())
+                RigClientInner::Anthropic(client)
             }
             ProviderId::Google => {
                 let base_url = base_url.unwrap_or("https://generativelanguage.googleapis.com");
@@ -187,7 +181,7 @@ impl RigClient {
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
-                (RigClientInner::Gemini(client), base_url.to_string())
+                RigClientInner::Gemini(client)
             }
             ProviderId::Custom if config.endpoint() == "messages" => {
                 let base_url = base_url.ok_or_else(|| {
@@ -201,10 +195,7 @@ impl RigClient {
                     .base_url(anthropic_base)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
-                (
-                    RigClientInner::Anthropic(client),
-                    anthropic_base.to_string(),
-                )
+                RigClientInner::Anthropic(client)
             }
             ProviderId::MiniMax => {
                 // Rows saved before the move to the Anthropic-compatible
@@ -221,7 +212,7 @@ impl RigClient {
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
-                (RigClientInner::Anthropic(client), base_url.to_string())
+                RigClientInner::Anthropic(client)
             }
             _ => {
                 let base_url = base_url.ok_or_else(|| {
@@ -234,7 +225,7 @@ impl RigClient {
                     .base_url(base_url)
                     .build()
                     .map_err(|e| AppError::ProviderConfig(e.to_string()))?;
-                (RigClientInner::OpenAi(client), base_url.to_string())
+                RigClientInner::OpenAi(client)
             }
         };
 
@@ -243,11 +234,8 @@ impl RigClient {
         Ok(Self {
             inner,
             model,
-            base_url,
-            api_key,
             reasoning_effort,
             enable_thinking,
-            openai_native,
             disable_thinking,
         })
     }
@@ -391,6 +379,32 @@ impl RigClient {
         }
         builder.build()
     }
+
+    /// One-shot streaming prompt over any rig completion model: same
+    /// preamble/max_tokens/additional_params wiring as the agent builders,
+    /// with rig's native SSE handling behind it.
+    async fn stream_model<M>(
+        model: M,
+        system: Option<&str>,
+        prompt: &str,
+        max_tokens: u32,
+        additional_params: Option<serde_json::Value>,
+    ) -> Result<LlmStream>
+    where
+        M: CompletionModel + Clone + 'static,
+    {
+        let mut builder = model
+            .completion_request(prompt)
+            .max_tokens(max_tokens as u64);
+        if let Some(system) = system {
+            builder = builder.preamble(system.to_string());
+        }
+        if let Some(params) = additional_params {
+            builder = builder.additional_params(params);
+        }
+        let response = builder.stream().await.map_err(classify_llm_error)?;
+        Ok(crate::streaming::into_llm_stream(response))
+    }
 }
 
 #[async_trait]
@@ -455,35 +469,28 @@ impl LlmClient for RigClient {
         max_tokens: u32,
     ) -> Result<LlmStream> {
         match &self.inner {
-            RigClientInner::OpenAi(_) => {
-                crate::streaming::stream_openai_compatible(
-                    &self.base_url,
-                    &self.api_key,
-                    &self.model,
-                    system,
-                    prompt,
-                    self.reasoning_effort.as_deref(),
-                    self.enable_thinking,
-                    max_tokens,
-                    self.openai_native,
-                )
-                .await
-            }
-            RigClientInner::Anthropic(_) => {
-                crate::streaming::stream_anthropic_messages(
-                    &self.base_url,
-                    &self.api_key,
-                    &self.model,
+            RigClientInner::OpenAi(client) => {
+                let model = openai::completion::CompletionModel::new(client.clone(), &self.model);
+                Self::stream_model(
+                    model,
                     system,
                     prompt,
                     max_tokens,
-                    self.disable_thinking,
+                    self.openai_additional_params(),
                 )
                 .await
             }
-            RigClientInner::Gemini(_) => {
-                let text = self.prompt(prompt, system, max_tokens).await?;
-                Ok(crate::streaming::stream_from_text(text))
+            RigClientInner::Anthropic(client) => {
+                let model = client.completion_model(self.model.clone());
+                let params = self
+                    .disable_thinking
+                    .then(anthropic_disable_thinking_params);
+                Self::stream_model(model, system, prompt, max_tokens, params).await
+            }
+            RigClientInner::Gemini(client) => {
+                let model = client.completion_model(self.model.clone());
+                let params = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params();
+                Self::stream_model(model, system, prompt, max_tokens, params).await
             }
         }
     }
@@ -532,6 +539,16 @@ mod tests {
         }
     }
 
+    /// Base URL the constructed rig client will actually call — what the
+    /// removed `RigClient::base_url` field used to record.
+    fn inner_base_url(client: &RigClient) -> &str {
+        match &client.inner {
+            RigClientInner::OpenAi(c) => c.base_url(),
+            RigClientInner::Anthropic(c) => c.base_url(),
+            RigClientInner::Gemini(c) => c.base_url(),
+        }
+    }
+
     #[test]
     fn missing_api_key_without_env_var_errors() {
         with_env_var("ANTHROPIC_API_KEY", None, || {
@@ -545,22 +562,8 @@ mod tests {
     fn env_var_fallback_allows_construction_without_configured_key() {
         with_env_var("ANTHROPIC_API_KEY", Some("env-anthropic-key"), || {
             let cfg = config(None, None, None);
-            let client = RigClient::from_config(&cfg, ProviderId::Anthropic)
+            RigClient::from_config(&cfg, ProviderId::Anthropic)
                 .expect("should fall back to env var");
-            assert_eq!(client.api_key, "env-anthropic-key");
-        });
-    }
-
-    #[test]
-    fn configured_key_takes_priority_over_env_var() {
-        with_env_var("OPENAI_API_KEY", Some("env-openai-key"), || {
-            let cfg = config(
-                Some("configured-key"),
-                Some("https://api.openai.com/v1"),
-                None,
-            );
-            let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
-            assert_eq!(client.api_key, "configured-key");
         });
     }
 
@@ -642,19 +645,21 @@ mod tests {
     fn google_builds_with_default_base_url() {
         let cfg = config(Some("gemini-key"), None, None);
         let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
-        assert_eq!(client.base_url, "https://generativelanguage.googleapis.com");
+        assert_eq!(
+            inner_base_url(&client),
+            "https://generativelanguage.googleapis.com"
+        );
         assert!(matches!(client.inner, RigClientInner::Gemini(_)));
     }
 
     #[test]
-    fn openai_drops_enable_thinking_and_marks_native_api() {
+    fn openai_drops_enable_thinking() {
         let mut cfg = config(Some("openai-key"), None, None);
         let ProviderConfig::ApiKey {
             enable_thinking, ..
         } = &mut cfg;
         *enable_thinking = Some(false);
         let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
-        assert!(client.openai_native);
         assert_eq!(client.enable_thinking, None);
 
         // Custom gateways keep the configured enable_thinking.
@@ -664,7 +669,6 @@ mod tests {
         } = &mut custom_cfg;
         *enable_thinking = Some(false);
         let custom = RigClient::from_config(&custom_cfg, ProviderId::Custom).expect("should build");
-        assert!(!custom.openai_native);
         assert_eq!(custom.enable_thinking, Some(false));
     }
 
@@ -673,7 +677,10 @@ mod tests {
         with_env_var("MINIMAX_API_KEY", None, || {
             let cfg = config(Some("minimax-key"), None, None);
             let client = RigClient::from_config(&cfg, ProviderId::MiniMax).expect("should build");
-            assert_eq!(client.base_url, crate::provider::MINIMAX_DEFAULT_BASE_URL);
+            assert_eq!(
+                inner_base_url(&client),
+                crate::provider::MINIMAX_DEFAULT_BASE_URL
+            );
             assert!(matches!(client.inner, RigClientInner::Anthropic(_)));
             assert!(client.disable_thinking);
         });
@@ -716,7 +723,7 @@ mod tests {
                 let client =
                     RigClient::from_config(&cfg, ProviderId::MiniMax).expect("should build");
                 assert_eq!(
-                    client.base_url,
+                    inner_base_url(&client),
                     crate::provider::MINIMAX_DEFAULT_BASE_URL,
                     "stored base_url {stored:?}"
                 );
@@ -728,7 +735,10 @@ mod tests {
                 None,
             );
             let client = RigClient::from_config(&cfg, ProviderId::MiniMax).expect("should build");
-            assert_eq!(client.base_url, "https://proxy.example.com/anthropic");
+            assert_eq!(
+                inner_base_url(&client),
+                "https://proxy.example.com/anthropic"
+            );
         });
     }
 
