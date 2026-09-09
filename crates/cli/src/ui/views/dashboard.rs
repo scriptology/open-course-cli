@@ -171,56 +171,66 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
     draw_hint_bar(frame.buffer_mut(), hint_area, state, labels);
 
-    // The page content is sized by its blocks, never squeezed: the activity
-    // calendar needs `calendar_height` rows, the progress block 10, and the
-    // next-topic/weak-topics row the taller of its two blocks (6 and 7). If
-    // it exceeds the viewport, it is rendered offscreen and the mouse wheel
+    // The page content is sized by its blocks, never squeezed: the
+    // next-topic/progress row needs the taller of its blocks (6 and 10), the
+    // activity/weak-topics row the taller of `calendar_height` and 7. If it
+    // exceeds the viewport, it is rendered offscreen and the mouse wheel
     // scrolls the visible window.
     let today = chrono::Local::now().date_naive();
     let calendar_height = activity_calendar::block_height(today);
     let narrow = content_area.width < 90;
-    let middle_height = if narrow {
-        calendar_height + PROGRESS_HEIGHT
+    let next_progress_height = if narrow {
+        NEXT_HEIGHT + PROGRESS_HEIGHT
     } else {
-        calendar_height.max(PROGRESS_HEIGHT)
+        NEXT_HEIGHT.max(PROGRESS_HEIGHT)
     };
-    let next_weak_height = if narrow {
-        NEXT_HEIGHT + WEAK_HEIGHT
+    let activity_weak_height = if narrow {
+        calendar_height + WEAK_HEIGHT
     } else {
-        NEXT_HEIGHT.max(WEAK_HEIGHT)
+        calendar_height.max(WEAK_HEIGHT)
     };
-    let content_height = TOP_HEIGHT + next_weak_height + middle_height;
+    let content_height = TOP_HEIGHT + next_progress_height + activity_weak_height;
 
     if content_height <= content_area.height {
         state.dashboard.scroll_offset = 0;
         state.dashboard.max_scroll = 0;
-        let [top_area, next_weak_area, middle_area] = Layout::vertical([
+        // The next/progress row absorbs leftover space so the progress block
+        // scales into its expanded layout on tall terminals, exactly as it
+        // did in the activity/progress row.
+        let [top_area, next_progress_area, activity_weak_area] = Layout::vertical([
             Constraint::Length(TOP_HEIGHT),
-            Constraint::Length(next_weak_height),
-            Constraint::Min(middle_height),
+            Constraint::Min(next_progress_height),
+            Constraint::Length(activity_weak_height),
         ])
         .areas(content_area);
         let buf = frame.buffer_mut();
         draw_top(buf, top_area, state, labels, narrow);
-        draw_next_weak(buf, next_weak_area, state, labels, narrow);
-        draw_middle(buf, middle_area, state, labels, calendar_height, narrow);
+        draw_next_progress(buf, next_progress_area, state, labels, narrow);
+        draw_activity_weak(
+            buf,
+            activity_weak_area,
+            state,
+            labels,
+            calendar_height,
+            narrow,
+        );
     } else {
         let max_scroll = content_height - content_area.height;
         state.dashboard.max_scroll = max_scroll;
         state.dashboard.scroll_offset = state.dashboard.scroll_offset.min(max_scroll);
 
         let mut offscreen = Buffer::empty(Rect::new(0, 0, content_area.width, content_height));
-        let [top_area, next_weak_area, middle_area] = Layout::vertical([
+        let [top_area, next_progress_area, activity_weak_area] = Layout::vertical([
             Constraint::Length(TOP_HEIGHT),
-            Constraint::Length(next_weak_height),
-            Constraint::Length(middle_height),
+            Constraint::Length(next_progress_height),
+            Constraint::Length(activity_weak_height),
         ])
         .areas(offscreen.area);
         draw_top(&mut offscreen, top_area, state, labels, narrow);
-        draw_next_weak(&mut offscreen, next_weak_area, state, labels, narrow);
-        draw_middle(
+        draw_next_progress(&mut offscreen, next_progress_area, state, labels, narrow);
+        draw_activity_weak(
             &mut offscreen,
-            middle_area,
+            activity_weak_area,
             state,
             labels,
             calendar_height,
@@ -414,7 +424,7 @@ fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
     Paragraph::new(Text::from(profile_info_lines(state, labels))).alignment(Alignment::Right)
 }
 
-fn draw_next_weak(
+fn draw_next_progress(
     buf: &mut Buffer,
     area: Rect,
     state: &AppState,
@@ -434,10 +444,10 @@ fn draw_next_weak(
     };
 
     draw_next_topic(buf, chunks[0], state, labels);
-    draw_weak_topics(buf, chunks[1], state, labels);
+    draw_progress(buf, chunks[1], state, labels);
 }
 
-fn draw_middle(
+fn draw_activity_weak(
     buf: &mut Buffer,
     area: Rect,
     state: &AppState,
@@ -453,12 +463,12 @@ fn draw_middle(
     } else {
         Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area)
     };
 
     draw_session_dynamics(buf, chunks[0], state, labels);
-    draw_progress(buf, chunks[1], state, labels);
+    draw_weak_topics(buf, chunks[1], state, labels);
 }
 
 const COLOR_NEW: Color = colors::BLUE;
