@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 
 use rig::agent::Agent;
 use rig::client::{AgentClientExt, AgentModelExt, CompletionClient};
-use rig::completion::{CompletionModel, Prompt};
+use rig::completion::{CompletionModel, Prompt, StructuredOutputError, TypedPrompt};
 use rig::extractor::ExtractorBuilder;
 use rig::providers::{anthropic, gemini, openai};
 
@@ -267,7 +267,39 @@ impl RigClient {
         max_tokens: u32,
     ) -> Result<T> {
         let mut last_err = None;
+        let mut native_supported = true;
         for attempt in 1..=LLM_MAX_RETRIES {
+            if native_supported {
+                match self.prompt_typed_native::<T>(prompt, max_tokens).await {
+                    Ok(value) => return Ok(value),
+                    Err(e) => {
+                        let app_err = classify_llm_error(e);
+                        if matches!(app_err, AppError::ProviderUnavailable(_)) {
+                            if attempt < LLM_MAX_RETRIES {
+                                tokio::time::sleep(Duration::from_millis(500 * attempt as u64))
+                                    .await;
+                                last_err = Some(app_err);
+                                continue;
+                            }
+                            return Err(app_err);
+                        }
+                        // A non-transient failure (e.g. the gateway rejects
+                        // response_format/output_config, or the constrained
+                        // output did not deserialize): degrade to the
+                        // submit-tool extractor for this and the remaining
+                        // attempts instead of failing the extraction.
+                        crate::debug_log::log_debug_event(
+                            "extract",
+                            &format!(
+                                "Native structured output failed ({app_err}), falling back to tool extraction"
+                            ),
+                            None,
+                        );
+                        native_supported = false;
+                    }
+                }
+            }
+
             let result = match &self.inner {
                 RigClientInner::OpenAi(client) => {
                     let mut extractor = ExtractorBuilder::<T>::new(
@@ -321,6 +353,39 @@ impl RigClient {
         Err(last_err.unwrap_or_else(|| {
             AppError::Llm("Failed to extract structured response after retries".to_string())
         }))
+    }
+
+    /// Native structured output: the provider is constrained by the JSON
+    /// schema of `T` (OpenAI `response_format`, Anthropic `output_config`,
+    /// Gemini `response_json_schema`) and rig deserializes the answer.
+    async fn prompt_typed_native<T: DeserializeOwned + JsonSchema + Send + 'static>(
+        &self,
+        prompt: &str,
+        max_tokens: u32,
+    ) -> std::result::Result<T, StructuredOutputError> {
+        match &self.inner {
+            RigClientInner::OpenAi(client) => {
+                Self::openai_agent(
+                    client,
+                    &self.model,
+                    None,
+                    max_tokens,
+                    self.openai_additional_params(),
+                )
+                .prompt_typed::<T>(prompt)
+                .await
+            }
+            RigClientInner::Anthropic(client) => {
+                Self::anthropic_agent(client, &self.model, None, max_tokens, self.disable_thinking)
+                    .prompt_typed::<T>(prompt)
+                    .await
+            }
+            RigClientInner::Gemini(client) => {
+                Self::gemini_agent(client, &self.model, None, max_tokens)
+                    .prompt_typed::<T>(prompt)
+                    .await
+            }
+        }
     }
 
     fn openai_agent(
@@ -784,5 +849,19 @@ mod tests {
         *model = "gemini-2.5-flash".to_string();
         let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
         assert_eq!(client.model, "gemini-2.5-flash");
+    }
+
+    #[test]
+    fn schema_rejection_is_not_classified_as_unavailable() {
+        // A gateway rejecting response_format/output_config must downgrade
+        // to the submit-tool extractor, not burn the transient-retry budget.
+        let err = classify_llm_error("ProviderError: 400 response_format is not supported");
+        assert!(matches!(err, AppError::Llm(_)));
+    }
+
+    #[test]
+    fn provider_overload_stays_retryable() {
+        let err = classify_llm_error("server_error: provider overloaded");
+        assert!(matches!(err, AppError::ProviderUnavailable(_)));
     }
 }
