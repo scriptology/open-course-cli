@@ -320,7 +320,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
                     card = card.line(Line::default());
                     card = card.line(Line::from(Span::styled(
                         item.translation.clone(),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(colors::ORANGE),
                     )));
                     content_lines += 1 + wrapped_line_count(&item.translation, text_width);
                 }

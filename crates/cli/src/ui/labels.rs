@@ -101,6 +101,10 @@ pub struct ReportLabels {
     pub help_title: &'static str,
     pub close_hint: &'static str,
     pub error_footer_hint: &'static str,
+    pub next_topic_title: &'static str,
+    pub kind_extend_label: &'static str,
+    pub next_topic_extend_msg: &'static str,
+    pub press_key_to_start: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -216,6 +220,10 @@ const EN_REPORT: ReportLabels = ReportLabels {
     help_title: "Help",
     close_hint: "Esc / ?: close",
     error_footer_hint: "r: retry | m: change model | q: quit",
+    next_topic_title: "Next topic",
+    kind_extend_label: "Course extension",
+    next_topic_extend_msg: "We'll generate new topics during the session",
+    press_key_to_start: "Press {} to start",
 };
 
 const RU_REPORT: ReportLabels = ReportLabels {
@@ -318,6 +326,10 @@ const RU_REPORT: ReportLabels = ReportLabels {
     help_title: "Помощь",
     close_hint: "Esc / ?: закрыть",
     error_footer_hint: "r: повторить | m: сменить модель | q: выход",
+    next_topic_title: "Следующая тема",
+    kind_extend_label: "Расширение курса",
+    next_topic_extend_msg: "Сгенерируем новые темы на сессии",
+    press_key_to_start: "Нажмите {}, чтобы начать",
 };
 
 const EN_DOCS: DocsLabels = DocsLabels {
