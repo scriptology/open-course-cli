@@ -109,6 +109,23 @@ async fn me_handler(headers: HeaderMap) -> Response {
     .into_response()
 }
 
+async fn list_pairs_handler(headers: HeaderMap) -> Response {
+    if !authorized(&headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    Json(vec![open_course_sync::PairInfoResponse {
+        pair_id: "en-de".to_string(),
+        native_lang: "en".to_string(),
+        target_lang: "de".to_string(),
+        revision: 3,
+        age: Some(30),
+        self_assessed_cefr: Some("B1".to_string()),
+        batch_size: 3,
+        topic_count: 5,
+    }])
+    .into_response()
+}
+
 async fn sync_push(
     State(state): State<Shared>,
     headers: HeaderMap,
@@ -216,6 +233,7 @@ async fn start_mock() -> (Shared, String) {
         .route("/auth/device", post(auth_device))
         .route("/auth/device/poll", post(auth_poll))
         .route("/v1/me", get(me_handler))
+        .route("/v1/pairs", get(list_pairs_handler))
         .route("/v1/sync/push", post(sync_push))
         .route("/v1/sync/pull", get(sync_pull))
         .with_state(state.clone());
@@ -331,6 +349,25 @@ async fn me_returns_profile_and_rejects_bad_token() {
 
     let anon = SyncClient::new(&base).unwrap();
     assert!(matches!(anon.me().await, Err(SyncError::Unauthorized)));
+}
+
+#[tokio::test]
+async fn list_pairs_returns_account_pairs_and_rejects_bad_token() {
+    let (_state, base) = start_mock().await;
+    let pairs = client(&base).list_pairs().await.unwrap();
+    assert_eq!(pairs.len(), 1);
+    assert_eq!(pairs[0].pair_id, "en-de");
+    assert_eq!(pairs[0].native_lang, "en");
+    assert_eq!(pairs[0].target_lang, "de");
+    assert_eq!(pairs[0].age, Some(30));
+    assert_eq!(pairs[0].self_assessed_cefr.as_deref(), Some("B1"));
+    assert_eq!(pairs[0].topic_count, 5);
+
+    let anon = SyncClient::new(&base).unwrap();
+    assert!(matches!(
+        anon.list_pairs().await,
+        Err(SyncError::Unauthorized)
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +676,50 @@ async fn pull_with_timeout_fails_fast_on_slow_server() {
         start.elapsed() < std::time::Duration::from_secs(8),
         "short-timeout pull should fail fast, took {:?}",
         start.elapsed()
+    );
+}
+
+/// A first full pull replays the whole history. Applying it must be linear
+/// (each table is read once), not a full table scan per change — the
+/// quadratic version looked like an infinite hang on real datasets.
+#[tokio::test]
+async fn pull_bulk_history_applies_linearly() {
+    let (state, base) = start_mock().await;
+    let (_dir, db) = temp_db().await;
+    const CHANGES: i64 = 2_000;
+    {
+        let mut st = state.lock().unwrap();
+        for seq in 1..=CHANGES {
+            let t = topic(
+                &format!("topic-{seq}"),
+                &format!("Topic {seq}"),
+                Some("2024-01-01T00:00:00Z"),
+            );
+            st.changes.push(wire_upsert_topic(seq, &t));
+        }
+        st.revision = CHANGES;
+    }
+
+    let start = std::time::Instant::now();
+    let revision = client(&base).pull(&db, "ru-es").await.unwrap();
+    assert_eq!(revision, CHANGES);
+    assert_eq!(
+        db.curriculum().read_all().await.unwrap().topics.len(),
+        CHANGES as usize
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(30),
+        "bulk pull of {CHANGES} changes took {:?} (regression: quadratic apply)",
+        start.elapsed()
+    );
+
+    // Re-applying the same full feed is a no-op (LWW against the preloaded
+    // caches).
+    db.metadata().set_last_pulled_seq(0).await.unwrap();
+    client(&base).pull(&db, "ru-es").await.unwrap();
+    assert_eq!(
+        db.curriculum().read_all().await.unwrap().topics.len(),
+        CHANGES as usize
     );
 }
 

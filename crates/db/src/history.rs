@@ -105,8 +105,19 @@ impl HistoryTable {
     /// Appends a summary exactly as given — used when applying synced
     /// changes whose timestamps must be preserved.
     pub async fn append_with_timestamps(&self, summary: &SessionSummary) -> Result<()> {
+        self.append_many_with_timestamps(std::slice::from_ref(summary))
+            .await
+    }
+
+    /// Bulk append: one read + one rewrite for the whole batch — applying a
+    /// sync pull row by row (a full-table rewrite per row) is prohibitively
+    /// slow on real datasets.
+    pub async fn append_many_with_timestamps(&self, summaries: &[SessionSummary]) -> Result<()> {
+        if summaries.is_empty() {
+            return Ok(());
+        }
         let mut all = self.read_all().await?;
-        all.push(summary.clone());
+        all.extend(summaries.iter().cloned());
         let total = all.len();
         if total > MAX_HISTORY_ENTRIES {
             all = all.into_iter().skip(total - MAX_HISTORY_ENTRIES).collect();

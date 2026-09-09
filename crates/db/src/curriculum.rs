@@ -168,6 +168,32 @@ impl CurriculumTable {
         Ok(())
     }
 
+    /// Bulk upsert: one delete + one add for the whole batch — applying a
+    /// sync pull row by row (two commits per row) is prohibitively slow on
+    /// real datasets.
+    pub async fn upsert_many_with_timestamps(&self, topics: &[Topic]) -> Result<()> {
+        if topics.is_empty() {
+            return Ok(());
+        }
+        self.table
+            .delete(&crate::util::in_predicate(
+                "id",
+                topics.iter().map(|t| t.id.as_str()),
+            ))
+            .await
+            .map_err(crate::error::DbError::from)?;
+        let batches = topics
+            .iter()
+            .map(topic_to_record_batch)
+            .collect::<Result<Vec<_>>>()?;
+        self.table
+            .add(batches)
+            .execute()
+            .await
+            .map_err(crate::error::DbError::from)?;
+        Ok(())
+    }
+
     /// Soft-delete: the row stays as a tombstone so sync can propagate the
     /// deletion; reads filter it out.
     pub async fn delete_by_topic_id(&self, topic_id: &str) -> Result<()> {

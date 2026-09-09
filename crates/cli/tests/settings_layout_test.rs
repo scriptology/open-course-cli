@@ -1196,7 +1196,10 @@ async fn sync_all_view_renders_rows_and_returns_on_enter() {
     .await;
     account::apply_sync_message(
         &mut state,
-        account::SyncMessage::SyncAllFinished { failed: 0 },
+        account::SyncMessage::SyncAllFinished {
+            failed: 0,
+            cancelled: false,
+        },
     )
     .await;
     assert!(state.sync_all.done);

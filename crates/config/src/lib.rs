@@ -132,6 +132,32 @@ impl OpenCourseConfig {
     }
 }
 
+/// Merges pairs known to the server (created on the web or another device)
+/// into the local config. Returns the ids of the pairs that were added, in
+/// server order. Existing pairs are left untouched.
+pub fn merge_remote_pairs(
+    config: &mut OpenCourseConfig,
+    remote: &[open_course_core::sync_protocol::PairInfoResponse],
+) -> Vec<String> {
+    let mut added = Vec::new();
+    for pair in remote {
+        if config.pairs.iter().any(|p| p.id == pair.pair_id) {
+            continue;
+        }
+        config.pairs.push(LanguagePair {
+            id: pair.pair_id.clone(),
+            profile: UserProfile {
+                native_language: pair.native_lang.clone(),
+                target_language: pair.target_lang.clone(),
+                age: pair.age.and_then(|a| u32::try_from(a).ok()),
+                self_assessed_cefr: pair.self_assessed_cefr.clone(),
+            },
+        });
+        added.push(pair.pair_id.clone());
+    }
+    added
+}
+
 fn default_version() -> u32 {
     2
 }
@@ -250,4 +276,73 @@ pub fn ensure_open_course_gitignore(cwd: &std::path::Path) -> Result<()> {
         std::fs::write(&path, "*\n")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use open_course_core::sync_protocol::PairInfoResponse;
+
+    fn remote_pair(pair_id: &str, native: &str, target: &str) -> PairInfoResponse {
+        PairInfoResponse {
+            pair_id: pair_id.to_string(),
+            native_lang: native.to_string(),
+            target_lang: target.to_string(),
+            revision: 1,
+            age: Some(30),
+            self_assessed_cefr: Some("B1".to_string()),
+            batch_size: 3,
+            topic_count: 0,
+        }
+    }
+
+    fn test_config() -> OpenCourseConfig {
+        OpenCourseConfig::new(
+            ProviderId::OpenAi,
+            ProviderConfig::ApiKey {
+                api_key: None,
+                model: "gpt-4o-mini".to_string(),
+                base_url: None,
+                endpoint: None,
+                reasoning_effort: None,
+                enable_thinking: None,
+            },
+            UserProfile {
+                native_language: "en".to_string(),
+                target_language: "de".to_string(),
+                age: None,
+                self_assessed_cefr: None,
+            },
+        )
+    }
+
+    #[test]
+    fn merge_remote_pairs_adds_only_unknown_pairs() {
+        let mut config = test_config();
+        let remote = vec![
+            remote_pair("en-de", "en", "de"),
+            remote_pair("en-fr", "en", "fr"),
+            remote_pair("en-es", "en", "es"),
+        ];
+        let added = merge_remote_pairs(&mut config, &remote);
+        assert_eq!(added, vec!["en-fr".to_string(), "en-es".to_string()]);
+        assert_eq!(config.pairs.len(), 3);
+        let fr = config.find_pair("en-fr").unwrap();
+        assert_eq!(fr.profile.native_language, "en");
+        assert_eq!(fr.profile.target_language, "fr");
+        assert_eq!(fr.profile.age, Some(30));
+        assert_eq!(fr.profile.self_assessed_cefr.as_deref(), Some("B1"));
+        // The pre-existing pair is untouched.
+        assert_eq!(config.pairs[0].id, "en-de");
+        assert_eq!(config.active_pair, "en-de");
+    }
+
+    #[test]
+    fn merge_remote_pairs_is_idempotent() {
+        let mut config = test_config();
+        let remote = vec![remote_pair("en-fr", "en", "fr")];
+        assert_eq!(merge_remote_pairs(&mut config, &remote).len(), 1);
+        assert!(merge_remote_pairs(&mut config, &remote).is_empty());
+        assert_eq!(config.pairs.len(), 2);
+    }
 }

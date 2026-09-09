@@ -29,7 +29,11 @@ pub struct SyncAllState {
     pub rows: Vec<PairSyncRow>,
     pub done: bool,
     pub failed: usize,
+    /// The finished run was interrupted by the user (Esc).
+    pub cancelled: bool,
     pub return_to: Option<View>,
+    /// Abort handle of the running sync-all task; `Some` while it runs.
+    pub abort: Option<tokio::task::AbortHandle>,
 }
 
 /// Seeds the rows from the config and switches to the view. The caller then
@@ -56,7 +60,9 @@ pub fn start(state: &mut AppState) {
         rows,
         done: false,
         failed: 0,
+        cancelled: false,
         return_to: Some(state.view),
+        abort: None,
     };
     state.view = View::SyncAll;
 }
@@ -72,21 +78,25 @@ pub fn apply_progress(state: &mut AppState, pair_id: &str, status: PairSyncStatu
     }
 }
 
-pub async fn apply_finished(state: &mut AppState, failed: usize) {
+pub async fn apply_finished(state: &mut AppState, failed: usize, cancelled: bool) {
     state.sync_all.done = true;
     state.sync_all.failed = failed;
+    state.sync_all.cancelled = cancelled;
+    state.sync_all.abort = None;
     let labels = get_sync_all_labels(native_language_code(state.config.as_ref()));
-    let summary = if failed == 0 {
+    let summary = if cancelled {
+        labels.summary_cancelled.to_string()
+    } else if failed == 0 {
         labels.summary_ok.to_string()
     } else {
         labels
             .summary_failed
             .replace("{failed}", &failed.to_string())
     };
-    state.toast = Some(if failed == 0 {
-        Toast::info(summary)
-    } else {
+    state.toast = Some(if cancelled || failed > 0 {
         Toast::error(summary)
+    } else {
+        Toast::info(summary)
     });
     // The account section shows the fresh sync state when it opens next.
     state.settings.account.sync_enabled = state.db.metadata().sync_enabled().await.unwrap_or(false);
@@ -98,7 +108,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
     let labels = get_sync_all_labels(native_language_code(state.config.as_ref()));
 
     let footer = if state.sync_all.done {
-        let summary = if state.sync_all.failed == 0 {
+        let summary = if state.sync_all.cancelled {
+            labels.summary_cancelled.to_string()
+        } else if state.sync_all.failed == 0 {
             labels.summary_ok.to_string()
         } else {
             labels
@@ -107,7 +119,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &mut
         };
         format!("{}\n{}", summary, labels.continue_hint)
     } else {
-        labels.running.to_string()
+        format!("{}\n{}", labels.running, labels.cancel_hint)
     };
     let footer_height = footer.lines().count() as u16;
     let chunks = Layout::vertical([
@@ -175,6 +187,11 @@ fn render_row<'a>(
             Style::default().fg(Color::Red),
             labels.status_unauthorized.to_string(),
         ),
+        Some(PairSyncStatus::Cancelled) => (
+            "–".to_string(),
+            Style::default().fg(Color::DarkGray),
+            labels.status_cancelled.to_string(),
+        ),
         Some(PairSyncStatus::Failed(message)) => (
             "✗".to_string(),
             Style::default().fg(Color::Red),
@@ -198,9 +215,21 @@ fn render_row<'a>(
 
 pub async fn handle_key(state: &mut AppState, code: KeyCode) -> Result<()> {
     if !state.sync_all.done {
-        // The run cannot be interrupted; Esc only is ignored too, so the
-        // user does not land on a half-bound account by accident.
-        let _ = code;
+        // Esc interrupts the run: the task is aborted, unfinished rows are
+        // marked cancelled, and the supervisor finalizes the view with
+        // `SyncAllFinished` once the task actually stops.
+        if code == KeyCode::Esc && state.sync_all.abort.is_some() {
+            if let Some(handle) = state.sync_all.abort.take() {
+                handle.abort();
+            }
+            // A queued trigger must not restart the run the user cancelled.
+            state.sync.pending = None;
+            for row in &mut state.sync_all.rows {
+                if row.status.is_none() || matches!(row.status, Some(PairSyncStatus::Running)) {
+                    row.status = Some(PairSyncStatus::Cancelled);
+                }
+            }
+        }
         return Ok(());
     }
     state.view = state.sync_all.return_to.unwrap_or(View::Dashboard);

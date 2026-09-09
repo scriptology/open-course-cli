@@ -1005,8 +1005,11 @@ pub struct SyncAllLabels {
     pub status_done: &'static str,
     pub status_merged: &'static str,
     pub status_unauthorized: &'static str,
+    pub status_cancelled: &'static str,
     pub summary_ok: &'static str,
     pub summary_failed: &'static str,
+    pub summary_cancelled: &'static str,
+    pub cancel_hint: &'static str,
     pub continue_hint: &'static str,
 }
 
@@ -1017,8 +1020,11 @@ const EN_SYNC_ALL: SyncAllLabels = SyncAllLabels {
     status_done: "synced",
     status_merged: "merged",
     status_unauthorized: "sign in again",
+    status_cancelled: "cancelled",
     summary_ok: "All pairs are in sync.",
     summary_failed: "Done with errors: {failed} pair(s) did not sync.",
+    summary_cancelled: "Sync cancelled.",
+    cancel_hint: "Esc — cancel",
     continue_hint: "Enter — continue",
 };
 
@@ -1029,8 +1035,11 @@ const RU_SYNC_ALL: SyncAllLabels = SyncAllLabels {
     status_done: "готово",
     status_merged: "объединено",
     status_unauthorized: "нужен повторный вход",
+    status_cancelled: "отменено",
     summary_ok: "Все пары синхронизированы.",
     summary_failed: "Завершено с ошибками: не синхронизировано пар: {failed}.",
+    summary_cancelled: "Синхронизация отменена.",
+    cancel_hint: "Esc — отменить",
     continue_hint: "Enter — продолжить",
 };
 

@@ -16,7 +16,7 @@ pub use bind::{BindScenario, MergeReport, ProgressMerge, backfill_outbox};
 pub use client::{PollResult, SyncClient};
 pub use error::{PushError, SyncError};
 pub use protocol::{
-    Change, CurriculumPayload, DeviceCodeResponse, MeResponse, PullResponse, PushRequest,
-    PushResponse, TokenSet,
+    Change, CurriculumPayload, DeviceCodeResponse, MeResponse, PairInfoResponse, PullResponse,
+    PushRequest, PushResponse, TokenSet,
 };
 pub use tokens::TokenStore;
