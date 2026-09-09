@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/scriptology/open-course-cli/compare/v0.23.0...v0.24.0) (2026-09-09)
+
+
+### Features
+
+* **llm:** migrate rig-core 0.20 → rig 0.42 and adopt native capabilities ([79feed0](https://github.com/scriptology/open-course-cli/commit/79feed0cc90853ae79e742ec31f89b06a4b6906b))
+
 ## [0.23.0](https://github.com/scriptology/open-course-cli/compare/v0.22.0...v0.23.0) (2026-09-09)
 
 
