@@ -9,7 +9,6 @@ open-course-core = { workspace = true }
 open-course-config = { workspace = true }
 rig = { workspace = true }
 reqwest = { workspace = true }
-bytes = { workspace = true }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 async-trait = { workspace = true }
@@ -17,7 +16,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 chrono = { workspace = true }
-regex = { workspace = true }
 
 [dev-dependencies]
 http = "1"

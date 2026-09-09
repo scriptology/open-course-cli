@@ -455,14 +455,9 @@ impl RigClient {
                     extractor.build().extract(prompt).await
                 }
                 RigClientInner::Gemini(client) => {
-                    let mut extractor = client
+                    let extractor = client
                         .extractor::<T>(&self.model)
                         .max_tokens(max_tokens as u64);
-                    if let Some(params) =
-                        ProviderMeta::for_provider(ProviderId::Google).rig_additional_params()
-                    {
-                        extractor = extractor.additional_params(params);
-                    }
                     extractor.build().extract(prompt).await
                 }
             };
@@ -569,10 +564,6 @@ impl RigClient {
         max_tokens: u32,
     ) -> Agent {
         let mut builder = client.agent(model).max_tokens(max_tokens as u64);
-        if let Some(params) = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params()
-        {
-            builder = builder.additional_params(params);
-        }
         if let Some(system) = system {
             builder = builder.preamble(system);
         }
@@ -689,8 +680,7 @@ impl LlmClient for RigClient {
             }
             RigClientInner::Gemini(client) => {
                 let model = client.completion_model(self.model.clone());
-                let params = ProviderMeta::for_provider(ProviderId::Google).rig_additional_params();
-                Self::stream_model(model, system, prompt, max_tokens, params).await
+                Self::stream_model(model, system, prompt, max_tokens, None).await
             }
         }
     }

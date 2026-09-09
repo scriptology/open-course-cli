@@ -5682,13 +5682,11 @@ name = "open-course-llm"
 version = "0.8.0"
 dependencies = [
  "async-trait",
- "bytes",
  "chrono",
  "futures-util",
  "http",
  "open-course-config",
  "open-course-core",
- "regex",
  "reqwest 0.13.5",
  "rig",
  "schemars 1.2.1",
