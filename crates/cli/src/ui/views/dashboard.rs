@@ -19,7 +19,7 @@ use open_course_core::dashboard::{
     get_daily_activity, get_progress_by_level,
 };
 use open_course_core::error::Result;
-use open_course_core::session::{get_due_review_topics, get_weak_review_topics};
+use open_course_core::session::{NextSessionTopic, get_due_review_topics, get_weak_review_topics};
 use open_course_db::curriculum::Topic;
 
 #[derive(Debug, Clone)]
@@ -34,6 +34,7 @@ pub struct DashboardState {
     pub levels: Vec<LevelProgress>,
     pub activity: Vec<DailyActivity>,
     pub weak_topics: Vec<Topic>,
+    pub next_topic: Option<NextSessionTopic>,
     pub weak_selected: Option<usize>,
     pub scroll_offset: u16,
     pub max_scroll: u16,
@@ -59,6 +60,7 @@ impl Default for DashboardState {
             levels: Vec::new(),
             activity: Vec::new(),
             weak_topics: Vec::new(),
+            next_topic: None,
             weak_selected: None,
             scroll_offset: 0,
             max_scroll: 0,
@@ -131,6 +133,8 @@ impl DashboardState {
         self.due_count =
             get_due_review_topics(&curriculum.topics, &progress, cefr, Utc::now()).len();
         self.weak_topics = get_weak_review_topics(&curriculum.topics, &progress, Utc::now());
+        self.next_topic =
+            Some(open_course_service::session::next_session_topic(db, &curriculum.topics).await?);
 
         if let Some(config) = config {
             self.profile_native = config.active_profile().native_language.clone();
@@ -155,6 +159,7 @@ impl DashboardState {
 }
 
 const TOP_HEIGHT: u16 = 5;
+const NEXT_HEIGHT: u16 = 6; // borders(2) + badge(1) + name(1) + description(1) + hint(1)
 const PROGRESS_HEIGHT: u16 = 10; // borders(2) + course(1) + gap(1) + 6 levels
 const WEAK_HEIGHT: u16 = 7; // borders(2) + up to 5 topics
 
@@ -167,9 +172,9 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     draw_hint_bar(frame.buffer_mut(), hint_area, state, labels);
 
     // The page content is sized by its blocks, never squeezed: the activity
-    // calendar needs `calendar_height` rows, the progress block 10, the weak
-    // block 7. If it exceeds the viewport, it is rendered offscreen and the
-    // mouse wheel scrolls the visible window.
+    // calendar needs `calendar_height` rows, the next-topic block 6, the
+    // progress block 10, the weak block 7. If it exceeds the viewport, it is
+    // rendered offscreen and the mouse wheel scrolls the visible window.
     let today = chrono::Local::now().date_naive();
     let calendar_height = activity_calendar::block_height(today);
     let narrow = content_area.width < 90;
@@ -178,19 +183,21 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     } else {
         calendar_height.max(PROGRESS_HEIGHT)
     };
-    let content_height = TOP_HEIGHT + middle_height + WEAK_HEIGHT;
+    let content_height = TOP_HEIGHT + NEXT_HEIGHT + middle_height + WEAK_HEIGHT;
 
     if content_height <= content_area.height {
         state.dashboard.scroll_offset = 0;
         state.dashboard.max_scroll = 0;
-        let [top_area, middle_area, weak_area] = Layout::vertical([
+        let [top_area, next_area, middle_area, weak_area] = Layout::vertical([
             Constraint::Length(TOP_HEIGHT),
+            Constraint::Length(NEXT_HEIGHT),
             Constraint::Length(middle_height),
             Constraint::Min(0),
         ])
         .areas(content_area);
         let buf = frame.buffer_mut();
         draw_top(buf, top_area, state, labels, narrow);
+        draw_next_topic(buf, next_area, state, labels);
         draw_middle(buf, middle_area, state, labels, calendar_height, narrow);
         draw_weak_topics(buf, weak_area, state, labels);
     } else {
@@ -199,13 +206,15 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         state.dashboard.scroll_offset = state.dashboard.scroll_offset.min(max_scroll);
 
         let mut offscreen = Buffer::empty(Rect::new(0, 0, content_area.width, content_height));
-        let [top_area, middle_area, weak_area] = Layout::vertical([
+        let [top_area, next_area, middle_area, weak_area] = Layout::vertical([
             Constraint::Length(TOP_HEIGHT),
+            Constraint::Length(NEXT_HEIGHT),
             Constraint::Length(middle_height),
             Constraint::Length(WEAK_HEIGHT),
         ])
         .areas(offscreen.area);
         draw_top(&mut offscreen, top_area, state, labels, narrow);
+        draw_next_topic(&mut offscreen, next_area, state, labels);
         draw_middle(
             &mut offscreen,
             middle_area,
@@ -635,6 +644,95 @@ fn draw_session_dynamics(buf: &mut Buffer, area: Rect, state: &AppState, labels:
         .show_month_header(Modifier::BOLD)
         .show_weekdays_header(Style::default().fg(Color::DarkGray))
         .render(cal_area, buf);
+}
+
+fn draw_next_topic(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
+    let block = Block::default()
+        .title(labels.next_topic_title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    block.render(area, buf);
+
+    let Some(next) = state.dashboard.next_topic.as_ref() else {
+        return;
+    };
+
+    let (kind_label, kind_style, topic) = match next {
+        NextSessionTopic::Review(topic) => (
+            labels.review_session_label,
+            Style::default()
+                .fg(colors::YELLOW)
+                .add_modifier(Modifier::BOLD),
+            Some(topic),
+        ),
+        NextSessionTopic::New(topic) => (
+            labels.new_topic_session_label,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            Some(topic),
+        ),
+        NextSessionTopic::ExtendCurriculum => (
+            labels.kind_extend_label,
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+            None,
+        ),
+    };
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let mut badge_spans = vec![Span::styled(format!("[{}]", kind_label), kind_style)];
+    if let Some(topic) = topic {
+        badge_spans.push(Span::raw(" "));
+        badge_spans.push(Span::styled(
+            format!("[{}]", topic.level.as_deref().unwrap_or(&topic.difficulty)),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    Paragraph::new(Line::from(badge_spans)).render(rows[0], buf);
+
+    match topic {
+        Some(topic) => Paragraph::new(Line::from(Span::styled(
+            topic.name.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )))
+        .render(rows[1], buf),
+        None => Paragraph::new(Line::from(Span::styled(
+            labels.next_topic_extend_msg,
+            Style::default().fg(Color::DarkGray),
+        )))
+        .render(rows[1], buf),
+    }
+
+    if let Some(topic) = topic
+        && !topic.description.is_empty()
+    {
+        Paragraph::new(Line::from(Span::styled(
+            topic.description.clone(),
+            Style::default().fg(Color::DarkGray),
+        )))
+        .wrap(Wrap { trim: true })
+        .render(rows[2], buf);
+    }
+
+    Paragraph::new(Line::from(Span::styled(
+        labels.press_key_to_start.replacen("{}", "N", 1),
+        Style::default()
+            .fg(colors::GREEN)
+            .add_modifier(Modifier::BOLD),
+    )))
+    .render(rows[3], buf);
 }
 
 fn draw_weak_topics(buf: &mut Buffer, area: Rect, state: &AppState, labels: ReportLabels) {
