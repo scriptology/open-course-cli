@@ -134,6 +134,54 @@ async fn check_wrong_key(provider: ProviderId, cfg: &ProviderConfig) {
     eprintln!("  wrong key: {err}");
 }
 
+/// 6. Realistic generation with thinking off: the output must stay
+///    well-formed and sensible, not just fast.
+async fn check_realistic_generation(client: &dyn LlmClient) {
+    let text = client
+        .prompt(
+            "Generate 3 B1-level discussion topics about travel as a JSON array of objects with id and name fields. Return only the JSON.",
+            Some("You are a language tutor. Return ONLY valid JSON. No markdown, no commentary."),
+            2048,
+        )
+        .await
+        .expect("generation should succeed");
+    let cleaned = open_course_llm::parse::clean_json_response(&text);
+    let value: serde_json::Value =
+        serde_json::from_str(&cleaned).expect("generation should parse as JSON");
+    let topics = value.as_array().expect("expected a JSON array");
+    assert_eq!(topics.len(), 3, "expected 3 topics: {cleaned}");
+    for topic in topics {
+        assert!(
+            topic["id"].is_string() || topic["id"].is_number(),
+            "topic missing id: {topic}"
+        );
+        assert!(topic["name"].is_string(), "topic missing name: {topic}");
+    }
+    eprintln!("  realistic generation: 3 well-formed topics");
+}
+
+/// Streaming with thinking disabled must not emit reasoning chunks.
+async fn check_stream_has_no_reasoning(client: &dyn LlmClient) {
+    let mut stream = client
+        .stream_prompt("Count from 1 to 10, separated by spaces.", None, 256)
+        .await
+        .expect("stream_prompt should open");
+    let mut reasoning_chunks = 0usize;
+    let mut content_chunks = 0usize;
+    while let Some(item) = stream.next().await {
+        match item.expect("stream chunk should not error") {
+            StreamChunk::Content(_) => content_chunks += 1,
+            StreamChunk::Reasoning(_) => reasoning_chunks += 1,
+        }
+    }
+    assert!(content_chunks > 0, "expected content chunks");
+    assert_eq!(
+        reasoning_chunks, 0,
+        "thinking disabled must not emit reasoning chunks"
+    );
+    eprintln!("  stream: {content_chunks} content chunks, 0 reasoning chunks");
+}
+
 async fn run<Fut: std::future::Future>(name: &str, fut: Fut) -> Fut::Output {
     tokio::time::timeout(SCENARIO_TIMEOUT, fut)
         .await
@@ -162,6 +210,7 @@ async fn openai_all_scenarios() {
     run("prompt", check_prompt(&client)).await;
     run("stream", check_stream(&client)).await;
     run("extract", check_extract(&client)).await;
+    run("generate", check_realistic_generation(&client)).await;
 }
 
 #[tokio::test]
@@ -197,6 +246,7 @@ async fn gemini_all_scenarios() {
     run("prompt", check_prompt(&client)).await;
     run("stream", check_stream(&client)).await;
     run("extract", check_extract(&client)).await;
+    run("generate", check_realistic_generation(&client)).await;
 }
 
 #[tokio::test]
@@ -242,6 +292,7 @@ async fn ali_openai_compatible_all_scenarios() {
     run("prompt", check_prompt(&client)).await;
     run("stream", check_stream(&client)).await;
     run("extract", check_extract(&client)).await;
+    run("generate", check_realistic_generation(&client)).await;
 }
 
 #[tokio::test]
@@ -252,6 +303,19 @@ async fn ali_openai_compatible_wrong_key_is_non_retryable() {
     };
     let cfg = config("sk-definitely-wrong", &model, Some(&base), None);
     run("wrong_key", check_wrong_key(ProviderId::Custom, &cfg)).await;
+}
+
+/// Custom OpenAI-compatible providers default to `enable_thinking: false`;
+/// the stream must not carry reasoning chunks.
+#[tokio::test]
+async fn ali_openai_compatible_stream_emits_no_reasoning() {
+    let Some((key, base, model)) = ali_env() else {
+        eprintln!("OC_LIVE_ALI_KEY unset, skipping");
+        return;
+    };
+    let cfg = config(&key, &model, Some(&base), None);
+    let client = client(ProviderId::Custom, &cfg);
+    run("stream", check_stream_has_no_reasoning(&client)).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +339,7 @@ async fn ali_anthropic_compatible_all_scenarios() {
     run("prompt", check_prompt(&client)).await;
     run("stream", check_stream(&client)).await;
     run("extract", check_extract(&client)).await;
+    run("generate", check_realistic_generation(&client)).await;
 }
 
 #[tokio::test]

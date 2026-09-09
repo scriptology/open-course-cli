@@ -194,6 +194,27 @@ fn anthropic_disable_thinking_params() -> serde_json::Value {
     serde_json::json!({ "thinking": { "type": "disabled" } })
 }
 
+/// `additional_params` that keep thinking off on Gemini models for speed
+/// and cost: Gemini 3 models take `thinkingLevel: "minimal"` (the only
+/// level that fully suppresses thought tokens — "low" still thinks), and
+/// Gemini 2.5 models take `thinkingBudget: 0`. The two knobs are mutually
+/// exclusive and each family rejects the other's, so the choice is
+/// family-gated; unknown families get nothing rather than a field their
+/// API version might reject.
+fn gemini_disable_thinking_params(model: &str) -> Option<serde_json::Value> {
+    if model.starts_with("gemini-3") {
+        Some(serde_json::json!({
+            "generationConfig": { "thinkingConfig": { "thinkingLevel": "minimal" } }
+        }))
+    } else if model.starts_with("gemini-2.5") {
+        Some(serde_json::json!({
+            "generationConfig": { "thinkingConfig": { "thinkingBudget": 0 } }
+        }))
+    } else {
+        None
+    }
+}
+
 #[async_trait]
 pub trait LlmClient: Send + Sync + Any {
     async fn prompt(&self, prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String>;
@@ -284,11 +305,24 @@ impl RigClient {
         // the same way unless the config overrides either field. Named
         // providers keep the plain request by default: some reject unknown
         // fields, and the server only adds controls on retry there.
+        //
+        // The default is `enable_thinking: false` and nothing else:
+        // gateways may give `reasoning_effort` precedence over
+        // `enable_thinking` (Aliyun Model Studio re-enables thinking when
+        // both are sent), so pairing the two would silently keep thinking
+        // on.
         let custom_openai = provider_id == ProviderId::Custom && config.endpoint() != "messages";
         let reasoning_effort = config
             .reasoning_effort()
             .map(|s| s.to_string())
-            .or_else(|| custom_openai.then(|| "low".to_string()));
+            .or_else(|| {
+                // OpenAI's gpt-5/o-series families reason at medium effort
+                // by default, burning tokens and latency on our structured
+                // workloads; other OpenAI models reject `reasoning_effort`
+                // with a 400, so the low-effort default is family-gated.
+                (openai_native && crate::provider::is_openai_reasoning_model(&model))
+                    .then(|| "low".to_string())
+            });
         // OpenAI rejects unknown parameters with a 400, and enable_thinking
         // is a Qwen/Aliyun extension — drop it for the real OpenAI API.
         let enable_thinking = if openai_native {
@@ -375,12 +409,16 @@ impl RigClient {
 
     /// Extra request fields for OpenAI-compatible providers on the rig
     /// (non-streaming) paths: the Qwen/Aliyun `enable_thinking` toggle and
-    /// the `reasoning_effort` control. The manual streaming body carries
-    /// the same fields (`streaming::build_openai_request_body`).
+    /// the `reasoning_effort` control. Streaming sends the same fields via
+    /// `stream_model`'s `additional_params`.
     fn openai_additional_params(&self) -> Option<serde_json::Value> {
         let mut params = serde_json::Map::new();
         if self.enable_thinking == Some(false) {
             params.insert("enable_thinking".to_string(), serde_json::json!(false));
+            // Thinking explicitly off: reasoning_effort is not just moot but
+            // harmful — gateways that give it precedence (Aliyun Model
+            // Studio) would turn thinking back on.
+            return Some(serde_json::Value::Object(params));
         }
         if let Some(effort) = &self.reasoning_effort {
             params.insert("reasoning_effort".to_string(), serde_json::json!(effort));
@@ -390,6 +428,16 @@ impl RigClient {
         } else {
             Some(serde_json::Value::Object(params))
         }
+    }
+
+    /// Gemini request params that keep thinking off for speed and cost.
+    /// An explicit `enable_thinking: true` in the config wins (thinking
+    /// stays at the provider default); `false` and unset both disable.
+    fn gemini_thinking_params(&self) -> Option<serde_json::Value> {
+        if self.enable_thinking == Some(true) {
+            return None;
+        }
+        gemini_disable_thinking_params(&self.model)
     }
 
     pub(crate) async fn extract_typed_impl<
@@ -455,9 +503,12 @@ impl RigClient {
                     extractor.build().extract(prompt).await
                 }
                 RigClientInner::Gemini(client) => {
-                    let extractor = client
+                    let mut extractor = client
                         .extractor::<T>(&self.model)
                         .max_tokens(max_tokens as u64);
+                    if let Some(params) = self.gemini_thinking_params() {
+                        extractor = extractor.additional_params(params);
+                    }
                     extractor.build().extract(prompt).await
                 }
             };
@@ -510,9 +561,15 @@ impl RigClient {
                     .await
             }
             RigClientInner::Gemini(client) => {
-                Self::gemini_agent(client, &self.model, None, max_tokens)
-                    .prompt_typed::<T>(prompt)
-                    .await
+                Self::gemini_agent(
+                    client,
+                    &self.model,
+                    None,
+                    max_tokens,
+                    self.gemini_thinking_params(),
+                )
+                .prompt_typed::<T>(prompt)
+                .await
             }
         }
     }
@@ -562,8 +619,12 @@ impl RigClient {
         model: &str,
         system: Option<&str>,
         max_tokens: u32,
+        additional_params: Option<serde_json::Value>,
     ) -> Agent {
         let mut builder = client.agent(model).max_tokens(max_tokens as u64);
+        if let Some(params) = additional_params {
+            builder = builder.additional_params(params);
+        }
         if let Some(system) = system {
             builder = builder.preamble(system);
         }
@@ -626,9 +687,15 @@ impl LlmClient for RigClient {
                     .await
                 }
                 RigClientInner::Gemini(client) => {
-                    Self::gemini_agent(client, &self.model, system, max_tokens)
-                        .prompt(prompt)
-                        .await
+                    Self::gemini_agent(
+                        client,
+                        &self.model,
+                        system,
+                        max_tokens,
+                        self.gemini_thinking_params(),
+                    )
+                    .prompt(prompt)
+                    .await
                 }
             };
 
@@ -680,7 +747,14 @@ impl LlmClient for RigClient {
             }
             RigClientInner::Gemini(client) => {
                 let model = client.completion_model(self.model.clone());
-                Self::stream_model(model, system, prompt, max_tokens, None).await
+                Self::stream_model(
+                    model,
+                    system,
+                    prompt,
+                    max_tokens,
+                    self.gemini_thinking_params(),
+                )
+                .await
             }
         }
     }
@@ -770,17 +844,34 @@ mod tests {
     fn custom_openai_provider_disables_thinking_by_default() {
         // Mirrors the server: custom OpenAI-compatible gateways always get
         // thinking controls, because their models often default to thinking
-        // mode (Aliyun MaaS, DashScope).
+        // mode (Aliyun MaaS, DashScope). Only enable_thinking is sent —
+        // gateways may give reasoning_effort precedence over it.
         let cfg = config(Some("key"), Some("https://example.com/v1"), None);
         let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
         assert_eq!(client.enable_thinking, Some(false));
-        assert_eq!(client.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(client.reasoning_effort, None);
         assert_eq!(
             client.openai_additional_params(),
-            Some(serde_json::json!({
-                "enable_thinking": false,
-                "reasoning_effort": "low",
-            }))
+            Some(serde_json::json!({ "enable_thinking": false }))
+        );
+    }
+
+    #[test]
+    fn disabled_thinking_wins_over_configured_reasoning_effort() {
+        // An explicit enable_thinking=false must not be undone by a
+        // reasoning_effort the gateway would give precedence to.
+        let mut cfg = config(Some("key"), Some("https://example.com/v1"), None);
+        let ProviderConfig::ApiKey {
+            enable_thinking,
+            reasoning_effort,
+            ..
+        } = &mut cfg;
+        *enable_thinking = Some(false);
+        *reasoning_effort = Some("low".to_string());
+        let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
+        assert_eq!(
+            client.openai_additional_params(),
+            Some(serde_json::json!({ "enable_thinking": false }))
         );
     }
 
@@ -974,6 +1065,105 @@ mod tests {
         *model = "gemini-2.5-flash".to_string();
         let client = RigClient::from_config(&cfg, ProviderId::Custom).expect("should build");
         assert_eq!(client.model, "gemini-2.5-flash");
+    }
+
+    #[test]
+    fn openai_reasoning_models_default_to_low_effort() {
+        for model in ["gpt-5-mini", "gpt-5", "gpt-5.2", "o3-mini", "o1"] {
+            let mut cfg = config(Some("openai-key"), None, None);
+            let ProviderConfig::ApiKey { model: m, .. } = &mut cfg;
+            *m = model.to_string();
+            let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
+            assert_eq!(
+                client.openai_additional_params(),
+                Some(serde_json::json!({ "reasoning_effort": "low" })),
+                "model {model}"
+            );
+        }
+    }
+
+    #[test]
+    fn openai_reasoning_effort_default_respects_config_override() {
+        let mut cfg = config(Some("openai-key"), None, None);
+        let ProviderConfig::ApiKey {
+            model,
+            reasoning_effort,
+            ..
+        } = &mut cfg;
+        *model = "gpt-5-mini".to_string();
+        *reasoning_effort = Some("high".to_string());
+        let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
+        assert_eq!(
+            client.openai_additional_params(),
+            Some(serde_json::json!({ "reasoning_effort": "high" }))
+        );
+    }
+
+    #[test]
+    fn openai_non_reasoning_models_get_no_effort_default() {
+        // gpt-4o-class models reject `reasoning_effort` with a 400 — they
+        // must keep the plain request.
+        for model in ["gpt-4o-mini", "gpt-4o", "gpt-45-turbo", "test-model"] {
+            let mut cfg = config(Some("openai-key"), None, None);
+            let ProviderConfig::ApiKey { model: m, .. } = &mut cfg;
+            *m = model.to_string();
+            let client = RigClient::from_config(&cfg, ProviderId::OpenAi).expect("should build");
+            assert_eq!(client.openai_additional_params(), None, "model {model}");
+        }
+    }
+
+    #[test]
+    fn gemini_3_models_disable_thinking_via_thinking_level() {
+        let mut cfg = config(Some("gemini-key"), None, None);
+        let ProviderConfig::ApiKey { model, .. } = &mut cfg;
+        *model = "gemini-3.6-flash".to_string();
+        let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+        assert_eq!(
+            client.gemini_thinking_params(),
+            Some(serde_json::json!({
+                "generationConfig": { "thinkingConfig": { "thinkingLevel": "minimal" } }
+            }))
+        );
+    }
+
+    #[test]
+    fn gemini_2_5_models_disable_thinking_via_budget() {
+        // The retired 2.5-flash remaps to a 3.x replacement, but other
+        // 2.5-family models keep the budget knob (the families reject each
+        // other's thinking field).
+        let mut cfg = config(Some("gemini-key"), None, None);
+        let ProviderConfig::ApiKey { model, .. } = &mut cfg;
+        *model = "gemini-2.5-pro".to_string();
+        let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+        assert_eq!(
+            client.gemini_thinking_params(),
+            Some(serde_json::json!({
+                "generationConfig": { "thinkingConfig": { "thinkingBudget": 0 } }
+            }))
+        );
+    }
+
+    #[test]
+    fn gemini_unknown_family_gets_no_thinking_params() {
+        let mut cfg = config(Some("gemini-key"), None, None);
+        let ProviderConfig::ApiKey { model, .. } = &mut cfg;
+        *model = "gemini-1.5-flash".to_string();
+        let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+        assert_eq!(client.gemini_thinking_params(), None);
+    }
+
+    #[test]
+    fn gemini_thinking_opt_in_keeps_provider_default() {
+        let mut cfg = config(Some("gemini-key"), None, None);
+        let ProviderConfig::ApiKey {
+            model,
+            enable_thinking,
+            ..
+        } = &mut cfg;
+        *model = "gemini-3.6-flash".to_string();
+        *enable_thinking = Some(true);
+        let client = RigClient::from_config(&cfg, ProviderId::Google).expect("should build");
+        assert_eq!(client.gemini_thinking_params(), None);
     }
 
     #[test]

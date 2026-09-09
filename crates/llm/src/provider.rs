@@ -19,6 +19,29 @@ pub const GOOGLE_RETIRED_MODELS: [&str; 2] = ["gemini-2.5-flash", "models/gemini
 /// Replacement served for every id in `GOOGLE_RETIRED_MODELS`.
 pub const GOOGLE_RETIRED_MODEL_REPLACEMENT: &str = "gemini-3.6-flash";
 
+/// True for OpenAI model families that reason by default and accept
+/// `reasoning_effort` (gpt-5 and up, and the o-series); other OpenAI
+/// models reject the field outright with a 400, so it must only be sent
+/// to these families. Mirrors rig's internal `is_openai_reasoning_model`
+/// classification (same families that require `max_completion_tokens`).
+pub fn is_openai_reasoning_model(model: &str) -> bool {
+    let numbered_gpt_5_plus = model
+        .strip_prefix("gpt-")
+        .and_then(|rest| rest.split(['.', '-']).next())
+        .filter(|major| major.len() == 1)
+        .and_then(|major| major.parse::<u32>().ok())
+        .is_some_and(|major| major >= 5);
+    let o_series = {
+        let mut chars = model.chars();
+        chars.next() == Some('o')
+            && chars.next().is_some_and(|c| c.is_ascii_digit())
+            && chars
+                .next()
+                .is_none_or(|next| next == '-' || next.is_ascii_digit())
+    };
+    numbered_gpt_5_plus || o_series
+}
+
 pub struct ProviderMeta {
     pub id: ProviderId,
     pub label: &'static str,
