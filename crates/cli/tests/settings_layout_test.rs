@@ -263,7 +263,7 @@ async fn dashboard_header_shows_update_hint() {
 }
 
 #[tokio::test]
-async fn dashboard_next_and_weak_share_a_row_on_wide_terminal() {
+async fn dashboard_rows_pair_next_with_progress_and_activity_with_weak() {
     let mut state = setup_state().await;
     state.view = View::Dashboard;
 
@@ -274,26 +274,64 @@ async fn dashboard_next_and_weak_share_a_row_on_wide_terminal() {
         .unwrap();
 
     let text = buffer_text(&terminal);
-    let row = text
+    let row1 = text
         .lines()
         .find(|line| line.contains("Следующая тема"))
         .expect("Next topic block title should render");
-    let next_col = row.find("Следующая тема").unwrap();
-    let weak_col = row
-        .find("Слабые темы")
-        .expect("Weak topics block title should share the row");
+    let next_col = row1.find("Следующая тема").unwrap();
+    let progress_col = row1
+        .find("Прогресс")
+        .expect("Progress block title should share the first row");
     assert!(
-        next_col < weak_col,
-        "Next topic should be left of Weak topics: {row}"
+        next_col < progress_col,
+        "Next topic should be left of Progress: {row1}"
+    );
+    assert!(
+        progress_col >= 60,
+        "Progress should start in the right half: {row1}"
+    );
+
+    let row2 = text
+        .lines()
+        .find(|line| line.contains("Активность"))
+        .expect("Activity block title should render");
+    let activity_col = row2.find("Активность").unwrap();
+    let weak_col = row2
+        .find("Слабые темы")
+        .expect("Weak topics block title should share the second row");
+    assert!(
+        activity_col < weak_col,
+        "Activity should be left of Weak topics: {row2}"
     );
     assert!(
         weak_col >= 60,
-        "Weak topics should start in the right half: {row}"
+        "Weak topics should start in the right half: {row2}"
+    );
+
+    let row1_idx = text
+        .lines()
+        .position(|line| line.contains("Следующая тема"))
+        .unwrap();
+    let row2_idx = text
+        .lines()
+        .position(|line| line.contains("Активность"))
+        .unwrap();
+    assert!(
+        row1_idx < row2_idx,
+        "Next/Progress row should sit above Activity/Weak row"
+    );
+
+    // The Next/Progress row absorbs leftover height, so at 120x40 the
+    // progress block keeps its expanded layout (level rows with a dedicated
+    // bar line, " / " separators) instead of the compact one ("0/0/0").
+    assert!(
+        text.contains("A1: 0 / 0 / 0"),
+        "Progress should render its expanded layout on tall terminals"
     );
 }
 
 #[tokio::test]
-async fn dashboard_next_and_weak_stack_on_narrow_terminal() {
+async fn dashboard_blocks_stack_in_order_on_narrow_terminal() {
     let mut state = setup_state().await;
     state.view = View::Dashboard;
 
@@ -304,17 +342,19 @@ async fn dashboard_next_and_weak_stack_on_narrow_terminal() {
         .unwrap();
 
     let text = buffer_text(&terminal);
-    let next_row = text
-        .lines()
-        .position(|line| line.contains("Следующая тема"))
-        .expect("Next topic block title should render");
-    let weak_row = text
-        .lines()
-        .position(|line| line.contains("Слабые темы"))
-        .expect("Weak topics block title should render");
+    let title_row = |title: &str| {
+        text.lines()
+            .position(|line| line.contains(title))
+            .unwrap_or_else(|| panic!("{title} block title should render"))
+    };
+    let next_row = title_row("Следующая тема");
+    let progress_row = title_row("Прогресс");
+    let activity_row = title_row("Активность");
+    let weak_row = title_row("Слабые темы");
     assert!(
-        weak_row > next_row,
-        "Blocks should stack vertically on narrow terminals: next row {next_row}, weak row {weak_row}"
+        next_row < progress_row && progress_row < activity_row && activity_row < weak_row,
+        "Blocks should stack as Next, Progress, Activity, Weak: \
+         {next_row}, {progress_row}, {activity_row}, {weak_row}"
     );
 }
 
