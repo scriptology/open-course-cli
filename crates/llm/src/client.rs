@@ -8,8 +8,10 @@ use serde::de::DeserializeOwned;
 
 use rig::agent::Agent;
 use rig::client::{AgentClientExt, AgentModelExt, CompletionClient};
-use rig::completion::{CompletionModel, Prompt, StructuredOutputError, TypedPrompt};
-use rig::extractor::ExtractorBuilder;
+use rig::completion::{
+    CompletionError, CompletionModel, Prompt, PromptError, StructuredOutputError, TypedPrompt,
+};
+use rig::extractor::{ExtractionError, ExtractorBuilder};
 use rig::providers::{anthropic, gemini, openai};
 
 use crate::provider::ProviderMeta;
@@ -18,6 +20,10 @@ use open_course_config::provider::{ProviderConfig, ProviderId};
 use open_course_core::error::{AppError, Result};
 
 const LLM_MAX_RETRIES: usize = 3;
+
+/// Ceiling applied to a provider-supplied `Retry-After` hint so a hostile
+/// or buggy value cannot park a retry loop for minutes.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 pub const DEFAULT_MAX_TOKENS: u32 = 8192;
 
@@ -43,13 +49,140 @@ fn provider_error_message(msg: &str) -> String {
     msg.to_string()
 }
 
-pub(crate) fn classify_llm_error<E: std::fmt::Display>(e: E) -> AppError {
-    let msg = e.to_string();
-    if is_provider_unavailable(&msg) {
-        AppError::ProviderUnavailable(provider_error_message(&msg))
-    } else {
-        AppError::Llm(msg)
+/// Typed provider-error inspection backing [`classify_llm_error`]. rig's
+/// error types expose the HTTP status, response body, provider request id
+/// and rate-limit headers of the failed call; errors that carry no typed
+/// data (plain strings, our own messages) get the default `None`s and are
+/// classified by string-matching.
+pub(crate) trait TypedErrorInfo: std::fmt::Display {
+    fn status(&self) -> Option<u16> {
+        None
     }
+    fn body(&self) -> Option<&str> {
+        None
+    }
+    fn request_id(&self) -> Option<&str> {
+        None
+    }
+    fn retry_after(&self) -> Option<Duration> {
+        None
+    }
+}
+
+macro_rules! impl_typed_error_info {
+    ($ty:ty) => {
+        impl TypedErrorInfo for $ty {
+            fn status(&self) -> Option<u16> {
+                self.provider_response_status().map(|s| s.as_u16())
+            }
+            fn body(&self) -> Option<&str> {
+                self.provider_response_body()
+            }
+            fn request_id(&self) -> Option<&str> {
+                self.provider_request_id()
+            }
+            fn retry_after(&self) -> Option<Duration> {
+                // Only the delta-seconds form is useful; the HTTP-date form
+                // is ignored.
+                self.provider_response_headers()?
+                    .get("retry-after")?
+                    .to_str()
+                    .ok()?
+                    .parse::<u64>()
+                    .ok()
+                    .map(Duration::from_secs)
+            }
+        }
+    };
+}
+
+impl_typed_error_info!(CompletionError);
+impl_typed_error_info!(PromptError);
+impl_typed_error_info!(StructuredOutputError);
+
+impl TypedErrorInfo for ExtractionError {
+    fn status(&self) -> Option<u16> {
+        match self {
+            Self::CompletionError(e) => e.status(),
+            Self::PromptError(e) => e.status(),
+            _ => None,
+        }
+    }
+    fn body(&self) -> Option<&str> {
+        match self {
+            Self::CompletionError(e) => e.body(),
+            Self::PromptError(e) => e.body(),
+            _ => None,
+        }
+    }
+    fn request_id(&self) -> Option<&str> {
+        match self {
+            Self::CompletionError(e) => e.request_id(),
+            Self::PromptError(e) => e.request_id(),
+            _ => None,
+        }
+    }
+    fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::CompletionError(e) => e.retry_after(),
+            Self::PromptError(e) => e.retry_after(),
+            _ => None,
+        }
+    }
+}
+
+impl TypedErrorInfo for &str {}
+impl TypedErrorInfo for String {}
+
+/// Best human-readable message for an LLM failure: the provider's own
+/// `error.message` from the typed response body when there is one, else the
+/// legacy scrape of the Display output (which falls back to the full
+/// Display string).
+fn error_message<E: TypedErrorInfo>(e: &E) -> String {
+    if let Some(message) = e
+        .body()
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(|message| message.as_str())
+                .map(str::to_string)
+        })
+    {
+        return message;
+    }
+    provider_error_message(&e.to_string())
+}
+
+/// Classify an LLM failure into the crate error type, typed data first:
+/// 429/5xx are transient (`ProviderUnavailable`, drives the retry loops
+/// and the streaming→prompt fallback), auth failures and other statuses
+/// are not retried. With no typed status (connect errors, rig-generated
+/// diagnostics, our own strings) the substring heuristic decides. The
+/// provider request id is appended when the error carries one.
+pub(crate) fn classify_llm_error<E: TypedErrorInfo>(e: E) -> AppError {
+    let message = match e.request_id() {
+        Some(id) => format!("{} (provider request id: {id})", error_message(&e)),
+        None => error_message(&e),
+    };
+    match e.status() {
+        Some(429) | Some(500..=599) => AppError::ProviderUnavailable(message),
+        Some(status @ (401 | 403)) => AppError::Llm(format!(
+            "authentication failed (status {status}): {message}"
+        )),
+        Some(_) => AppError::Llm(message),
+        None if is_provider_unavailable(&e.to_string()) => AppError::ProviderUnavailable(message),
+        None => AppError::Llm(message),
+    }
+}
+
+/// Backoff before the next retry: the provider's `Retry-After` hint when
+/// one was captured (capped), else the fixed linear backoff.
+pub(crate) fn retry_delay(attempt: usize, retry_after: Option<Duration>) -> Duration {
+    retry_after
+        .map(|delay| delay.min(MAX_RETRY_AFTER))
+        .unwrap_or_else(|| Duration::from_millis(500 * attempt as u64))
 }
 
 /// `additional_params` that keep reasoning off on Anthropic-family APIs:
@@ -273,11 +406,11 @@ impl RigClient {
                 match self.prompt_typed_native::<T>(prompt, max_tokens).await {
                     Ok(value) => return Ok(value),
                     Err(e) => {
+                        let retry_after = e.retry_after();
                         let app_err = classify_llm_error(e);
                         if matches!(app_err, AppError::ProviderUnavailable(_)) {
                             if attempt < LLM_MAX_RETRIES {
-                                tokio::time::sleep(Duration::from_millis(500 * attempt as u64))
-                                    .await;
+                                tokio::time::sleep(retry_delay(attempt, retry_after)).await;
                                 last_err = Some(app_err);
                                 continue;
                             }
@@ -337,11 +470,12 @@ impl RigClient {
             match result {
                 Ok(value) => return Ok(value),
                 Err(e) => {
+                    let retry_after = e.retry_after();
                     let app_err = classify_llm_error(e);
                     if matches!(app_err, AppError::ProviderUnavailable(_))
                         && attempt < LLM_MAX_RETRIES
                     {
-                        tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
+                        tokio::time::sleep(retry_delay(attempt, retry_after)).await;
                         last_err = Some(app_err);
                         continue;
                     }
@@ -510,11 +644,12 @@ impl LlmClient for RigClient {
             match result {
                 Ok(text) => return Ok(text),
                 Err(e) => {
+                    let retry_after = e.retry_after();
                     let app_err = classify_llm_error(e);
                     if matches!(app_err, AppError::ProviderUnavailable(_))
                         && attempt < LLM_MAX_RETRIES
                     {
-                        tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
+                        tokio::time::sleep(retry_delay(attempt, retry_after)).await;
                         last_err = Some(app_err);
                         continue;
                     }
@@ -863,5 +998,119 @@ mod tests {
     fn provider_overload_stays_retryable() {
         let err = classify_llm_error("server_error: provider overloaded");
         assert!(matches!(err, AppError::ProviderUnavailable(_)));
+    }
+
+    fn http_error_with_retry_after(
+        status: http::StatusCode,
+        body: &str,
+        retry_after: &str,
+    ) -> CompletionError {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::RETRY_AFTER,
+            http::HeaderValue::from_str(retry_after).unwrap(),
+        );
+        CompletionError::from_http_response(status, body)
+            .with_response_headers(Some(Box::new(headers)))
+    }
+
+    #[test]
+    fn typed_429_is_unavailable_and_carries_retry_after() {
+        let err = http_error_with_retry_after(
+            http::StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error":{"message":"rate limited"}}"#,
+            "7",
+        );
+        assert_eq!(err.retry_after(), Some(Duration::from_secs(7)));
+        match classify_llm_error(err) {
+            AppError::ProviderUnavailable(msg) => assert!(msg.contains("rate limited"), "{msg}"),
+            other => panic!("expected ProviderUnavailable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_5xx_is_unavailable_with_provider_message_and_request_id() {
+        let err = CompletionError::from_http_response_with_request_id(
+            http::StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"error":{"message":"model overloaded"}}"#,
+            Some("req_abc123".to_string()),
+        );
+        match classify_llm_error(err) {
+            AppError::ProviderUnavailable(msg) => {
+                assert!(msg.contains("model overloaded"), "{msg}");
+                assert!(msg.contains("req_abc123"), "{msg}");
+            }
+            other => panic!("expected ProviderUnavailable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_auth_failure_is_not_retryable() {
+        for status in [http::StatusCode::UNAUTHORIZED, http::StatusCode::FORBIDDEN] {
+            let err =
+                CompletionError::from_http_response(status, r#"{"error":{"message":"bad key"}}"#);
+            match classify_llm_error(err) {
+                AppError::Llm(msg) => {
+                    assert!(msg.contains("authentication failed"), "{msg}");
+                    assert!(msg.contains("bad key"), "{msg}");
+                }
+                other => panic!("expected AppError::Llm for {status}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn typed_400_is_not_retryable() {
+        let err = CompletionError::from_http_response(
+            http::StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"response_format is not supported"}}"#,
+        );
+        match classify_llm_error(err) {
+            AppError::Llm(msg) => assert!(msg.contains("response_format"), "{msg}"),
+            other => panic!("expected AppError::Llm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_error_data_survives_wrapper_errors() {
+        let completion = CompletionError::from_http_response_with_request_id(
+            http::StatusCode::BAD_GATEWAY,
+            "bad gateway",
+            Some("req_wrap".to_string()),
+        );
+        let prompt_err = PromptError::CompletionError(completion);
+        match classify_llm_error(prompt_err) {
+            AppError::ProviderUnavailable(msg) => assert!(msg.contains("req_wrap"), "{msg}"),
+            other => panic!("expected ProviderUnavailable, got {other:?}"),
+        }
+
+        let completion =
+            CompletionError::from_http_response(http::StatusCode::SERVICE_UNAVAILABLE, "down");
+        let extraction = ExtractionError::CompletionError(completion);
+        assert!(matches!(
+            classify_llm_error(extraction),
+            AppError::ProviderUnavailable(_)
+        ));
+    }
+
+    #[test]
+    fn string_classification_applies_without_typed_status() {
+        // Plain-string errors (no typed data) still use the substring
+        // heuristic, e.g. rig-generated diagnostics and connect failures.
+        let err = classify_llm_error("HttpError: error trying to connect: dns error");
+        assert!(matches!(err, AppError::Llm(_)));
+    }
+
+    #[test]
+    fn retry_delay_prefers_capped_retry_after_hint() {
+        assert_eq!(
+            retry_delay(1, Some(Duration::from_secs(5))),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            retry_delay(1, Some(Duration::from_secs(3600))),
+            MAX_RETRY_AFTER
+        );
+        assert_eq!(retry_delay(2, None), Duration::from_millis(1000));
     }
 }
