@@ -172,9 +172,10 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     draw_hint_bar(frame.buffer_mut(), hint_area, state, labels);
 
     // The page content is sized by its blocks, never squeezed: the activity
-    // calendar needs `calendar_height` rows, the next-topic block 6, the
-    // progress block 10, the weak block 7. If it exceeds the viewport, it is
-    // rendered offscreen and the mouse wheel scrolls the visible window.
+    // calendar needs `calendar_height` rows, the progress block 10, and the
+    // next-topic/weak-topics row the taller of its two blocks (6 and 7). If
+    // it exceeds the viewport, it is rendered offscreen and the mouse wheel
+    // scrolls the visible window.
     let today = chrono::Local::now().date_naive();
     let calendar_height = activity_calendar::block_height(today);
     let narrow = content_area.width < 90;
@@ -183,38 +184,40 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     } else {
         calendar_height.max(PROGRESS_HEIGHT)
     };
-    let content_height = TOP_HEIGHT + NEXT_HEIGHT + middle_height + WEAK_HEIGHT;
+    let next_weak_height = if narrow {
+        NEXT_HEIGHT + WEAK_HEIGHT
+    } else {
+        NEXT_HEIGHT.max(WEAK_HEIGHT)
+    };
+    let content_height = TOP_HEIGHT + next_weak_height + middle_height;
 
     if content_height <= content_area.height {
         state.dashboard.scroll_offset = 0;
         state.dashboard.max_scroll = 0;
-        let [top_area, next_area, middle_area, weak_area] = Layout::vertical([
+        let [top_area, next_weak_area, middle_area] = Layout::vertical([
             Constraint::Length(TOP_HEIGHT),
-            Constraint::Length(NEXT_HEIGHT),
-            Constraint::Length(middle_height),
-            Constraint::Min(0),
+            Constraint::Length(next_weak_height),
+            Constraint::Min(middle_height),
         ])
         .areas(content_area);
         let buf = frame.buffer_mut();
         draw_top(buf, top_area, state, labels, narrow);
-        draw_next_topic(buf, next_area, state, labels);
+        draw_next_weak(buf, next_weak_area, state, labels, narrow);
         draw_middle(buf, middle_area, state, labels, calendar_height, narrow);
-        draw_weak_topics(buf, weak_area, state, labels);
     } else {
         let max_scroll = content_height - content_area.height;
         state.dashboard.max_scroll = max_scroll;
         state.dashboard.scroll_offset = state.dashboard.scroll_offset.min(max_scroll);
 
         let mut offscreen = Buffer::empty(Rect::new(0, 0, content_area.width, content_height));
-        let [top_area, next_area, middle_area, weak_area] = Layout::vertical([
+        let [top_area, next_weak_area, middle_area] = Layout::vertical([
             Constraint::Length(TOP_HEIGHT),
-            Constraint::Length(NEXT_HEIGHT),
+            Constraint::Length(next_weak_height),
             Constraint::Length(middle_height),
-            Constraint::Length(WEAK_HEIGHT),
         ])
         .areas(offscreen.area);
         draw_top(&mut offscreen, top_area, state, labels, narrow);
-        draw_next_topic(&mut offscreen, next_area, state, labels);
+        draw_next_weak(&mut offscreen, next_weak_area, state, labels, narrow);
         draw_middle(
             &mut offscreen,
             middle_area,
@@ -223,7 +226,6 @@ pub fn draw(frame: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             calendar_height,
             narrow,
         );
-        draw_weak_topics(&mut offscreen, weak_area, state, labels);
 
         blit(
             &offscreen,
@@ -410,6 +412,29 @@ fn profile_info_lines(state: &AppState, labels: ReportLabels) -> Vec<Line<'stati
 
 fn profile_info(state: &AppState, labels: ReportLabels) -> Paragraph<'static> {
     Paragraph::new(Text::from(profile_info_lines(state, labels))).alignment(Alignment::Right)
+}
+
+fn draw_next_weak(
+    buf: &mut Buffer,
+    area: Rect,
+    state: &AppState,
+    labels: ReportLabels,
+    narrow: bool,
+) {
+    let chunks = if narrow {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(NEXT_HEIGHT), Constraint::Min(0)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area)
+    };
+
+    draw_next_topic(buf, chunks[0], state, labels);
+    draw_weak_topics(buf, chunks[1], state, labels);
 }
 
 fn draw_middle(
