@@ -6,6 +6,7 @@
 //! only decides WHAT runs and spawns the tasks.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use open_course_config::{merge_remote_pairs, pair_db_path, resolve_sync_server_url, write_config};
 use open_course_db::Database;
@@ -43,6 +44,29 @@ pub struct SyncSchedulerState {
     pub pending: Option<SyncTrigger>,
 }
 
+/// Per-pair ceiling for the quiet app-start pull: the short HTTP timeout
+/// plus room for opening the pair's database. A hung step is skipped — it
+/// must never wedge the scheduler.
+const PAIR_PULL_TIMEOUT: Duration = Duration::from_secs(15);
+/// Per-pair ceiling for a sync-all run (a bind can backfill and push a large
+/// outbox: several retried requests). A hung pair is marked failed.
+const PAIR_SYNC_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Appends a timestamped line to `.open-course-cli/sync-debug.log`
+/// (diagnostics for sync scheduling/hang investigations).
+fn debug_log(data_dir: &std::path::Path, message: &str) {
+    use std::io::Write;
+    let path = open_course_config::open_course_dir(data_dir).join("sync-debug.log");
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{} {}", chrono::Utc::now().to_rfc3339(), message);
+}
+
 /// One-off operations shared by the account view (the FreshLocal/FreshCloud
 /// bind follow-ups). Moved here so every spawned sync task lives in one
 /// module.
@@ -58,7 +82,12 @@ pub(crate) enum SyncKind {
 /// coalesced: the running task finishes, then the LAST pending trigger is
 /// re-run once.
 pub async fn schedule(state: &mut AppState, trigger: SyncTrigger) {
+    debug_log(&state.data_dir, &format!("schedule: {trigger:?}"));
     if state.sync.active {
+        debug_log(
+            &state.data_dir,
+            &format!("schedule: {trigger:?} coalesced (another run is active)"),
+        );
         state.sync.pending = Some(trigger);
         return;
     }
@@ -92,10 +121,14 @@ pub async fn schedule(state: &mut AppState, trigger: SyncTrigger) {
 /// so the sync-all run that follows binds and pulls them. Best-effort: any
 /// failure (signed out, offline) keeps the local pair list.
 async fn discover_pairs(state: &mut AppState) {
+    debug_log(&state.data_dir, "discover: fetching remote pairs");
     let base_url = resolve_sync_server_url(state.config.as_ref());
     let token = match TokenStore::new(state.data_dir.clone()).load().await {
         Ok(Some(token)) => token,
-        _ => return,
+        _ => {
+            debug_log(&state.data_dir, "discover: no token, skipped");
+            return;
+        }
     };
     let client = match SyncClient::new(&base_url) {
         Ok(client) => client.with_access_token(token.access_token),
@@ -103,12 +136,23 @@ async fn discover_pairs(state: &mut AppState) {
     };
     let remote = match client.list_pairs().await {
         Ok(pairs) => pairs,
-        Err(_) => return,
+        Err(e) => {
+            debug_log(&state.data_dir, &format!("discover: list failed: {e}"));
+            return;
+        }
     };
     let Some(config) = state.config.as_mut() else {
         return;
     };
     let added = merge_remote_pairs(config, &remote);
+    debug_log(
+        &state.data_dir,
+        &format!(
+            "discover: {} remote pair(s), {} added",
+            remote.len(),
+            added.len()
+        ),
+    );
     if added.is_empty() {
         return;
     }
@@ -261,6 +305,7 @@ fn spawn_pull_all(state: &AppState) {
     let active_db = Arc::clone(&state.db);
     let tx = state.sync_tx.clone();
     let inner = tokio::spawn(async move {
+        debug_log(&data_dir, "pull-all: started");
         let token = match TokenStore::new(data_dir.clone()).load().await {
             Ok(Some(token)) => token,
             // Signed out (or an unreadable store): nothing to pull.
@@ -272,12 +317,29 @@ fn spawn_pull_all(state: &AppState) {
         };
         let mut unauthorized = false;
         for pair_id in &pair_ids {
-            let Some(db) = open_pair_db(&data_dir, &active_db, &active_pair, pair_id).await else {
+            let step = async {
+                let db = open_pair_db(&data_dir, &active_db, &active_pair, pair_id).await?;
+                if !db.metadata().sync_enabled().await.unwrap_or(false) {
+                    return Some((db, false));
+                }
+                Some((db, true))
+            };
+            let Some((db, enabled)) = tokio::time::timeout(PAIR_PULL_TIMEOUT, step)
+                .await
+                .unwrap_or_else(|_| {
+                    debug_log(
+                        &data_dir,
+                        &format!("pull-all: {pair_id}: open/check TIMED OUT"),
+                    );
+                    None
+                })
+            else {
                 continue;
             };
-            if !db.metadata().sync_enabled().await.unwrap_or(false) {
+            if !enabled {
                 continue;
             }
+            debug_log(&data_dir, &format!("pull-all: {pair_id}: pulling"));
             match client.pull_with_timeout(&db, pair_id).await {
                 Ok(_) => {
                     let _ = db
@@ -293,6 +355,7 @@ fn spawn_pull_all(state: &AppState) {
                 Err(_) => {}
             }
         }
+        debug_log(&data_dir, "pull-all: finished");
         Some(unauthorized)
     });
     tokio::spawn(async move {
@@ -339,11 +402,16 @@ fn spawn_sync_all(state: &mut AppState, mode: SyncAllMode) {
     let active_db = Arc::clone(&state.db);
     let tx = state.sync_tx.clone();
     let total = pair_ids.len();
+    debug_log(
+        &data_dir,
+        &format!("sync-all: started ({total} pair(s), mode {mode:?})"),
+    );
     // (index of the pair currently syncing, its id) — for panic reporting.
     let current = Arc::new(std::sync::Mutex::new((0usize, String::new())));
     let inner = {
         let current = Arc::clone(&current);
         let tx = tx.clone();
+        let data_dir = data_dir.clone();
         tokio::spawn(async move {
             let token = match TokenStore::new(data_dir.clone()).load().await {
                 Ok(Some(token)) => token,
@@ -396,14 +464,28 @@ fn spawn_sync_all(state: &mut AppState, mode: SyncAllMode) {
                         status: PairSyncStatus::Running,
                     })
                     .await;
-                let status = match open_pair_db(&data_dir, &active_db, &active_pair, pair_id).await
-                {
-                    Some(db) => match mode {
-                        SyncAllMode::AfterLogin => bind_and_sync(&client, &db, pair_id).await,
-                        SyncAllMode::Manual => manual_sync_pair(&client, &db, pair_id).await,
-                    },
-                    None => PairSyncStatus::Failed("database unavailable".to_string()),
+                debug_log(&data_dir, &format!("sync-all: {pair_id}: running"));
+                let step = async {
+                    match open_pair_db(&data_dir, &active_db, &active_pair, pair_id).await {
+                        Some(db) => match mode {
+                            SyncAllMode::AfterLogin => {
+                                bind_and_sync(&data_dir, &client, &db, pair_id).await
+                            }
+                            SyncAllMode::Manual => {
+                                manual_sync_pair(&data_dir, &client, &db, pair_id).await
+                            }
+                        },
+                        None => PairSyncStatus::Failed("database unavailable".to_string()),
+                    }
                 };
+                let status = match tokio::time::timeout(PAIR_SYNC_TIMEOUT, step).await {
+                    Ok(status) => status,
+                    Err(_) => {
+                        debug_log(&data_dir, &format!("sync-all: {pair_id}: TIMED OUT"));
+                        PairSyncStatus::Failed("timed out".to_string())
+                    }
+                };
+                debug_log(&data_dir, &format!("sync-all: {pair_id}: {status:?}"));
                 if matches!(
                     status,
                     PairSyncStatus::Failed(_) | PairSyncStatus::Unauthorized
@@ -430,6 +512,10 @@ fn spawn_sync_all(state: &mut AppState, mode: SyncAllMode) {
                 // count every unfinished pair as failed.
                 let (index, pair_id) = current.lock().unwrap().clone();
                 let message = panic_message(&e);
+                debug_log(
+                    &data_dir,
+                    &format!("sync-all: task panicked at {pair_id}: {message}"),
+                );
                 if !pair_id.is_empty() {
                     let _ = tx
                         .send(SyncMessage::SyncAllProgress {
@@ -441,6 +527,10 @@ fn spawn_sync_all(state: &mut AppState, mode: SyncAllMode) {
                 (total.saturating_sub(index), false)
             }
         };
+        debug_log(
+            &data_dir,
+            &format!("sync-all: finished (failed={failed}, cancelled={cancelled})"),
+        );
         let _ = tx
             .send(SyncMessage::SyncAllFinished { failed, cancelled })
             .await;
@@ -463,7 +553,12 @@ fn panic_message(e: &tokio::task::JoinError) -> String {
 /// then pushes; a 409 curriculum conflict is auto-merged by `merge_bind`
 /// (last-writer-wins), like the after-login run. Runs even when the
 /// per-pair toggle is off — the user asked explicitly.
-async fn manual_sync_pair(client: &SyncClient, db: &Database, pair_id: &str) -> PairSyncStatus {
+async fn manual_sync_pair(
+    data_dir: &std::path::Path,
+    client: &SyncClient,
+    db: &Database,
+    pair_id: &str,
+) -> PairSyncStatus {
     // "Bound" marker: a canonical curriculum version is stamped by every
     // bind that pushed or merged topics; a pair bound by a pure pull (an
     // empty local database) has `last_pulled_seq` advanced instead.
@@ -475,7 +570,7 @@ async fn manual_sync_pair(client: &SyncClient, db: &Database, pair_id: &str) -> 
         .is_some()
         || db.metadata().last_pulled_seq().await.unwrap_or(0) > 0;
     if !bound {
-        return bind_and_sync(client, db, pair_id).await;
+        return bind_and_sync(data_dir, client, db, pair_id).await;
     }
     if let Err(e) = client.pull(db, pair_id).await {
         return sync_err_status(e);
@@ -500,12 +595,28 @@ async fn manual_sync_pair(client: &SyncClient, db: &Database, pair_id: &str) -> 
 /// Binds one pair and runs the first sync: push for a cloud-empty pair,
 /// pull for a locally-empty one, `merge_bind` for a conflict. Enables sync
 /// for the pair on success.
-async fn bind_and_sync(client: &SyncClient, db: &Database, pair_id: &str) -> PairSyncStatus {
+async fn bind_and_sync(
+    data_dir: &std::path::Path,
+    client: &SyncClient,
+    db: &Database,
+    pair_id: &str,
+) -> PairSyncStatus {
     let scenario = match client.first_bind_choices(db, pair_id).await {
         Ok(scenario) => scenario,
         Err(SyncError::Unauthorized) => return PairSyncStatus::Unauthorized,
         Err(e) => return PairSyncStatus::Failed(e.to_string()),
     };
+    debug_log(
+        data_dir,
+        &format!(
+            "sync-all: {pair_id}: bind scenario {}",
+            match &scenario {
+                BindScenario::FreshLocal => "FreshLocal",
+                BindScenario::FreshCloud => "FreshCloud",
+                BindScenario::Conflict(_) => "Conflict",
+            }
+        ),
+    );
     let result = match scenario {
         BindScenario::FreshLocal => {
             // Pre-sync data never entered the outbox: enqueue it first,
