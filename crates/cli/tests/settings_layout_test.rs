@@ -263,6 +263,62 @@ async fn dashboard_header_shows_update_hint() {
 }
 
 #[tokio::test]
+async fn dashboard_next_and_weak_share_a_row_on_wide_terminal() {
+    let mut state = setup_state().await;
+    state.view = View::Dashboard;
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| dashboard::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    let row = text
+        .lines()
+        .find(|line| line.contains("Следующая тема"))
+        .expect("Next topic block title should render");
+    let next_col = row.find("Следующая тема").unwrap();
+    let weak_col = row
+        .find("Слабые темы")
+        .expect("Weak topics block title should share the row");
+    assert!(
+        next_col < weak_col,
+        "Next topic should be left of Weak topics: {row}"
+    );
+    assert!(
+        weak_col >= 60,
+        "Weak topics should start in the right half: {row}"
+    );
+}
+
+#[tokio::test]
+async fn dashboard_next_and_weak_stack_on_narrow_terminal() {
+    let mut state = setup_state().await;
+    state.view = View::Dashboard;
+
+    let backend = TestBackend::new(80, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|f| dashboard::draw(f, f.area(), &mut state))
+        .unwrap();
+
+    let text = buffer_text(&terminal);
+    let next_row = text
+        .lines()
+        .position(|line| line.contains("Следующая тема"))
+        .expect("Next topic block title should render");
+    let weak_row = text
+        .lines()
+        .position(|line| line.contains("Слабые темы"))
+        .expect("Weak topics block title should render");
+    assert!(
+        weak_row > next_row,
+        "Blocks should stack vertically on narrow terminals: next row {next_row}, weak row {weak_row}"
+    );
+}
+
+#[tokio::test]
 async fn update_available_prompt_renders() {
     use open_course_cli::ui::views::update;
 
