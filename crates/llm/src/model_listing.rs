@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+use rig::client::ModelListingClient;
+use rig::model::{Model, ModelList, ModelListingError};
+use rig::providers::{anthropic, gemini, openai};
+
 use crate::provider::ProviderMeta;
 use open_course_config::provider::ProviderId;
 use open_course_core::error::{AppError, Result};
@@ -16,16 +20,75 @@ pub async fn list_models(
     base_url: Option<&str>,
 ) -> Result<Vec<ModelInfo>> {
     match provider_id {
-        ProviderId::Anthropic => list_anthropic_models(api_key, base_url).await,
-        ProviderId::Google => list_gemini_models(api_key, base_url).await,
+        ProviderId::Anthropic => {
+            let base_url = base_url.unwrap_or("https://api.anthropic.com");
+            let api_key = api_key.ok_or_else(|| {
+                AppError::ProviderConfig("Anthropic requires an API key to list models".to_string())
+            })?;
+            let client = anthropic::Client::builder()
+                .api_key(api_key)
+                .base_url(base_url)
+                .http_client(http_client()?)
+                .build()
+                .map_err(|e| AppError::Llm(format!("Failed to build Anthropic client: {e}")))?;
+            map_model_list(client.list_models().await)
+        }
+        ProviderId::Google => {
+            let base_url = base_url.unwrap_or("https://generativelanguage.googleapis.com");
+            let api_key = api_key.ok_or_else(|| {
+                AppError::ProviderConfig("Gemini requires an API key to list models".to_string())
+            })?;
+            let client = gemini::Client::builder()
+                .api_key(api_key)
+                .base_url(base_url)
+                .http_client(http_client()?)
+                .build()
+                .map_err(|e| AppError::Llm(format!("Failed to build Gemini client: {e}")))?;
+            map_model_list(client.list_models().await)
+        }
         ProviderId::MiniMax => {
             // Chat moved to the Anthropic-compatible API, which serves
             // messages only; model listing stays on the OpenAI-compatible
             // endpoint. Configs carrying either known default map to it.
             let base_url = minimax_listing_base_url(base_url);
-            list_openai_models_at(base_url, api_key).await
+            list_openai_style_models(base_url, api_key).await
         }
-        _ => list_openai_compatible_models(provider_id, api_key, base_url).await,
+        _ => {
+            let meta = ProviderMeta::for_provider(provider_id);
+            let base_url = base_url.or(meta.default_base_url).ok_or_else(|| {
+                AppError::ProviderConfig(format!("{provider_id:?} requires a base URL"))
+            })?;
+            list_openai_style_models(base_url, api_key).await
+        }
+    }
+}
+
+/// List models from an OpenAI-style `GET {base_url}/models` endpoint via
+/// rig's OpenAI completions model lister. Covers OpenAI itself plus every
+/// OpenAI-compatible provider (DeepSeek, Mistral, OpenRouter, MiniMax,
+/// Ollama, Custom).
+async fn list_openai_style_models(base_url: &str, api_key: Option<&str>) -> Result<Vec<ModelInfo>> {
+    let client = openai::CompletionsClient::builder()
+        .api_key(api_key.unwrap_or_default())
+        .base_url(base_url)
+        .http_client(http_client()?)
+        .build()
+        .map_err(|e| AppError::Llm(format!("Failed to build OpenAI client: {e}")))?;
+    map_model_list(client.list_models().await)
+}
+
+fn map_model_list(
+    result: std::result::Result<ModelList, ModelListingError>,
+) -> Result<Vec<ModelInfo>> {
+    result
+        .map(|list| list.into_iter().map(model_info).collect())
+        .map_err(|e| AppError::Llm(e.to_string()))
+}
+
+fn model_info(model: Model) -> ModelInfo {
+    ModelInfo {
+        id: model.id,
+        label: model.name,
     }
 }
 
@@ -39,190 +102,11 @@ fn minimax_listing_base_url(base_url: Option<&str>) -> &str {
     }
 }
 
-async fn list_anthropic_models(
-    api_key: Option<&str>,
-    base_url: Option<&str>,
-) -> Result<Vec<ModelInfo>> {
-    let base_url = base_url
-        .unwrap_or("https://api.anthropic.com")
-        .trim_end_matches('/');
-    let url = format!("{base_url}/v1/models");
-    let api_key = api_key.ok_or_else(|| {
-        AppError::ProviderConfig("Anthropic requires an API key to list models".to_string())
-    })?;
-
-    let client = http_client()?;
-    let response = client
-        .get(&url)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .send()
-        .await
-        .map_err(|e| AppError::Llm(format!("Failed to fetch Anthropic models: {e}")))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(AppError::Llm(format!(
-            "Anthropic model listing returned {status}: {body}"
-        )));
-    }
-
-    let payload: AnthropicModelList = response
-        .json()
-        .await
-        .map_err(|e| AppError::Llm(format!("Failed to parse Anthropic model list: {e}")))?;
-
-    let models: Vec<ModelInfo> = payload
-        .data
-        .into_iter()
-        .map(|m| ModelInfo {
-            id: m.id,
-            label: Some(m.display_name),
-        })
-        .collect();
-    Ok(models)
-}
-
-async fn list_gemini_models(
-    api_key: Option<&str>,
-    base_url: Option<&str>,
-) -> Result<Vec<ModelInfo>> {
-    let base_url = base_url
-        .unwrap_or("https://generativelanguage.googleapis.com")
-        .trim_end_matches('/');
-    let api_key = api_key.ok_or_else(|| {
-        AppError::ProviderConfig("Gemini requires an API key to list models".to_string())
-    })?;
-    let url = format!("{base_url}/v1beta/models?key={api_key}");
-
-    let client = http_client()?;
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| AppError::Llm(format!("Failed to fetch Gemini models: {e}")))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(AppError::Llm(format!(
-            "Gemini model listing returned {status}: {body}"
-        )));
-    }
-
-    let payload: GeminiModelList = response
-        .json()
-        .await
-        .map_err(|e| AppError::Llm(format!("Failed to parse Gemini model list: {e}")))?;
-
-    let models: Vec<ModelInfo> = payload
-        .models
-        .into_iter()
-        .map(|m| {
-            let id = m
-                .name
-                .strip_prefix("models/")
-                .unwrap_or(&m.name)
-                .to_string();
-            ModelInfo {
-                id,
-                label: Some(m.display_name),
-            }
-        })
-        .collect();
-    Ok(models)
-}
-
-async fn list_openai_compatible_models(
-    provider_id: ProviderId,
-    api_key: Option<&str>,
-    base_url: Option<&str>,
-) -> Result<Vec<ModelInfo>> {
-    let meta = ProviderMeta::for_provider(provider_id);
-    let base_url = base_url
-        .or(meta.default_base_url)
-        .ok_or_else(|| AppError::ProviderConfig(format!("{provider_id:?} requires a base URL")))?;
-    list_openai_models_at(base_url, api_key).await
-}
-
-async fn list_openai_models_at(base_url: &str, api_key: Option<&str>) -> Result<Vec<ModelInfo>> {
-    let base_url = base_url.trim_end_matches('/');
-    let url = format!("{base_url}/models");
-
-    let client = http_client()?;
-    let mut request = client.get(&url);
-    if let Some(key) = api_key {
-        request = request.bearer_auth(key);
-    }
-
-    let response = request
-        .send()
-        .await
-        .map_err(|e| AppError::Llm(format!("Failed to fetch models: {e}")))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(AppError::Llm(format!(
-            "Model listing returned {status}: {body}"
-        )));
-    }
-
-    let payload: OpenAiModelList = response
-        .json()
-        .await
-        .map_err(|e| AppError::Llm(format!("Failed to parse model list: {e}")))?;
-
-    let models: Vec<ModelInfo> = payload
-        .data
-        .into_iter()
-        .map(|m| ModelInfo {
-            id: m.id,
-            label: None,
-        })
-        .collect();
-    Ok(models)
-}
-
 fn http_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| AppError::Llm(format!("Failed to build HTTP client: {e}")))
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct AnthropicModelList {
-    data: Vec<AnthropicModel>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct AnthropicModel {
-    id: String,
-    display_name: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct GeminiModelList {
-    models: Vec<GeminiModel>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct GeminiModel {
-    name: String,
-    #[serde(rename = "displayName")]
-    display_name: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct OpenAiModelList {
-    data: Vec<OpenAiModel>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct OpenAiModel {
-    id: String,
 }
 
 #[cfg(test)]
@@ -250,5 +134,29 @@ mod tests {
             minimax_listing_base_url(Some("https://proxy.example.com/v1")),
             "https://proxy.example.com/v1"
         );
+    }
+
+    #[test]
+    fn model_info_maps_rig_model_fields() {
+        let named = model_info(Model::new("claude-sonnet-5", "Claude Sonnet 5"));
+        assert_eq!(named.id, "claude-sonnet-5");
+        assert_eq!(named.label.as_deref(), Some("Claude Sonnet 5"));
+
+        let anonymous = model_info(Model::from_id("gpt-5"));
+        assert_eq!(anonymous.id, "gpt-5");
+        assert_eq!(anonymous.label, None);
+    }
+
+    #[test]
+    fn listing_errors_map_to_app_error_llm() {
+        let err = map_model_list(Err(ModelListingError::api_error(401, "bad key")))
+            .expect_err("should propagate");
+        match err {
+            AppError::Llm(msg) => {
+                assert!(msg.contains("401"), "status should survive: {msg}");
+                assert!(msg.contains("bad key"), "message should survive: {msg}");
+            }
+            other => panic!("expected AppError::Llm, got {other:?}"),
+        }
     }
 }
