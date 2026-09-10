@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.0](https://github.com/scriptology/open-course-cli/compare/v0.25.0...v0.26.0) (2026-09-09)
+
+
+### Features
+
+* **dashboard:** place Next topic and Weak topics side by side ([0c6f757](https://github.com/scriptology/open-course-cli/commit/0c6f7572e8558cfee35c5adec79e0a531178b19d))
+* **dashboard:** place Next topic and Weak topics side by side ([0940ffe](https://github.com/scriptology/open-course-cli/commit/0940ffe45bc68ab2b7289fa04dadc353b0bebb0d))
+
+
+### Bug Fixes
+
+* **cli:** reorder dashboard blocks into Next/Progress and Activity/Weak rows ([c233f1c](https://github.com/scriptology/open-course-cli/commit/c233f1c69d2206c7c1afd8dd20e557b185a8c6d7))
+* **cli:** reorder dashboard blocks into Next/Progress and Activity/Weak rows ([b82f10d](https://github.com/scriptology/open-course-cli/commit/b82f10d83addf981eb14626c429472f23064d546))
+
 ## [0.25.0](https://github.com/scriptology/open-course-cli/compare/v0.24.0...v0.25.0) (2026-09-09)
 
 
