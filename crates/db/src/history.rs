@@ -363,6 +363,11 @@ pub(crate) fn history_from_record_batch(batch: &RecordBatch) -> Result<Vec<Sessi
             avg_target_score: avg_col.value(i),
             target_delta: delta_col.value(i),
             updated_at: crate::util::optional_string_at(updated_col, i),
+            // The LanceDB schema predates situational modules; unit-session
+            // fields survive sync (JSON payload) but are not persisted here
+            // until the phase-2 table migration.
+            module_id: None,
+            target_unit_ids: None,
         });
     }
 

@@ -44,7 +44,7 @@ pub struct ErrorBody {
 
 /// A single change entry. `op` is one of "upsert" | "delete" |
 /// "tombstoneReset"; `entity` is one of "topic" | "progress" | "session" |
-/// "learningItem" | "lemma" | "form" | "metadata".
+/// "learningItem" | "lemma" | "form" | "metadata" | "module" | "moduleUnit".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +145,15 @@ pub struct PairInfoResponse {
     pub topic_count: i64,
 }
 
+/// Wire entity name for situational modules (single word, passes through
+/// `entity_to_wire` unchanged). Payload: `crate::modules::Module`.
+pub const ENTITY_MODULE: &str = "module";
+
+/// Wire entity name for module units. The snake_case outbox form is
+/// "module_unit" (mapped by `entity_to_wire`). Payload:
+/// `crate::modules::ModuleUnit`.
+pub const ENTITY_MODULE_UNIT: &str = "moduleUnit";
+
 /// Outbox op strings (snake_case) to wire strings (camelCase).
 pub fn op_to_wire(op: &str) -> &str {
     match op {
@@ -157,6 +166,7 @@ pub fn op_to_wire(op: &str) -> &str {
 pub fn entity_to_wire(entity: &str) -> &str {
     match entity {
         "learning_item" => "learningItem",
+        "module_unit" => ENTITY_MODULE_UNIT,
         other => other,
     }
 }
@@ -191,4 +201,15 @@ pub fn entity_is_lemma(entity: &str) -> bool {
 /// passes through `entity_to_wire` unchanged).
 pub fn entity_is_form(entity: &str) -> bool {
     entity == "form"
+}
+
+/// Whether a wire `entity` names situational modules (single-word entity,
+/// passes through `entity_to_wire` unchanged).
+pub fn entity_is_module(entity: &str) -> bool {
+    entity == ENTITY_MODULE
+}
+
+/// Whether a wire `entity` names module units (accepts both naming styles).
+pub fn entity_is_module_unit(entity: &str) -> bool {
+    entity == ENTITY_MODULE_UNIT || entity == "module_unit"
 }

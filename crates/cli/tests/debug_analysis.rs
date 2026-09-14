@@ -34,6 +34,7 @@ fn make_exercise(id: &str, target: &str, expected: &str) -> Exercise {
         target_topic_ids: vec!["relative-pronouns".to_string()],
         side_topic_ids: vec![],
         expected_patterns: vec![],
+        target_unit_ids: None,
         hint: None,
     }
 }

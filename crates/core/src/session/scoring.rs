@@ -5,7 +5,10 @@
 //! unified:
 //!
 //! - Topic mastery (session-level): `adaptive_alpha` with alpha in 0.1..=0.45
-//!   depending on current mastery, fed by `topic_exercise_scores`.
+//!   depending on current mastery, fed by `topic_exercise_scores`. Module
+//!   unit ids (`unit_` namespace, from `Exercise::target_unit_ids`) are
+//!   scored through the same map and the same EMA, sharing the generic
+//!   `progress` rows with grammar topics.
 //! - Learning items (item-level): `ema_update` with a fixed alpha of 0.34.
 //!
 //! - "Acceptable" sentences: per-exercise penalties of 10/5/2/0.5 inside
@@ -44,8 +47,11 @@ pub fn topic_exercise_scores(
                 .chain(exercise.side_topic_ids.iter())
                 .cloned(),
         );
+        let exercise_unit_ids =
+            unique_topic_ids(exercise.target_unit_ids.iter().flatten().cloned());
 
         let mut topic_ids = exercise_topic_ids.clone();
+        topic_ids.extend(exercise_unit_ids.iter().cloned());
         if let Some(s) = sentence {
             for error in &s.errors {
                 topic_ids.extend(error.topic_ids.iter().cloned());
@@ -59,7 +65,12 @@ pub fn topic_exercise_scores(
                     s.errors
                         .iter()
                         .filter(|e| {
-                            if e.topic_ids.is_empty() {
+                            if exercise_unit_ids.contains(&topic_id) {
+                                // A unit is measured by the exercise as a
+                                // whole, regardless of which grammar topic an
+                                // error was attributed to.
+                                true
+                            } else if e.topic_ids.is_empty() {
                                 exercise_topic_ids.contains(&topic_id)
                             } else {
                                 e.topic_ids.contains(&topic_id)
@@ -231,4 +242,124 @@ pub fn average(values: &[f64]) -> f64 {
 
 pub fn clamp_score(score: f64) -> f64 {
     score.clamp(0.0, 100.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::models::Exercise;
+
+    fn exercise(target_topic_ids: &[&str], target_unit_ids: Option<&[&str]>) -> Exercise {
+        Exercise {
+            id: "e1".to_string(),
+            target_sentence: "Hello".to_string(),
+            expected_translation: "Привет".to_string(),
+            acceptable_translations: vec![],
+            target_topic_ids: target_topic_ids.iter().map(|s| s.to_string()).collect(),
+            side_topic_ids: vec![],
+            target_unit_ids: target_unit_ids.map(|ids| ids.iter().map(|s| s.to_string()).collect()),
+            expected_patterns: vec![],
+            hint: None,
+        }
+    }
+
+    fn error(error_type: GrammarErrorType, topic_ids: &[&str]) -> GrammarError {
+        GrammarError {
+            error_type,
+            topic_ids: topic_ids.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn session_with(exercises: Vec<Exercise>) -> MentorSession {
+        MentorSession {
+            id: "s1".to_string(),
+            exercises,
+            answers: HashMap::new(),
+            current_exercise_index: 0,
+        }
+    }
+
+    fn analysis_with(sentences: Vec<SentenceAnalysis>) -> AnalysisResult {
+        AnalysisResult {
+            session_score: None,
+            sentences,
+            evaluated_topics: vec![],
+            new_topics: vec![],
+            new_learning_items: vec![],
+            new_lemmas: vec![],
+            new_forms: vec![],
+        }
+    }
+
+    fn sentence(
+        number: i32,
+        verdict: SemanticVerdict,
+        errors: Vec<GrammarError>,
+    ) -> SentenceAnalysis {
+        SentenceAnalysis {
+            sentence_number: number,
+            student_translation: String::new(),
+            expected_translation: String::new(),
+            acceptable_translations: vec![],
+            semantic_verdict: verdict,
+            errors,
+            per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
+        }
+    }
+
+    fn wrong_sentence(number: i32, errors: Vec<GrammarError>) -> SentenceAnalysis {
+        sentence(number, SemanticVerdict::NeedsCorrection, errors)
+    }
+
+    #[test]
+    fn unit_ids_are_scored_from_the_whole_exercise() {
+        // One exercise practicing grammar topic g1 and unit unit_1; the wrong
+        // sentence has a major error attributed to g1 and a minor one
+        // attributed to g2 (not practiced by the exercise).
+        let session = session_with(vec![exercise(&["g1"], Some(&["unit_1"]))]);
+        let analysis = analysis_with(vec![wrong_sentence(
+            1,
+            vec![
+                error(GrammarErrorType::Major, &["g1"]),
+                error(GrammarErrorType::Minor, &["g2"]),
+            ],
+        )]);
+
+        let scores = topic_exercise_scores(&session, &analysis);
+
+        // Grammar topics only see errors attributed to them: 50-8 and 50-3.
+        assert_eq!(scores["g1"], vec![42.0]);
+        assert_eq!(scores["g2"], vec![47.0]);
+        // The unit is measured by the exercise as a whole: 50-8-3.
+        assert_eq!(scores["unit_1"], vec![39.0]);
+    }
+
+    #[test]
+    fn unit_ema_shares_the_topic_alpha_schedule() {
+        // A clean correct sentence scores the unit 100 like any topic.
+        let session = session_with(vec![exercise(&[], Some(&["unit_1"]))]);
+        let analysis = analysis_with(vec![sentence(1, SemanticVerdict::Correct, vec![])]);
+        let scores = topic_exercise_scores(&session, &analysis);
+        assert_eq!(scores["unit_1"], vec![100.0]);
+
+        // One EMA step from mastery 0: alpha is 0.45, as for grammar topics.
+        let mastery = clamp_score(
+            (0.0 * (1.0 - adaptive_alpha(0.0)) + scores["unit_1"][0] * adaptive_alpha(0.0)).round(),
+        );
+        assert_eq!(mastery, 45.0);
+    }
+
+    #[test]
+    fn exercises_without_unit_ids_score_grammar_only() {
+        let session = session_with(vec![exercise(&["g1"], None)]);
+        let analysis = analysis_with(vec![wrong_sentence(
+            1,
+            vec![error(GrammarErrorType::Major, &["g1"])],
+        )]);
+        let scores = topic_exercise_scores(&session, &analysis);
+        assert_eq!(scores.len(), 1);
+        assert_eq!(scores["g1"], vec![42.0]);
+    }
 }

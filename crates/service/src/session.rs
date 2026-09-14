@@ -507,6 +507,11 @@ async fn ensure_topics_exist(
                 .cloned(),
         );
         for id in ids {
+            // Unit ids belong to situational modules, not the curriculum:
+            // they must never auto-create grammar topics.
+            if open_course_core::modules::is_unit_id(&id) {
+                continue;
+            }
             if !existing_ids.contains(&id) {
                 missing_ids.insert(id);
             }

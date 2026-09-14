@@ -17,6 +17,13 @@ pub struct Exercise {
     pub acceptable_translations: Vec<String>,
     pub target_topic_ids: Vec<String>,
     pub side_topic_ids: Vec<String>,
+    /// Module units this exercise practices (ids in the `unit_` namespace).
+    /// Filled by the session pipeline for unit sessions, never by the LLM,
+    /// so it is excluded from the JSON schema sent to the model; `None` for
+    /// grammar-topic sessions and older payloads.
+    #[serde(default)]
+    #[schemars(skip)]
+    pub target_unit_ids: Option<Vec<String>>,
     #[serde(default, deserialize_with = "string_or_vec_string")]
     pub expected_patterns: Vec<String>,
     pub hint: Option<String>,
@@ -290,4 +297,26 @@ pub struct EvaluatedTopic {
     pub score: f64,
     #[serde(default)]
     pub previous_score: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exercise_without_target_unit_ids_deserializes() {
+        // Payloads written before situational modules have no targetUnitIds.
+        let json = r#"{"id": "e1", "targetSentence": "Hola", "expectedTranslation": "Hello", "targetTopicIds": ["t1"], "sideTopicIds": []}"#;
+        let exercise: Exercise = serde_json::from_str(json).unwrap();
+        assert_eq!(exercise.target_unit_ids, None);
+    }
+
+    #[test]
+    fn exercise_target_unit_ids_round_trip_camel_case() {
+        let json = r#"{"id": "e1", "targetSentence": "Hola", "expectedTranslation": "Hello", "targetTopicIds": [], "sideTopicIds": [], "targetUnitIds": ["unit_1"]}"#;
+        let exercise: Exercise = serde_json::from_str(json).unwrap();
+        assert_eq!(exercise.target_unit_ids, Some(vec!["unit_1".to_string()]));
+        let serialized = serde_json::to_string(&exercise).unwrap();
+        assert!(serialized.contains("\"targetUnitIds\":[\"unit_1\"]"));
+    }
 }

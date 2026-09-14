@@ -2,6 +2,7 @@ use crate::curriculum::{
     CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty, cefr_to_numeric, difficulty_to_cefr,
 };
 use crate::learning_items::LearningItem;
+use crate::modules::Module;
 use crate::profile::UserProfile;
 use crate::progress::ProgressTopic;
 use crate::session::{Exercise, NewTopicRef};
@@ -677,6 +678,96 @@ pub fn build_curriculum_domain_prompt(
     )
 }
 
+/// Prompt for generating a situational module from the learner's free-text
+/// description: a module title/description plus a list of practice units,
+/// each optionally linked to existing curriculum grammar topics. Parsed back
+/// by `llm::parse::parse_module`.
+pub fn build_module_generation_prompt(
+    profile: &UserProfile,
+    source_prompt: &str,
+    grammar_topics: &[Topic],
+    existing_modules: &[Module],
+) -> String {
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
+
+    let cefr_hint = profile
+        .self_assessed_cefr
+        .as_ref()
+        .map(|c| format!("Proficiency level (self-assessed): {c}"))
+        .unwrap_or_default();
+
+    let age_hint = profile
+        .age
+        .map(|age| format!("Student age: {age}. Use situations and examples that fit the life experience of a typical {age}-year-old."))
+        .unwrap_or_else(|| "Student age: not specified; keep situations neutral and broadly applicable.".to_string());
+
+    let topic_list = grammar_topics
+        .iter()
+        .map(|t| format!("- topicId: \"{}\", name: \"{}\"", t.id, t.name))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let topic_list = if topic_list.is_empty() {
+        "(no grammar topics yet)".to_string()
+    } else {
+        topic_list
+    };
+
+    let existing_list = existing_modules
+        .iter()
+        .map(|m| format!("- {}: {}", m.title, m.description))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let existing_hint = if existing_list.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nThe student already has these modules — do NOT duplicate them by title or concept:\n{existing_list}\n"
+        )
+    };
+
+    format!(
+        "You are a language tutor designing a situational practice module for a {native} speaker learning {target}.
+
+The student described a situation they want to practice:
+\"{source_prompt}\"
+
+Native language: {native}
+Target language: {target}
+{cefr_hint}
+{age_hint}
+{existing_hint}
+Turn this situation into a practice module: a short title, a 1-2 sentence description, and 3-7 units that break the situation down into concrete, practicable sub-scenarios (e.g. for \"going to the store\": \"Navigation & Departments\", \"Price, Discounts & Offers\"). Each unit must be narrow enough to practice in one translation-exercise session. Order the units in a natural learning progression.
+
+Optionally link each unit to the student's existing grammar topics it will practice. Use ONLY the following grammar topic IDs. Do not invent new IDs; use an empty array when none fit.
+{topic_list}
+
+Return a JSON object:
+{{
+  \"title\": \"short module title (2-6 words)\",
+  \"description\": \"1-2 sentences\",
+  \"units\": [
+    {{
+      \"title\": \"short unit title (2-6 words)\",
+      \"description\": \"1-2 sentences\",
+      \"grammarTopicIds\": [\"...\"]
+    }}
+  ]
+}}
+
+CRITICAL: write the title and description of the module and of every unit in {native} (the student's native language). Only linguistic examples may be in {target}.
+CRITICAL: the \"units\" array must not be empty.
+CRITICAL: do not include any markdown code fences.",
+        native = native_name,
+        target = target_name,
+        source_prompt = source_prompt,
+        cefr_hint = cefr_hint,
+        age_hint = age_hint,
+        existing_hint = existing_hint,
+        topic_list = topic_list,
+    )
+}
+
 pub fn build_new_topic_metadata_prompt(profile: &UserProfile, new_topic: &NewTopicRef) -> String {
     let cefr = new_topic
         .level
@@ -824,6 +915,7 @@ mod tests {
             target_topic_ids: vec![],
             side_topic_ids: vec![],
             expected_patterns: vec![],
+            target_unit_ids: None,
             hint: None,
         };
         let pairs = vec![(exercise, "Como".to_string())];
@@ -841,5 +933,43 @@ mod tests {
         assert!(prompt.contains("VerbForm=Fin"));
         // Single-word-form errors must not produce newTopics.
         assert!(prompt.contains("errors fully explained by a single word form"));
+    }
+
+    #[test]
+    fn module_generation_prompt_covers_inputs_and_contract() {
+        let topics = vec![Topic {
+            id: "g1".to_string(),
+            name: "Gender agreement".to_string(),
+            ..Default::default()
+        }];
+        let existing = vec![Module {
+            title: "Shopping".to_string(),
+            description: "Grocery runs".to_string(),
+            ..Default::default()
+        }];
+        let prompt =
+            build_module_generation_prompt(&profile(), "поход к врачу", &topics, &existing);
+
+        // The user's situation is quoted verbatim.
+        assert!(prompt.contains("\"поход к врачу\""));
+        // Language codes are expanded for prose, as in the exercise prompt.
+        assert!(prompt.contains("Russian speaker learning Spanish"));
+        assert!(prompt.contains("in Russian (the student's native language)"));
+        // Grammar topics are offered as an allow-list of ids.
+        assert!(prompt.contains("topicId: \"g1\", name: \"Gender agreement\""));
+        assert!(prompt.contains("Use ONLY the following grammar topic IDs"));
+        // Existing modules are listed to avoid duplicates.
+        assert!(prompt.contains("- Shopping: Grocery runs"));
+        assert!(prompt.contains("do NOT duplicate"));
+        // Output contract.
+        assert!(prompt.contains("\"grammarTopicIds\""));
+        assert!(prompt.contains("\"units\" array must not be empty"));
+    }
+
+    #[test]
+    fn module_generation_prompt_without_existing_modules_or_topics() {
+        let prompt = build_module_generation_prompt(&profile(), "sailing", &[], &[]);
+        assert!(prompt.contains("(no grammar topics yet)"));
+        assert!(!prompt.contains("already has these modules"));
     }
 }

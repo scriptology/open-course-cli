@@ -42,6 +42,7 @@ fn make_exercise(target_topics: &[&str], side_topics: &[&str]) -> Exercise {
         target_topic_ids: target_topics.iter().map(|s| s.to_string()).collect(),
         side_topic_ids: side_topics.iter().map(|s| s.to_string()).collect(),
         expected_patterns: vec![],
+        target_unit_ids: None,
         hint: None,
     }
 }
@@ -475,6 +476,7 @@ async fn apply_analysis_to_db_updates_learning_items() {
         target_topic_ids: vec!["t1".to_string()],
         side_topic_ids: vec![],
         expected_patterns: vec![],
+        target_unit_ids: None,
         hint: None,
     }];
     let session = create_session(exercises, 1);
@@ -543,6 +545,7 @@ async fn apply_analysis_to_db_routes_word_topics_to_learning_items() {
         target_topic_ids: vec!["t1".to_string()],
         side_topic_ids: vec![],
         expected_patterns: vec![],
+        target_unit_ids: None,
         hint: None,
     }];
     let session = create_session(exercises, 1);
@@ -660,6 +663,7 @@ fn exercise_analysis(
         target_topic_ids: vec![],
         side_topic_ids: vec![],
         expected_patterns: vec![],
+        target_unit_ids: None,
         hint: None,
     }];
     let session = create_session(exercises, 1);
@@ -1253,6 +1257,7 @@ fn vocabulary_session(target_topics: &[&str]) -> MentorSession {
             target_topic_ids: target_topics.iter().map(|s| s.to_string()).collect(),
             side_topic_ids: vec![],
             expected_patterns: vec![],
+            target_unit_ids: None,
             hint: None,
         }],
         1,
@@ -1652,4 +1657,67 @@ fn cloze_items_blank_sentence_and_word_bank() {
     };
     assert_eq!(generated.cloze.len(), 1);
     assert_eq!(generated.exercises.len(), 1);
+}
+
+#[tokio::test]
+async fn apply_analysis_scores_unit_ids_with_the_topic_ema() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::connect(&dir.path().join("db")).await.unwrap();
+    let history = db.history();
+
+    // One exercise practicing grammar topic g1 and module unit unit_1.
+    let mut exercise = make_exercise(&["g1"], &[]);
+    exercise.target_unit_ids = Some(vec!["unit_1".to_string()]);
+    let session = create_session(vec![exercise], 1);
+
+    let analysis = AnalysisResult {
+        session_score: None,
+        sentences: vec![SentenceAnalysis {
+            sentence_number: 1,
+            student_translation: "wrong".to_string(),
+            expected_translation: "Привет".to_string(),
+            acceptable_translations: vec![],
+            semantic_verdict: SemanticVerdict::NeedsCorrection,
+            errors: vec![
+                GrammarError {
+                    error_type: GrammarErrorType::Major,
+                    topic_ids: vec!["g1".to_string()],
+                    ..Default::default()
+                },
+                GrammarError {
+                    error_type: GrammarErrorType::Minor,
+                    topic_ids: vec!["g2".to_string()],
+                    ..Default::default()
+                },
+            ],
+            per_sentence_feedback: vec![],
+            used_vocabulary: vec![],
+        }],
+        evaluated_topics: vec![],
+        new_topics: vec![],
+        new_learning_items: vec![],
+        new_lemmas: vec![],
+        new_forms: vec![],
+    };
+
+    let mut progress = ProgressData::default();
+    apply_analysis(&analysis, &session, &mut progress, &history)
+        .await
+        .unwrap();
+
+    // One EMA step from mastery 0 with alpha 0.45. Grammar topics only see
+    // errors attributed to them (50-8=42, 50-3=47); the unit is measured by
+    // the whole exercise (50-8-3=39). The three rows are updated
+    // independently through the same schedule.
+    let mastery = |id: &str| {
+        progress
+            .topics
+            .iter()
+            .find(|t| t.topic_id == id)
+            .unwrap_or_else(|| panic!("no progress row for {id}"))
+            .mastery
+    };
+    assert_eq!(mastery("g1"), 19.0); // 42 * 0.45 = 18.9
+    assert_eq!(mastery("g2"), 21.0); // 47 * 0.45 = 21.15
+    assert_eq!(mastery("unit_1"), 18.0); // 39 * 0.45 = 17.55
 }

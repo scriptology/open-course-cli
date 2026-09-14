@@ -162,6 +162,7 @@ fn analysis_prompt_includes_answers() {
         target_topic_ids: vec!["t1".to_string()],
         side_topic_ids: vec![],
         expected_patterns: vec![],
+        target_unit_ids: None,
         hint: None,
     };
     let pairs = vec![(exercise, "Hi".to_string())];
