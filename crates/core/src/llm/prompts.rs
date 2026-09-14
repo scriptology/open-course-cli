@@ -755,7 +755,7 @@ Return a JSON object:
   ]
 }}
 
-CRITICAL: write the title and description of the module and of every unit in {native} (the student's native language). Only linguistic examples may be in {target}.
+CRITICAL: write the title and description of the module and of every unit in {target} (the language the student is learning), NOT in {native} — they must match the language of the student's curriculum topic titles, which are in {target}. Linguistic examples must also be in {target}.
 CRITICAL: the \"units\" array must not be empty.
 CRITICAL: do not include any markdown code fences.",
         native = native_name,
@@ -954,7 +954,12 @@ mod tests {
         assert!(prompt.contains("\"поход к врачу\""));
         // Language codes are expanded for prose, as in the exercise prompt.
         assert!(prompt.contains("Russian speaker learning Spanish"));
-        assert!(prompt.contains("in Russian (the student's native language)"));
+        // Module/unit titles and descriptions must be in the target language,
+        // matching the curriculum topic titles the student already sees.
+        assert!(
+            prompt.contains("in Spanish (the language the student is learning), NOT in Russian")
+        );
+        assert!(!prompt.contains("in Russian (the student's native language)"));
         // Grammar topics are offered as an allow-list of ids.
         assert!(prompt.contains("topicId: \"g1\", name: \"Gender agreement\""));
         assert!(prompt.contains("Use ONLY the following grammar topic IDs"));
