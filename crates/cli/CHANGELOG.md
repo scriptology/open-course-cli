@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.0](https://github.com/scriptology/open-course-cli/compare/v0.27.0...v0.28.0) (2026-09-14)
+
+
+### Features
+
+* **core:** add module refine prompt and parser with unit-id preservation ([8c36d1d](https://github.com/scriptology/open-course-cli/commit/8c36d1d380a0db2149b455f3c569dfbad4d3385a))
+
+
+### Bug Fixes
+
+* **core:** generate module and unit titles/descriptions in the target language ([64f0cf9](https://github.com/scriptology/open-course-cli/commit/64f0cf99bd478338094893d01cc1b7d8f05c4f1f))
+
 ## [0.27.0](https://github.com/scriptology/open-course-cli/compare/v0.26.0...v0.27.0) (2026-09-14)
 
 
