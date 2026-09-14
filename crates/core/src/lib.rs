@@ -5,6 +5,7 @@ pub mod history;
 pub mod language;
 pub mod learning_items;
 pub mod llm;
+pub mod modules;
 pub mod profile;
 pub mod progress;
 pub mod reviews;

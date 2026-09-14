@@ -462,6 +462,7 @@ fn synthetic_exercise(_profile: &UserProfile) -> Exercise {
         target_topic_ids: vec!["diag-coffee".to_string()],
         side_topic_ids: vec!["diag-present".to_string()],
         expected_patterns: vec!["present tense".to_string()],
+        target_unit_ids: None,
         hint: None,
     }
 }

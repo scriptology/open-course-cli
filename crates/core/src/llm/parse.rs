@@ -99,6 +99,98 @@ pub struct LevelCurriculum {
     pub topics: Vec<Topic>,
 }
 
+/// Module generation output as returned by the LLM (see
+/// `prompts::build_module_generation_prompt`), before validation filters it
+/// into a `modules::ModuleDraft`. Every field is optional so a partial
+/// response never breaks parsing of the whole document.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawModule {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub units: Vec<RawModuleUnit>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawModuleUnit {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub grammar_topic_ids: Vec<String>,
+}
+
+/// Parses and validates a module generation response into a draft.
+/// `valid_grammar_topic_ids` is the allow-list of curriculum topic ids the
+/// prompt offered: ids outside it are dropped (the LLM must not invent or
+/// reference unknown topics), and each unit's list is deduplicated keeping
+/// the first occurrence. Units without a title are dropped; a module with a
+/// title but no usable units is an error.
+pub fn parse_module(
+    cleaned: &str,
+    valid_grammar_topic_ids: &[String],
+    content_chars: usize,
+    reasoning_chars: usize,
+) -> Result<crate::modules::ModuleDraft> {
+    if cleaned.trim().is_empty() {
+        return Err(AppError::Llm(format!(
+            "empty response (content {content_chars} chars, reasoning {reasoning_chars} chars)"
+        )));
+    }
+
+    let raw: RawModule = from_str::<RawModule>(cleaned)
+        .map_err(|e| AppError::Llm(format!("JSON does not match expected module schema: {e}")))?;
+
+    if raw.title.trim().is_empty() {
+        return Err(AppError::Llm(
+            "parsed module JSON contains no title".to_string(),
+        ));
+    }
+
+    let mut seen_titles = std::collections::HashSet::new();
+    let mut units = Vec::new();
+    for unit in raw.units {
+        let title = unit.title.trim().to_string();
+        if title.is_empty() || !seen_titles.insert(title.to_lowercase()) {
+            continue;
+        }
+        let grammar_topic_ids = crate::session::unique_topic_ids(
+            unit.grammar_topic_ids
+                .into_iter()
+                .filter(|id| valid_grammar_topic_ids.contains(id)),
+        );
+        units.push(crate::modules::ModuleUnitDraft {
+            title,
+            description: unit.description.trim().to_string(),
+            grammar_topic_ids,
+        });
+    }
+
+    if units.is_empty() {
+        return Err(AppError::Llm(
+            "parsed module JSON contains no units".to_string(),
+        ));
+    }
+
+    Ok(crate::modules::ModuleDraft {
+        title: raw.title.trim().to_string(),
+        description: raw.description.trim().to_string(),
+        units,
+    })
+}
+
+pub fn module_parse_errors(cleaned: &str) -> String {
+    from_str::<RawModule>(cleaned)
+        .err()
+        .map(|e| format!("module parse: {e}"))
+        .unwrap_or_default()
+}
+
 pub fn parse_exercises(
     cleaned: &str,
     content_chars: usize,
@@ -848,5 +940,98 @@ mod tests {
         let err = from_str::<LevelCurriculum>("}").unwrap_err();
         let excerpt = error_excerpt("}", &err);
         assert_eq!(excerpt, " <<PARSE ERROR HERE>> }");
+    }
+
+    // --- parse_module ---
+
+    fn valid_grammar_ids() -> Vec<String> {
+        vec!["g1".to_string(), "g2".to_string()]
+    }
+
+    #[test]
+    fn parse_module_accepts_valid_response() {
+        let cleaned = r#"{
+            "title": "At the doctor",
+            "description": "Medical visits",
+            "units": [
+                {"title": "Making an appointment", "description": "Calls and scheduling", "grammarTopicIds": ["g1", "g2", "g1"]},
+                {"title": "Describing symptoms", "description": "", "grammarTopicIds": []}
+            ]
+        }"#;
+        let draft = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap();
+        assert_eq!(draft.title, "At the doctor");
+        assert_eq!(draft.description, "Medical visits");
+        assert_eq!(draft.units.len(), 2);
+        assert_eq!(draft.units[0].title, "Making an appointment");
+        // Grammar ids are deduplicated, order preserved.
+        assert_eq!(draft.units[0].grammar_topic_ids, ["g1", "g2"]);
+        assert!(draft.units[1].grammar_topic_ids.is_empty());
+    }
+
+    #[test]
+    fn parse_module_drops_grammar_ids_outside_the_allow_list() {
+        let cleaned = r#"{
+            "title": "Shopping",
+            "units": [
+                {"title": "Prices", "grammarTopicIds": ["g1", "invented-id", "unit_999"]}
+            ]
+        }"#;
+        let draft = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap();
+        assert_eq!(draft.units[0].grammar_topic_ids, ["g1"]);
+    }
+
+    #[test]
+    fn parse_module_rejects_broken_json() {
+        let err = parse_module("{not json", &valid_grammar_ids(), 0, 0).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("JSON does not match expected module schema"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_module_rejects_empty_response() {
+        let err = parse_module("  ", &valid_grammar_ids(), 3, 7).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "LLM error: empty response (content 3 chars, reasoning 7 chars)"
+        );
+    }
+
+    #[test]
+    fn parse_module_rejects_missing_title() {
+        let cleaned = r#"{"units": [{"title": "Prices"}]}"#;
+        let err = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "LLM error: parsed module JSON contains no title"
+        );
+    }
+
+    #[test]
+    fn parse_module_rejects_empty_units() {
+        let cleaned = r#"{"title": "Shopping", "units": []}"#;
+        let err = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "LLM error: parsed module JSON contains no units"
+        );
+    }
+
+    #[test]
+    fn parse_module_drops_untitled_and_duplicate_units() {
+        let cleaned = r#"{
+            "title": "Shopping",
+            "units": [
+                {"title": ""},
+                {"title": "Prices"},
+                {"title": "prices"},
+                {"title": "Bargaining"}
+            ]
+        }"#;
+        let draft = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap();
+        let titles: Vec<&str> = draft.units.iter().map(|u| u.title.as_str()).collect();
+        assert_eq!(titles, ["Prices", "Bargaining"]);
     }
 }

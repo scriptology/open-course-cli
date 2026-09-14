@@ -1068,6 +1068,7 @@ mod tests {
             target_topic_ids: vec![],
             side_topic_ids: vec![],
             expected_patterns: vec![],
+            target_unit_ids: None,
             hint: None,
         }
     }

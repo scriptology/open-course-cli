@@ -46,6 +46,15 @@ pub async fn apply_analysis(
             .iter()
             .flat_map(|e| e.side_topic_ids.iter().cloned()),
     );
+    // Unit ids from `target_unit_ids` (module units, `unit_` namespace) share
+    // the generic progress rows with grammar topics: they are scored by the
+    // same EMA under `topic_id = unit id`.
+    let unit_ids = unique_topic_ids(
+        session
+            .exercises
+            .iter()
+            .flat_map(|e| e.target_unit_ids.iter().flatten().cloned()),
+    );
     let session_topic_ids = unique_topic_ids(
         target_ids
             .iter()
@@ -56,7 +65,8 @@ pub async fn apply_analysis(
                     .sentences
                     .iter()
                     .flat_map(|s| s.errors.iter().flat_map(|e| e.topic_ids.iter().cloned())),
-            ),
+            )
+            .chain(unit_ids.iter().cloned()),
     );
 
     let exercise_scores_by_topic = topic_exercise_scores(session, analysis);
@@ -120,6 +130,11 @@ pub async fn apply_analysis(
         new_topic_ids: analysis.new_topics.iter().map(|t| t.id.clone()).collect(),
         avg_target_score,
         target_delta: 0.0,
+        target_unit_ids: if unit_ids.is_empty() {
+            None
+        } else {
+            Some(unit_ids)
+        },
         ..Default::default()
     };
 
@@ -205,6 +220,11 @@ pub async fn apply_analysis_to_db(
     }
 
     for topic in &analysis.new_topics {
+        // Safety net: unit ids belong to situational modules and must never
+        // become curriculum topics.
+        if open_course_core::modules::is_unit_id(&topic.id) {
+            continue;
+        }
         // Safety net: word-specific names must not become curriculum topics.
         if is_learning_item_name(&topic.name) {
             let item = LearningItem::from_topic(topic);
