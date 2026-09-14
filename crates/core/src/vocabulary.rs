@@ -80,6 +80,15 @@ pub struct Lemma {
     /// only when its source ranks strictly higher (see `cefr_source_rank`).
     #[serde(default)]
     pub cefr_source: Option<String>,
+    /// Ids of the situational modules (`mod_<uuid>`) whose unit glossaries
+    /// claim this word as domain terminology. Claimed words are drilled in
+    /// their modules' sessions and excluded from the global weak-word pool of
+    /// plain grammar sessions; a word returns to the shared rotation only
+    /// once every claiming module has released it (module deletion or a
+    /// refine that drops the term). Additive: lemmas predating modules parse
+    /// with an empty list.
+    #[serde(default)]
+    pub module_refs: Vec<String>,
     /// RFC3339 timestamp of the last modification; `None` means "unknown"
     /// (predates sync support) and sorts as the oldest.
     #[serde(default)]
@@ -759,6 +768,34 @@ mod tests {
         assert_eq!(vocabulary_session_score(false, true), 30.0);
         assert_eq!(vocabulary_session_score(true, false), 0.0);
         assert_eq!(vocabulary_session_score(false, false), 0.0);
+    }
+
+    #[test]
+    fn lemma_without_module_refs_still_parses() {
+        // Lemmas persisted or synced before modules existed carry no
+        // `module_refs` key at all; the payload must stay valid.
+        let legacy = r#"{
+            "id": "es-hablar",
+            "lemma": "hablar",
+            "pos": "VERB",
+            "target_lang": "es",
+            "native_lang": "ru",
+            "translation": "говорить",
+            "status": 1,
+            "mastery": 42.0,
+            "last_seen": null,
+            "practice_count": 3,
+            "correct_uses": 2,
+            "incorrect_uses": 1
+        }"#;
+        let lemma: Lemma = serde_json::from_str(legacy).unwrap();
+        assert!(lemma.module_refs.is_empty());
+        // ...and the field round-trips when present.
+        let mut claimed = lemma;
+        claimed.module_refs = vec!["mod_1".to_string(), "mod_2".to_string()];
+        let json = serde_json::to_string(&claimed).unwrap();
+        let back: Lemma = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.module_refs, ["mod_1", "mod_2"]);
     }
 
     #[test]
