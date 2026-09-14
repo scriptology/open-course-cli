@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/scriptology/open-course-cli/compare/v0.28.0...v0.29.0) (2026-09-14)
+
+
+### Features
+
+* **core:** module glossaries, lemma module_refs, and exercise terminology block ([df3182d](https://github.com/scriptology/open-course-cli/commit/df3182ddf74d8a154051982e62bcde928b33025e))
+
 ## [0.28.0](https://github.com/scriptology/open-course-cli/compare/v0.27.0...v0.28.0) (2026-09-14)
 
 
