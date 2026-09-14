@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.27.0](https://github.com/scriptology/open-course-cli/compare/v0.26.0...v0.27.0) (2026-09-14)
+
+
+### Features
+
+* **core:** situational modules — domain types, unit scoring, generation prompt ([7ea6a67](https://github.com/scriptology/open-course-cli/commit/7ea6a6737b3c5edc3aa2c0cebc30d0e3b596f750))
+* **core:** situational modules domain types, unit scoring and generation prompt ([9697eff](https://github.com/scriptology/open-course-cli/commit/9697eff73ee95248af81cae79d5adcb780d55ca6))
+
 ## [0.26.0](https://github.com/scriptology/open-course-cli/compare/v0.25.0...v0.26.0) (2026-09-09)
 
 
