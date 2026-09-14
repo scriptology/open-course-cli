@@ -2,7 +2,7 @@ use crate::curriculum::{
     CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty, cefr_to_numeric, difficulty_to_cefr,
 };
 use crate::learning_items::LearningItem;
-use crate::modules::{Module, ModuleUnit};
+use crate::modules::{Module, ModuleTerm, ModuleUnit};
 use crate::profile::UserProfile;
 use crate::progress::ProgressTopic;
 use crate::session::{Exercise, NewTopicRef};
@@ -36,6 +36,37 @@ pub fn build_exercise_prompt(
     forced_vocabulary: &[Lemma],
     count: u32,
     recent_success_rate: f64,
+) -> String {
+    build_exercise_prompt_with_module_terms(
+        profile,
+        target_topics,
+        side_topics,
+        candidate_topics,
+        forced_learning_items,
+        forced_vocabulary,
+        count,
+        recent_success_rate,
+        &[],
+    )
+}
+
+/// `build_exercise_prompt` plus an optional module-terminology block.
+/// `module_terms` is the glossary of the module unit being practiced (see
+/// `modules::ModuleUnit::vocabulary`), passed weakest-first by the caller
+/// (terms the student hasn't seen or keeps failing come first); the LLM must
+/// weave these terms into the generated sentences. An empty slice produces
+/// exactly the same prompt as `build_exercise_prompt`.
+#[allow(clippy::too_many_arguments)]
+pub fn build_exercise_prompt_with_module_terms(
+    profile: &UserProfile,
+    target_topics: &[Topic],
+    side_topics: &[Topic],
+    candidate_topics: &[Topic],
+    forced_learning_items: &[LearningItem],
+    forced_vocabulary: &[Lemma],
+    count: u32,
+    recent_success_rate: f64,
+    module_terms: &[ModuleTerm],
 ) -> String {
     let target_names = target_topics
         .iter()
@@ -176,6 +207,20 @@ pub fn build_exercise_prompt(
         )
     };
 
+    let module_terms_hint = if module_terms.is_empty() {
+        String::new()
+    } else {
+        let terms = module_terms
+            .iter()
+            .map(|t| format!("- {} ({})", t.lemma, t.translation))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\nThis session belongs to a situational practice module. Its domain terminology (listed weakest-first — terms the student has not seen or keeps failing come first):\n{terms}\n\
+            Weave these terms into the exercises: every exercise should use at least one of them in its expectedTranslation where the sentence allows it, prioritizing the earliest-listed (weakest) terms, and distributing them so different terms appear across different exercises. Use the professional register and precise domain usage the terminology implies — these sentences practice real domain communication, not generic small talk. Do not force a term into a sentence where it would sound unnatural; coverage across the whole session matters more than density in one sentence.\n"
+        )
+    };
+
     // "Target sentences" alone is ambiguous: the exercise field
     // `targetSentence` holds the NATIVE-language sentence, so models read it
     // as a field reference and extract native words (with a same-language
@@ -232,7 +277,7 @@ Native language: {native}
 {complexity_hint}
 
 Use ONLY the following topic IDs when tagging exercises. Do not invent new IDs.
-{topic_list}{learning_items_hint}{vocabulary_hint}
+{topic_list}{learning_items_hint}{vocabulary_hint}{module_terms_hint}
 
 The {count} sentences should form a short coherent dialogue or mini-story while respecting the sentence-shape limits stated above. Keep each sentence natural and focused on the target topics (or general vocabulary if no topics are specified).
 
@@ -742,6 +787,12 @@ Turn this situation into a practice module: a short title, a 1-2 sentence descri
 Optionally link each unit to the student's existing grammar topics it will practice. Use ONLY the following grammar topic IDs. Do not invent new IDs; use an empty array when none fit.
 {topic_list}
 
+Each unit MUST also include a \"vocabulary\" glossary: the unit's domain terminology the student should master — professional terms, jargon, and fixed collocations, not generic everyday words. Aim for 15-40 terms per unit depending on how broad the unit is; never more than 50. Each entry has:
+- lemma: the headword or short phrase in {target}
+- translation: the translation in {native}
+- pos: optional part of speech (Universal Dependencies tag, e.g. \"NOUN\")
+- cefr: optional approximate CEFR level (\"A1\"-\"C2\")
+
 Return a JSON object:
 {{
   \"title\": \"short module title (2-6 words)\",
@@ -750,13 +801,15 @@ Return a JSON object:
     {{
       \"title\": \"short unit title (2-6 words)\",
       \"description\": \"1-2 sentences\",
-      \"grammarTopicIds\": [\"...\"]
+      \"grammarTopicIds\": [\"...\"],
+      \"vocabulary\": [ {{ \"lemma\": \"...\", \"translation\": \"...\", \"pos\": \"...\", \"cefr\": \"...\" }} ]
     }}
   ]
 }}
 
 CRITICAL: write the title and description of the module and of every unit in {target} (the language the student is learning), NOT in {native} — they must match the language of the student's curriculum topic titles, which are in {target}. Linguistic examples must also be in {target}.
-CRITICAL: the \"units\" array must not be empty.
+CRITICAL: every vocabulary \"lemma\" is in {target} and every \"translation\" is in {native} — never the other way round.
+CRITICAL: the \"units\" array must not be empty, and every unit's \"vocabulary\" array must not be empty.
 CRITICAL: do not include any markdown code fences.",
         native = native_name,
         target = target_name,
@@ -854,6 +907,12 @@ CRITICAL: for every unit that stays in the module — including units you only r
 Optionally link each unit to the student's existing grammar topics it will practice. Use ONLY the following grammar topic IDs. Do not invent new IDs; use an empty array when none fit.
 {topic_list}
 
+Each unit MUST also include a \"vocabulary\" glossary, revised together with the unit's content: the unit's domain terminology the student should master — professional terms, jargon, and fixed collocations, not generic everyday words. Aim for 15-40 terms per unit depending on how broad the unit is; never more than 50. Apply the feedback to the glossary too (e.g. a request to deepen the terminology means a longer, more specialized glossary). Each entry has:
+- lemma: the headword or short phrase in {target}
+- translation: the translation in {native}
+- pos: optional part of speech (Universal Dependencies tag, e.g. \"NOUN\")
+- cefr: optional approximate CEFR level (\"A1\"-\"C2\")
+
 Return a JSON object:
 {{
   \"title\": \"short module title (2-6 words)\",
@@ -863,13 +922,15 @@ Return a JSON object:
       \"id\": \"current unit id — ONLY for units that stay; omit for new units\",
       \"title\": \"short unit title (2-6 words)\",
       \"description\": \"1-2 sentences\",
-      \"grammarTopicIds\": [\"...\"]
+      \"grammarTopicIds\": [\"...\"],
+      \"vocabulary\": [ {{ \"lemma\": \"...\", \"translation\": \"...\", \"pos\": \"...\", \"cefr\": \"...\" }} ]
     }}
   ]
 }}
 
 CRITICAL: write the title and description of the module and of every unit in {target} (the language the student is learning), NOT in {native} — they must match the language of the student's curriculum topic titles, which are in {target}. Linguistic examples must also be in {target}.
-CRITICAL: the \"units\" array must not be empty.
+CRITICAL: every vocabulary \"lemma\" is in {target} and every \"translation\" is in {native} — never the other way round.
+CRITICAL: the \"units\" array must not be empty, and every unit's \"vocabulary\" array must not be empty.
 CRITICAL: do not include any markdown code fences.",
         native = native_name,
         target = target_name,
@@ -1085,6 +1146,16 @@ mod tests {
         // Output contract.
         assert!(prompt.contains("\"grammarTopicIds\""));
         assert!(prompt.contains("\"units\" array must not be empty"));
+        // Every unit must carry an exhaustive domain glossary; lemmas are in
+        // the target language, translations in the native one.
+        assert!(prompt.contains("\"vocabulary\" glossary"));
+        assert!(prompt.contains("professional terms, jargon"));
+        assert!(prompt.contains("15-40 terms per unit"));
+        assert!(prompt.contains("every unit's \"vocabulary\" array must not be empty"));
+        assert!(prompt.contains(
+            "every vocabulary \"lemma\" is in Spanish and every \"translation\" is in Russian"
+        ));
+        assert!(prompt.contains("\"vocabulary\": [ { \"lemma\":"));
     }
 
     #[test]
@@ -1178,6 +1249,68 @@ mod tests {
         ));
         assert!(prompt.contains("\"grammarTopicIds\""));
         assert!(prompt.contains("\"units\" array must not be empty"));
+        // Refine revises the glossary together with the unit content.
+        assert!(
+            prompt.contains("\"vocabulary\" glossary, revised together with the unit's content")
+        );
+        assert!(prompt.contains("15-40 terms per unit"));
+        assert!(prompt.contains(
+            "every vocabulary \"lemma\" is in Spanish and every \"translation\" is in Russian"
+        ));
+        assert!(prompt.contains("\"vocabulary\": [ { \"lemma\":"));
+    }
+
+    #[test]
+    fn exercise_prompt_includes_module_terminology_block() {
+        let terms = vec![
+            ModuleTerm {
+                lemma: "tack".to_string(),
+                translation: "галс".to_string(),
+                pos: Some("NOUN".to_string()),
+                cefr: None,
+            },
+            ModuleTerm {
+                lemma: "port side".to_string(),
+                translation: "левый борт".to_string(),
+                pos: None,
+                cefr: None,
+            },
+        ];
+        let prompt = build_exercise_prompt_with_module_terms(
+            &profile(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            3,
+            0.8,
+            &terms,
+        );
+        assert!(prompt.contains("situational practice module"));
+        assert!(prompt.contains("- tack (галс)"));
+        assert!(prompt.contains("- port side (левый борт)"));
+        // Weakest-first priority and the professional register.
+        assert!(prompt.contains("listed weakest-first"));
+        assert!(prompt.contains("professional register"));
+    }
+
+    #[test]
+    fn exercise_prompt_without_module_terms_matches_plain_prompt() {
+        let with_empty = build_exercise_prompt_with_module_terms(
+            &profile(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            3,
+            0.8,
+            &[],
+        );
+        let plain = build_exercise_prompt(&profile(), &[], &[], &[], &[], &[], 3, 0.8);
+        assert_eq!(with_empty, plain);
+        assert!(!plain.contains("situational practice module"));
     }
 
     #[test]

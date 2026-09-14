@@ -100,11 +100,37 @@ pub struct ModuleUnit {
     /// generation time; sessions on the unit practice them as side topics.
     #[serde(default)]
     pub grammar_topic_ids: Vec<String>,
+    /// The unit's domain glossary: terminology its sessions weave into
+    /// exercises. Lives inside the unit payload — no separate table or sync
+    /// entity — so generate/refine rewrite it atomically with the unit.
+    /// Additive: units created before glossaries parse with an empty list.
+    #[serde(default)]
+    pub vocabulary: Vec<ModuleTerm>,
     #[serde(default)]
     pub updated_at: Option<String>,
     /// RFC3339 tombstone marker; `Some` rows are hidden from reads.
     #[serde(default)]
     pub deleted_at: Option<String>,
+}
+
+/// One glossary entry of a module unit: a domain term (headword or phrase)
+/// on the target language with its native-language translation. Maps to the
+/// global vocabulary via the usual lemma id scheme (`Lemma::slug_id`) —
+/// mastery of the word is global, module membership is tracked through
+/// `vocabulary::Lemma::module_refs`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ModuleTerm {
+    /// Headword or phrase on the target language ("tack", "port side").
+    pub lemma: String,
+    /// Translation on the student's native language.
+    pub translation: String,
+    /// Universal Dependencies POS tag ("NOUN", "VERB", ...), if known.
+    #[serde(default)]
+    pub pos: Option<String>,
+    /// Approximate CEFR level ("A1"–"C2"), if known.
+    #[serde(default)]
+    pub cefr: Option<String>,
 }
 
 /// LLM output of module generation before entity ids are assigned (see
@@ -124,6 +150,8 @@ pub struct ModuleUnitDraft {
     pub title: String,
     pub description: String,
     pub grammar_topic_ids: Vec<String>,
+    /// The unit's domain glossary (see `ModuleUnit::vocabulary`).
+    pub vocabulary: Vec<ModuleTerm>,
     /// Id of the existing unit this draft updates, echoed back by the LLM
     /// during a refine pass so the unit's progress survives; `None` for a
     /// brand-new unit (and always for initial generation). `materialize`
@@ -165,6 +193,7 @@ impl ModuleDraft {
                 description: unit.description.clone(),
                 order: i as i32,
                 grammar_topic_ids: unit.grammar_topic_ids.clone(),
+                vocabulary: unit.vocabulary.clone(),
                 updated_at: Some(now.to_string()),
                 deleted_at: None,
             })
@@ -279,12 +308,19 @@ mod tests {
                     title: "Making an appointment".to_string(),
                     description: String::new(),
                     grammar_topic_ids: vec!["t1".to_string()],
+                    vocabulary: vec![ModuleTerm {
+                        lemma: "cita previa".to_string(),
+                        translation: "appointment".to_string(),
+                        pos: Some("NOUN".to_string()),
+                        cefr: Some("A2".to_string()),
+                    }],
                     existing_id: None,
                 },
                 ModuleUnitDraft {
                     title: "Describing symptoms".to_string(),
                     description: String::new(),
                     grammar_topic_ids: vec![],
+                    vocabulary: vec![],
                     existing_id: None,
                 },
             ],
@@ -302,6 +338,36 @@ mod tests {
         assert_eq!(units[0].order, 0);
         assert_eq!(units[1].order, 1);
         assert_eq!(units[0].grammar_topic_ids, ["t1"]);
+        // The glossary is carried over from the draft.
+        assert_eq!(units[0].vocabulary.len(), 1);
+        assert_eq!(units[0].vocabulary[0].lemma, "cita previa");
+        assert_eq!(units[0].vocabulary[0].translation, "appointment");
+        assert!(units[1].vocabulary.is_empty());
+    }
+
+    #[test]
+    fn unit_without_vocabulary_still_parses() {
+        // Units persisted before glossaries existed carry no `vocabulary`
+        // key at all; the payload must stay valid.
+        let legacy = r#"{
+            "id": "unit_1",
+            "module_id": "mod_1",
+            "title": "Prices",
+            "description": "Asking about costs",
+            "order": 0
+        }"#;
+        let unit: ModuleUnit = serde_json::from_str(legacy).unwrap();
+        assert!(unit.vocabulary.is_empty());
+    }
+
+    #[test]
+    fn module_term_tolerates_minimal_json() {
+        // pos/cefr are optional; the LLM may omit them.
+        let term: ModuleTerm =
+            serde_json::from_str(r#"{"lemma": "tack", "translation": "галс"}"#).unwrap();
+        assert_eq!(term.lemma, "tack");
+        assert_eq!(term.pos, None);
+        assert_eq!(term.cefr, None);
     }
 
     #[test]

@@ -379,6 +379,11 @@ pub(crate) fn lemmas_from_record_batch(batch: &RecordBatch) -> Result<Vec<Lemma>
             incorrect_uses: incorrect_col.value(i),
             cefr_level: crate::util::optional_string_at(cefr_level_col, i),
             cefr_source: crate::util::optional_string_at(cefr_source_col, i),
+            // The LanceDB schema predates module glossaries; `module_refs`
+            // survives sync (JSON payload) but is not persisted locally until
+            // the phase-2 table migration (same precedent as
+            // `SessionSummary.module_id` in history.rs).
+            module_refs: Vec::new(),
             updated_at: crate::util::optional_string_at(updated_col, i),
             deleted_at: crate::util::optional_string_at(deleted_col, i),
         });

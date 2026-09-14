@@ -127,14 +127,42 @@ pub struct RawModuleUnit {
     pub description: String,
     #[serde(default)]
     pub grammar_topic_ids: Vec<String>,
+    /// The unit's domain glossary (see `modules::ModuleUnit::vocabulary`).
+    #[serde(default)]
+    pub vocabulary: Vec<RawModuleTerm>,
 }
+
+/// Glossary entry as returned by the LLM (see
+/// `prompts::build_module_generation_prompt`), before validation filters it
+/// into a `modules::ModuleTerm`. Every field is optional so a partial entry
+/// never breaks parsing of the whole document.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RawModuleTerm {
+    #[serde(default)]
+    pub lemma: String,
+    #[serde(default)]
+    pub translation: String,
+    #[serde(default)]
+    pub pos: Option<String>,
+    #[serde(default)]
+    pub cefr: Option<String>,
+}
+
+/// Maximum glossary terms kept per unit (see
+/// `prompts::build_module_generation_prompt`): the LLM is asked for 15–40 and
+/// anything beyond the cap is dropped, keeping the first occurrences.
+pub const MODULE_VOCABULARY_CAP: usize = 50;
 
 /// Parses and validates a module generation response into a draft.
 /// `valid_grammar_topic_ids` is the allow-list of curriculum topic ids the
 /// prompt offered: ids outside it are dropped (the LLM must not invent or
 /// reference unknown topics), and each unit's list is deduplicated keeping
-/// the first occurrence. Units without a title are dropped; a module with a
-/// title but no usable units is an error.
+/// the first occurrence. Glossary terms with an empty lemma or translation
+/// are dropped, duplicates are deduped by normalized lemma (first wins), and
+/// the glossary is capped at `MODULE_VOCABULARY_CAP` terms per unit. Units
+/// without a title are dropped; a module with a title but no usable units is
+/// an error.
 pub fn parse_module(
     cleaned: &str,
     valid_grammar_topic_ids: &[String],
@@ -207,6 +235,7 @@ fn parse_module_impl(
                 .into_iter()
                 .filter(|id| valid_grammar_topic_ids.contains(id)),
         );
+        let vocabulary = parse_module_vocabulary(unit.vocabulary);
         let existing_id = unit.id.and_then(|id| {
             let id = id.trim().to_string();
             let valid = current_unit_ids.is_some_and(|ids| ids.contains(&id))
@@ -217,6 +246,7 @@ fn parse_module_impl(
             title,
             description: unit.description.trim().to_string(),
             grammar_topic_ids,
+            vocabulary,
             existing_id,
         });
     }
@@ -239,6 +269,42 @@ pub fn module_parse_errors(cleaned: &str) -> String {
         .err()
         .map(|e| format!("module parse: {e}"))
         .unwrap_or_default()
+}
+
+/// Validates a unit's raw glossary: terms with an empty lemma or translation
+/// are dropped (a term without either side teaches nothing), duplicates are
+/// deduped by normalized lemma (first occurrence wins), and the result is
+/// capped at `MODULE_VOCABULARY_CAP`. Optional fields are trimmed, with empty
+/// strings becoming `None`.
+fn parse_module_vocabulary(raw: Vec<RawModuleTerm>) -> Vec<crate::modules::ModuleTerm> {
+    let mut seen = std::collections::HashSet::new();
+    let mut terms = Vec::new();
+    for term in raw {
+        let lemma = term.lemma.trim().to_string();
+        let translation = term.translation.trim().to_string();
+        if lemma.is_empty()
+            || translation.is_empty()
+            || !seen.insert(crate::vocabulary::normalize_key(&lemma))
+        {
+            continue;
+        }
+        terms.push(crate::modules::ModuleTerm {
+            lemma,
+            translation,
+            pos: term.pos.and_then(|p| {
+                let p = p.trim().to_string();
+                (!p.is_empty()).then_some(p)
+            }),
+            cefr: term.cefr.and_then(|c| {
+                let c = c.trim().to_string();
+                (!c.is_empty()).then_some(c)
+            }),
+        });
+        if terms.len() >= MODULE_VOCABULARY_CAP {
+            break;
+        }
+    }
+    terms
 }
 
 pub fn parse_exercises(
@@ -1156,5 +1222,95 @@ mod tests {
             err.to_string(),
             "LLM error: parsed module JSON contains no units"
         );
+    }
+
+    // --- module vocabulary ---
+
+    #[test]
+    fn parse_module_maps_vocabulary_terms() {
+        let cleaned = r#"{
+            "title": "Sailing",
+            "units": [
+                {"title": "Maneuvers", "vocabulary": [
+                    {"lemma": "tack", "translation": "галс", "pos": "NOUN", "cefr": "B2"},
+                    {"lemma": "port side", "translation": "левый борт", "pos": " ", "cefr": ""}
+                ]}
+            ]
+        }"#;
+        let draft = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap();
+        let terms = &draft.units[0].vocabulary;
+        assert_eq!(terms.len(), 2);
+        assert_eq!(terms[0].lemma, "tack");
+        assert_eq!(terms[0].translation, "галс");
+        assert_eq!(terms[0].pos.as_deref(), Some("NOUN"));
+        assert_eq!(terms[0].cefr.as_deref(), Some("B2"));
+        // Blank optional fields become None.
+        assert_eq!(terms[1].pos, None);
+        assert_eq!(terms[1].cefr, None);
+    }
+
+    #[test]
+    fn parse_module_drops_empty_terms_and_dedups_by_lemma() {
+        let cleaned = r#"{
+            "title": "Sailing",
+            "units": [
+                {"title": "Maneuvers", "vocabulary": [
+                    {"lemma": "tack", "translation": "галс"},
+                    {"lemma": "", "translation": "no lemma"},
+                    {"lemma": "no translation", "translation": " "},
+                    {"lemma": "Tack", "translation": "дубликат"},
+                    {"lemma": " tack ", "translation": "ещё дубликат"},
+                    {"lemma": "jib", "translation": "кливр"}
+                ]}
+            ]
+        }"#;
+        let draft = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap();
+        let terms = &draft.units[0].vocabulary;
+        // Case/whitespace duplicates of "tack" lose to the first occurrence.
+        let lemmas: Vec<&str> = terms.iter().map(|t| t.lemma.as_str()).collect();
+        assert_eq!(lemmas, ["tack", "jib"]);
+        assert_eq!(terms[0].translation, "галс");
+    }
+
+    #[test]
+    fn parse_module_caps_vocabulary_at_fifty_terms() {
+        let terms: Vec<String> = (0..60)
+            .map(|i| format!(r#"{{"lemma": "term-{i}", "translation": "t{i}"}}"#))
+            .collect();
+        let cleaned = format!(
+            r#"{{"title": "Sailing", "units": [{{"title": "Maneuvers", "vocabulary": [{}]}}]}}"#,
+            terms.join(",")
+        );
+        let draft = parse_module(&cleaned, &valid_grammar_ids(), 0, 0).unwrap();
+        assert_eq!(draft.units[0].vocabulary.len(), MODULE_VOCABULARY_CAP);
+        // The first occurrences win, in order.
+        assert_eq!(draft.units[0].vocabulary[0].lemma, "term-0");
+        assert_eq!(draft.units[0].vocabulary[49].lemma, "term-49");
+    }
+
+    #[test]
+    fn parse_module_tolerates_missing_vocabulary() {
+        // Modules generated before glossaries existed (or by a weak model)
+        // parse with an empty glossary instead of failing.
+        let cleaned = r#"{"title": "Shopping", "units": [{"title": "Prices"}]}"#;
+        let draft = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap();
+        assert!(draft.units[0].vocabulary.is_empty());
+    }
+
+    #[test]
+    fn parse_module_refine_parses_vocabulary_too() {
+        let cleaned = r#"{
+            "title": "At the doctor",
+            "units": [
+                {"id": "unit_1", "title": "Making an appointment", "vocabulary": [
+                    {"lemma": "cita previa", "translation": "запись к врачу"}
+                ]}
+            ]
+        }"#;
+        let draft =
+            parse_module_refine(cleaned, &current_unit_ids(), &valid_grammar_ids(), 0, 0).unwrap();
+        assert_eq!(draft.units[0].existing_id.as_deref(), Some("unit_1"));
+        assert_eq!(draft.units[0].vocabulary.len(), 1);
+        assert_eq!(draft.units[0].vocabulary[0].lemma, "cita previa");
     }
 }

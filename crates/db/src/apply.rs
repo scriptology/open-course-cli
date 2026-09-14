@@ -446,15 +446,7 @@ pub async fn apply_analysis_to_db(
 
     for (id, (session_score, had_error)) in &lemma_evidence {
         if let Some(lemma) = lemmas.iter_mut().find(|l| &l.id == id) {
-            lemma.mastery = ema_update(lemma.mastery, *session_score);
-            lemma.practice_count += 1;
-            if *had_error {
-                lemma.incorrect_uses += 1;
-            } else {
-                lemma.correct_uses += 1;
-            }
-            lemma.last_seen = Some(now.clone());
-            lemma.status = derive_status(lemma.mastery, *had_error, lemma.practice_count > 0);
+            apply_lemma_evidence(lemma, *session_score, *had_error, &now);
             touched_lemma_ids.insert(id.clone());
         }
     }
@@ -500,6 +492,23 @@ pub async fn apply_analysis_to_db(
     let mut touched_forms: Vec<String> = touched_form_ids.into_iter().collect();
     touched_forms.sort();
     Ok((scores, touched_lemmas, touched_forms))
+}
+
+/// Applies one session's worst-case evidence to a lemma in place: EMA
+/// mastery update, practice counters, `last_seen`, and the derived status.
+/// Only scoring fields are touched — translation, CEFR metadata and
+/// `module_refs` (module glossary claims) must survive every update, since a
+/// session that practices a module's term must not silently un-claim it.
+fn apply_lemma_evidence(lemma: &mut Lemma, session_score: f64, had_error: bool, now: &str) {
+    lemma.mastery = ema_update(lemma.mastery, session_score);
+    lemma.practice_count += 1;
+    if had_error {
+        lemma.incorrect_uses += 1;
+    } else {
+        lemma.correct_uses += 1;
+    }
+    lemma.last_seen = Some(now.to_string());
+    lemma.status = derive_status(lemma.mastery, had_error, lemma.practice_count > 0);
 }
 
 /// Number of `key=value` segments in a normalized feats key — used to decide
@@ -616,4 +625,43 @@ fn item_has_error(item: &LearningItem, analysis: &AnalysisResult) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evidence_update_preserves_module_refs_and_metadata() {
+        let mut lemma = Lemma {
+            id: "es-tack".to_string(),
+            lemma: "tack".to_string(),
+            pos: "NOUN".to_string(),
+            target_lang: "es".to_string(),
+            native_lang: "ru".to_string(),
+            translation: "галс".to_string(),
+            mastery: 40.0,
+            practice_count: 2,
+            correct_uses: 2,
+            cefr_level: Some("B1".to_string()),
+            cefr_source: Some("list".to_string()),
+            module_refs: vec!["mod_1".to_string(), "mod_2".to_string()],
+            ..Default::default()
+        };
+        apply_lemma_evidence(&mut lemma, 100.0, false, "2026-01-01T00:00:00Z");
+        // Scoring fields move...
+        assert!(lemma.mastery > 40.0);
+        assert_eq!(lemma.practice_count, 3);
+        assert_eq!(lemma.correct_uses, 3);
+        assert_eq!(lemma.last_seen.as_deref(), Some("2026-01-01T00:00:00Z"));
+        // ...module claims and other metadata do not.
+        assert_eq!(lemma.module_refs, ["mod_1", "mod_2"]);
+        assert_eq!(lemma.translation, "галс");
+        assert_eq!(lemma.cefr_level.as_deref(), Some("B1"));
+        assert_eq!(lemma.cefr_source.as_deref(), Some("list"));
+
+        apply_lemma_evidence(&mut lemma, 0.0, true, "2026-01-02T00:00:00Z");
+        assert_eq!(lemma.incorrect_uses, 1);
+        assert_eq!(lemma.module_refs, ["mod_1", "mod_2"]);
+    }
 }
