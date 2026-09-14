@@ -2,7 +2,7 @@ use crate::curriculum::{
     CURRICULUM_DOMAIN_DESCRIPTIONS, Topic, cefr_to_difficulty, cefr_to_numeric, difficulty_to_cefr,
 };
 use crate::learning_items::LearningItem;
-use crate::modules::Module;
+use crate::modules::{Module, ModuleUnit};
 use crate::profile::UserProfile;
 use crate::progress::ProgressTopic;
 use crate::session::{Exercise, NewTopicRef};
@@ -768,6 +768,122 @@ CRITICAL: do not include any markdown code fences.",
     )
 }
 
+/// Prompt for refining an existing situational module from the learner's
+/// free-text feedback ("drop X", "go deeper into Y"). The LLM returns the
+/// full revised module; units that survive MUST echo their current `id` back
+/// so their progress is preserved — units missing from the response are
+/// deleted. Parsed back by `llm::parse::parse_module_refine`.
+pub fn build_module_refine_prompt(
+    profile: &UserProfile,
+    module: &Module,
+    units: &[ModuleUnit],
+    feedback: &str,
+    grammar_topics: &[Topic],
+    other_modules: &[Module],
+) -> String {
+    let native_name = crate::language::english_name(&profile.native_language);
+    let target_name = crate::language::english_name(&profile.target_language);
+
+    let cefr_hint = profile
+        .self_assessed_cefr
+        .as_ref()
+        .map(|c| format!("Proficiency level (self-assessed): {c}"))
+        .unwrap_or_default();
+
+    let age_hint = profile
+        .age
+        .map(|age| format!("Student age: {age}. Use situations and examples that fit the life experience of a typical {age}-year-old."))
+        .unwrap_or_else(|| "Student age: not specified; keep situations neutral and broadly applicable.".to_string());
+
+    let unit_list = units
+        .iter()
+        .map(|u| {
+            format!(
+                "- id: \"{}\", title: \"{}\", description: \"{}\"",
+                u.id, u.title, u.description
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let topic_list = grammar_topics
+        .iter()
+        .map(|t| format!("- topicId: \"{}\", name: \"{}\"", t.id, t.name))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let topic_list = if topic_list.is_empty() {
+        "(no grammar topics yet)".to_string()
+    } else {
+        topic_list
+    };
+
+    let other_list = other_modules
+        .iter()
+        .map(|m| format!("- {}: {}", m.title, m.description))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let other_hint = if other_list.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nThe student also has these OTHER modules — do NOT turn this module into a duplicate of any of them:\n{other_list}\n"
+        )
+    };
+
+    format!(
+        "You are a language tutor revising an existing situational practice module for a {native} speaker learning {target}.
+
+The module as it currently stands:
+Title: \"{module_title}\"
+Description: \"{module_description}\"
+Units (in current order):
+{unit_list}
+
+The student asked for these changes:
+\"{feedback}\"
+
+Native language: {native}
+Target language: {target}
+{cefr_hint}
+{age_hint}
+{other_hint}
+Apply the feedback and return the FULL revised module: title, 1-2 sentence description, and 3-7 units. Each unit must be narrow enough to practice in one translation-exercise session. Order the units in a natural learning progression.
+
+CRITICAL: for every unit that stays in the module — including units you only reword or expand — copy its current \"id\" into the output unchanged. A unit returned WITH its id keeps the student's practice progress; a unit returned WITHOUT an id is created from scratch, and every current unit missing from your output is permanently deleted along with its progress. Never invent ids or reuse an id for a different concept.
+
+Optionally link each unit to the student's existing grammar topics it will practice. Use ONLY the following grammar topic IDs. Do not invent new IDs; use an empty array when none fit.
+{topic_list}
+
+Return a JSON object:
+{{
+  \"title\": \"short module title (2-6 words)\",
+  \"description\": \"1-2 sentences\",
+  \"units\": [
+    {{
+      \"id\": \"current unit id — ONLY for units that stay; omit for new units\",
+      \"title\": \"short unit title (2-6 words)\",
+      \"description\": \"1-2 sentences\",
+      \"grammarTopicIds\": [\"...\"]
+    }}
+  ]
+}}
+
+CRITICAL: write the title and description of the module and of every unit in {target} (the language the student is learning), NOT in {native} — they must match the language of the student's curriculum topic titles, which are in {target}. Linguistic examples must also be in {target}.
+CRITICAL: the \"units\" array must not be empty.
+CRITICAL: do not include any markdown code fences.",
+        native = native_name,
+        target = target_name,
+        module_title = module.title,
+        module_description = module.description,
+        unit_list = unit_list,
+        feedback = feedback,
+        cefr_hint = cefr_hint,
+        age_hint = age_hint,
+        other_hint = other_hint,
+        topic_list = topic_list,
+    )
+}
+
 pub fn build_new_topic_metadata_prompt(profile: &UserProfile, new_topic: &NewTopicRef) -> String {
     let cefr = new_topic
         .level
@@ -976,5 +1092,105 @@ mod tests {
         let prompt = build_module_generation_prompt(&profile(), "sailing", &[], &[]);
         assert!(prompt.contains("(no grammar topics yet)"));
         assert!(!prompt.contains("already has these modules"));
+    }
+
+    fn current_module() -> Module {
+        Module {
+            id: "mod_1".to_string(),
+            title: "Visita al médico".to_string(),
+            description: "Medical visits".to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn current_units() -> Vec<ModuleUnit> {
+        vec![
+            ModuleUnit {
+                id: "unit_1".to_string(),
+                module_id: "mod_1".to_string(),
+                title: "Concertar cita".to_string(),
+                description: "Calls and scheduling".to_string(),
+                order: 0,
+                ..Default::default()
+            },
+            ModuleUnit {
+                id: "unit_2".to_string(),
+                module_id: "mod_1".to_string(),
+                title: "Describir síntomas".to_string(),
+                description: "Symptoms vocabulary".to_string(),
+                order: 1,
+                ..Default::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn module_refine_prompt_covers_inputs_and_contract() {
+        let topics = vec![Topic {
+            id: "g1".to_string(),
+            name: "Gender agreement".to_string(),
+            ..Default::default()
+        }];
+        let other = vec![Module {
+            title: "Shopping".to_string(),
+            description: "Grocery runs".to_string(),
+            ..Default::default()
+        }];
+        let prompt = build_module_refine_prompt(
+            &profile(),
+            &current_module(),
+            &current_units(),
+            "añade unidades sobre navegación a vela",
+            &topics,
+            &other,
+        );
+
+        // The current module and its units are quoted with their ids, so the
+        // LLM can echo the ids of the units that survive.
+        assert!(prompt.contains("Title: \"Visita al médico\""));
+        assert!(prompt.contains("id: \"unit_1\", title: \"Concertar cita\""));
+        assert!(prompt.contains("id: \"unit_2\", title: \"Describir síntomas\""));
+        // The feedback is quoted verbatim.
+        assert!(prompt.contains("\"añade unidades sobre navegación a vela\""));
+        // Language codes are expanded for prose, as in the generation prompt.
+        assert!(prompt.contains("Russian speaker learning Spanish"));
+        // Surviving units must keep their id so progress is preserved;
+        // dropped units are deleted; invented ids are forbidden.
+        assert!(prompt.contains("copy its current \"id\" into the output unchanged"));
+        assert!(prompt.contains("keeps the student's practice progress"));
+        assert!(prompt.contains("permanently deleted along with its progress"));
+        assert!(prompt.contains("Never invent ids"));
+        // Titles and descriptions must be in the target language, matching
+        // the generation prompt and the curriculum topic titles.
+        assert!(
+            prompt.contains("in Spanish (the language the student is learning), NOT in Russian")
+        );
+        assert!(!prompt.contains("in Russian (the student's native language)"));
+        // Grammar topics are offered as an allow-list of ids.
+        assert!(prompt.contains("topicId: \"g1\", name: \"Gender agreement\""));
+        assert!(prompt.contains("Use ONLY the following grammar topic IDs"));
+        // Other modules are listed to avoid drifting into a duplicate.
+        assert!(prompt.contains("- Shopping: Grocery runs"));
+        assert!(prompt.contains("OTHER modules"));
+        // Output contract: optional per-unit id plus the generation fields.
+        assert!(prompt.contains(
+            "\"id\": \"current unit id — ONLY for units that stay; omit for new units\""
+        ));
+        assert!(prompt.contains("\"grammarTopicIds\""));
+        assert!(prompt.contains("\"units\" array must not be empty"));
+    }
+
+    #[test]
+    fn module_refine_prompt_without_other_modules_or_topics() {
+        let prompt = build_module_refine_prompt(
+            &profile(),
+            &current_module(),
+            &current_units(),
+            "drop the last unit",
+            &[],
+            &[],
+        );
+        assert!(prompt.contains("(no grammar topics yet)"));
+        assert!(!prompt.contains("OTHER modules"));
     }
 }
