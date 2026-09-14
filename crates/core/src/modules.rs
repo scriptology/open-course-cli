@@ -109,7 +109,9 @@ pub struct ModuleUnit {
 
 /// LLM output of module generation before entity ids are assigned (see
 /// `llm::prompts::build_module_generation_prompt` and
-/// `llm::parse::parse_module`).
+/// `llm::parse::parse_module`), or of a refine pass over an existing module
+/// (see `llm::prompts::build_module_refine_prompt` and
+/// `llm::parse::parse_module_refine`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModuleDraft {
     pub title: String,
@@ -122,6 +124,11 @@ pub struct ModuleUnitDraft {
     pub title: String,
     pub description: String,
     pub grammar_topic_ids: Vec<String>,
+    /// Id of the existing unit this draft updates, echoed back by the LLM
+    /// during a refine pass so the unit's progress survives; `None` for a
+    /// brand-new unit (and always for initial generation). `materialize`
+    /// ignores it — refine callers must apply updates themselves.
+    pub existing_id: Option<String>,
 }
 
 impl ModuleDraft {
@@ -272,11 +279,13 @@ mod tests {
                     title: "Making an appointment".to_string(),
                     description: String::new(),
                     grammar_topic_ids: vec!["t1".to_string()],
+                    existing_id: None,
                 },
                 ModuleUnitDraft {
                     title: "Describing symptoms".to_string(),
                     description: String::new(),
                     grammar_topic_ids: vec![],
+                    existing_id: None,
                 },
             ],
         };

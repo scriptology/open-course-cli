@@ -117,6 +117,10 @@ pub struct RawModule {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RawModuleUnit {
+    /// Echoed back only by refine responses (`parse_module_refine`): the id
+    /// of the existing unit this entry updates. Absent in initial generation.
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -137,6 +141,44 @@ pub fn parse_module(
     content_chars: usize,
     reasoning_chars: usize,
 ) -> Result<crate::modules::ModuleDraft> {
+    parse_module_impl(
+        cleaned,
+        None,
+        valid_grammar_topic_ids,
+        content_chars,
+        reasoning_chars,
+    )
+}
+
+/// Parses and validates a module refine response (see
+/// `prompts::build_module_refine_prompt`). Same rules as `parse_module`,
+/// plus unit-id handling: a unit whose `id` belongs to `current_unit_ids`
+/// keeps it in `ModuleUnitDraft::existing_id` (its progress survives the
+/// refine); an `id` that is missing, unknown, invented, or repeated does NOT
+/// fail the parse — the unit is treated as new.
+pub fn parse_module_refine(
+    cleaned: &str,
+    current_unit_ids: &[String],
+    valid_grammar_topic_ids: &[String],
+    content_chars: usize,
+    reasoning_chars: usize,
+) -> Result<crate::modules::ModuleDraft> {
+    parse_module_impl(
+        cleaned,
+        Some(current_unit_ids),
+        valid_grammar_topic_ids,
+        content_chars,
+        reasoning_chars,
+    )
+}
+
+fn parse_module_impl(
+    cleaned: &str,
+    current_unit_ids: Option<&[String]>,
+    valid_grammar_topic_ids: &[String],
+    content_chars: usize,
+    reasoning_chars: usize,
+) -> Result<crate::modules::ModuleDraft> {
     if cleaned.trim().is_empty() {
         return Err(AppError::Llm(format!(
             "empty response (content {content_chars} chars, reasoning {reasoning_chars} chars)"
@@ -153,6 +195,7 @@ pub fn parse_module(
     }
 
     let mut seen_titles = std::collections::HashSet::new();
+    let mut seen_existing_ids = std::collections::HashSet::new();
     let mut units = Vec::new();
     for unit in raw.units {
         let title = unit.title.trim().to_string();
@@ -164,10 +207,17 @@ pub fn parse_module(
                 .into_iter()
                 .filter(|id| valid_grammar_topic_ids.contains(id)),
         );
+        let existing_id = unit.id.and_then(|id| {
+            let id = id.trim().to_string();
+            let valid = current_unit_ids.is_some_and(|ids| ids.contains(&id))
+                && seen_existing_ids.insert(id.clone());
+            valid.then_some(id)
+        });
         units.push(crate::modules::ModuleUnitDraft {
             title,
             description: unit.description.trim().to_string(),
             grammar_topic_ids,
+            existing_id,
         });
     }
 
@@ -1033,5 +1083,78 @@ mod tests {
         let draft = parse_module(cleaned, &valid_grammar_ids(), 0, 0).unwrap();
         let titles: Vec<&str> = draft.units.iter().map(|u| u.title.as_str()).collect();
         assert_eq!(titles, ["Prices", "Bargaining"]);
+    }
+
+    // --- parse_module_refine ---
+
+    fn current_unit_ids() -> Vec<String> {
+        vec!["unit_1".to_string(), "unit_2".to_string()]
+    }
+
+    #[test]
+    fn parse_module_refine_keeps_current_unit_ids() {
+        let cleaned = r#"{
+            "title": "At the doctor",
+            "description": "Medical visits, expanded",
+            "units": [
+                {"id": "unit_1", "title": "Making an appointment", "description": "Reworded", "grammarTopicIds": ["g1"]},
+                {"title": "Insurance questions", "description": "New unit", "grammarTopicIds": []}
+            ]
+        }"#;
+        let draft =
+            parse_module_refine(cleaned, &current_unit_ids(), &valid_grammar_ids(), 0, 0).unwrap();
+        assert_eq!(draft.units.len(), 2);
+        // A surviving unit echoes its id; its content may be updated.
+        assert_eq!(draft.units[0].existing_id.as_deref(), Some("unit_1"));
+        assert_eq!(draft.units[0].description, "Reworded");
+        assert_eq!(draft.units[0].grammar_topic_ids, ["g1"]);
+        // A unit without an id is new.
+        assert_eq!(draft.units[1].existing_id, None);
+    }
+
+    #[test]
+    fn parse_module_refine_treats_unknown_or_repeated_ids_as_new() {
+        let cleaned = r#"{
+            "title": "At the doctor",
+            "units": [
+                {"id": "unit_1", "title": "Making an appointment"},
+                {"id": "unit_999", "title": "Invented id unit"},
+                {"id": "mod_1", "title": "Foreign id unit"},
+                {"id": "unit_1", "title": "Repeated id unit"},
+                {"id": "  ", "title": "Blank id unit"}
+            ]
+        }"#;
+        let draft =
+            parse_module_refine(cleaned, &current_unit_ids(), &valid_grammar_ids(), 0, 0).unwrap();
+        let ids: Vec<Option<&str>> = draft
+            .units
+            .iter()
+            .map(|u| u.existing_id.as_deref())
+            .collect();
+        // Only the first genuinely current id survives; unknown, foreign,
+        // repeated, and blank ids degrade to "new unit" instead of failing.
+        assert_eq!(ids, [Some("unit_1"), None, None, None, None]);
+    }
+
+    #[test]
+    fn parse_module_refine_rejects_broken_json() {
+        let err = parse_module_refine("{not json", &current_unit_ids(), &valid_grammar_ids(), 0, 0)
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("JSON does not match expected module schema"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_module_refine_rejects_empty_units() {
+        let cleaned = r#"{"title": "Shopping", "units": []}"#;
+        let err = parse_module_refine(cleaned, &current_unit_ids(), &valid_grammar_ids(), 0, 0)
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "LLM error: parsed module JSON contains no units"
+        );
     }
 }
