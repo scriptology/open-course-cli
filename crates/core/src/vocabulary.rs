@@ -20,7 +20,11 @@ use crate::session::{COMPLETED_THRESHOLD, GrammarError, MASTERY_THRESHOLD, Sente
 /// tracked here as ADV. Excluding them meant a topic like "Discourse
 /// Markers and Connectors" could track literally none of its own target
 /// vocabulary, since most of it is SCONJ/CCONJ.
-pub const CONTENT_POS: &[&str] = &["NOUN", "VERB", "ADJ", "ADV", "PROPN", "SCONJ", "CCONJ"];
+///
+/// Proper nouns (PROPN) are NOT content: names of people, cities,
+/// countries, and brands are not vocabulary to drill, and the student must
+/// never be penalized for their spelling or transliteration.
+pub const CONTENT_POS: &[&str] = &["NOUN", "VERB", "ADJ", "ADV", "SCONJ", "CCONJ"];
 
 /// Function-word POS tags (the closed UD set) excluded from forced
 /// vocabulary practice: purely grammatical scaffolding (prepositions,
@@ -33,11 +37,16 @@ const FUNCTION_POS: &[&str] = &[
 
 /// Whether a lemma with this POS tag is a content-word candidate for
 /// forced practice. Case-insensitive; empty or unrecognized tags are
-/// lazily accepted so incomplete metadata never hides a lemma.
+/// lazily accepted so incomplete metadata never hides a lemma. Proper
+/// nouns (PROPN) are explicitly rejected: names are not taught as
+/// vocabulary and their spelling is never penalized.
 pub fn is_content_pos(pos: &str) -> bool {
     let trimmed = pos.trim();
     if trimmed.is_empty() {
         return true;
+    }
+    if trimmed.eq_ignore_ascii_case("PROPN") {
+        return false;
     }
     !FUNCTION_POS.iter().any(|p| p.eq_ignore_ascii_case(trimmed))
 }
@@ -440,7 +449,11 @@ fn blank_answer(sentence: &str, answer_key: &str) -> Option<String> {
 /// options are dropped. Items are deduped by `normalize_key(lemma)` (first
 /// wins). For a word with an existing row the item carries that row's id
 /// and falls back to the stored `pos`/`cefr_level` when the raw item's are
-/// empty.
+/// empty. Finally, the first letter of the answer and of every option is
+/// unified to the answer's casing (see `unify_cloze_option_case`): the web
+/// client compares `picked === item.answer` strictly, so answer and options
+/// must share one casing rule, and the uniform case keeps the blank's
+/// sentence position from leaking the answer.
 pub fn cloze_items(
     existing_lemmas: &[Lemma],
     forced_vocabulary: &[Lemma],
@@ -489,6 +502,7 @@ pub fn cloze_items(
             if !(3..=4).contains(&options.len()) {
                 return None;
             }
+            let (answer, options) = unify_cloze_option_case(answer, options);
             Some(crate::session::ClozeItem {
                 lemma_id: existing.map(|lemma| lemma.id.clone()),
                 lemma: item.lemma,
@@ -497,12 +511,42 @@ pub fn cloze_items(
                 cefr_level: non_empty(item.cefr_level)
                     .or_else(|| existing.and_then(|lemma| lemma.cefr_level.clone())),
                 sentence,
-                answer: answer.to_string(),
+                answer,
                 options,
                 translation: non_empty(item.translation).unwrap_or_default(),
             })
         })
         .collect()
+}
+
+/// Unify the display case of a cloze answer and its options: the first
+/// letter of every option is re-cased to match the first letter of the
+/// answer (Unicode-aware). Language-neutral: German nouns and proper nouns
+/// stay capitalized because the LLM is asked to write the answer per the
+/// language's own rules, but with every option in the same case the
+/// capitalization no longer hints at which option fills the blank. The
+/// answer itself is returned re-cased too, so the strict
+/// `picked === item.answer` comparison in the web client stays consistent
+/// with the displayed options.
+fn unify_cloze_option_case(answer: &str, options: Vec<String>) -> (String, Vec<String>) {
+    let uppercase = answer.chars().next().is_some_and(char::is_uppercase);
+    let recase = |word: &str| {
+        let mut chars = word.chars();
+        match chars.next() {
+            None => word.to_string(),
+            Some(first) => {
+                let first: String = if uppercase {
+                    first.to_uppercase().collect()
+                } else {
+                    first.to_lowercase().collect()
+                };
+                format!("{first}{}", chars.as_str())
+            }
+        }
+    };
+    let answer = recase(answer);
+    let options = options.iter().map(|option| recase(option)).collect();
+    (answer, options)
 }
 
 /// Priority rank of a CEFR source: user-curated data ("manual"/"list") is 4,
@@ -726,13 +770,16 @@ mod tests {
         // Conjunctions count as content: discourse markers ("although",
         // "however", "therefore") are lexical items worth tracking, not
         // grammatical scaffolding.
-        for pos in [
-            "NOUN", "verb", "Adj", "ADV", "PROPN", "SCONJ", "CCONJ", "sconj",
-        ] {
+        for pos in ["NOUN", "verb", "Adj", "ADV", "SCONJ", "CCONJ", "sconj"] {
             assert!(is_content_pos(pos), "{pos} should be content");
         }
         for pos in ["PART", "ADP", "DET", "PRON", "AUX", "PUNCT"] {
             assert!(!is_content_pos(pos), "{pos} should be function");
+        }
+        // Proper nouns are not vocabulary: names are not drilled and their
+        // spelling is never penalized.
+        for pos in ["PROPN", "propn", "Propn"] {
+            assert!(!is_content_pos(pos), "{pos} should not be content");
         }
         // Empty or unrecognized tags are lazily accepted.
         assert!(is_content_pos(""));
@@ -1592,17 +1639,21 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].sentence, "Yo _____ pan cada día.");
         assert_eq!(items[0].answer, "Como");
+        // The distractors follow the answer's casing (see the
+        // unify_cloze_option_case tests below).
+        assert_eq!(items[0].options, ["Como", "Comes", "Comen"]);
     }
 
     #[test]
     fn cloze_items_options_dedup_and_count() {
         // A distractor duplicating the answer (different case) is deduped;
-        // two remaining distractors give exactly 3 options.
+        // two remaining distractors give exactly 3 options, re-cased to
+        // match the answer.
         let raw = vec![raw_cloze(
             "comer",
             "Como pan.",
             "Como",
-            &["como", "Comes", "Comen"],
+            &["como", "comes", "comen"],
         )];
         let items = cloze_items(&[], &[], raw);
         assert_eq!(items.len(), 1);
@@ -1620,6 +1671,41 @@ mod tests {
             &["comes", "comen", "comer", "comed"],
         )];
         assert!(cloze_items(&[], &[], raw).is_empty());
+    }
+
+    #[test]
+    fn cloze_items_lowercase_answer_lowercases_all_options() {
+        // The word sits mid-sentence, but the LLM capitalized some
+        // distractors; everything is normalized to the answer's lowercase
+        // so the casing no longer hints at the blank.
+        let raw = vec![raw_cloze(
+            "comer",
+            "Yo como pan.",
+            "como",
+            &["Comes", "COMEN"],
+        )];
+        let items = cloze_items(&[], &[], raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].answer, "como");
+        // Only the first letter is re-cased; the rest of each word is kept.
+        assert_eq!(items[0].options, ["como", "comes", "cOMEN"]);
+    }
+
+    #[test]
+    fn cloze_items_uppercase_answer_capitalizes_all_options() {
+        // A German noun is capitalized by the language's rules; every
+        // option is capitalized too, so the uniform case carries no hint.
+        // The re-casing is Unicode-aware ("Üben" keeps its umlaut).
+        let raw = vec![raw_cloze(
+            "üben",
+            "Ich übe jeden Tag.",
+            "Übe",
+            &["übst", "übt"],
+        )];
+        let items = cloze_items(&[], &[], raw);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].answer, "Übe");
+        assert_eq!(items[0].options, ["Übe", "Übst", "Übt"]);
     }
 
     #[test]

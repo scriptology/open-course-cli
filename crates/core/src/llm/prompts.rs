@@ -227,8 +227,8 @@ pub fn build_exercise_prompt_with_module_terms(
     // "translation"). Name the exact field to extract from instead.
     let vocabulary_extraction_note = format!(
         "\nIn addition to the exercises{warmup_ref}, return a top-level \"vocabulary\" array \
-         listing every CONTENT word (NOUN, VERB, ADJ, ADV, PROPN, SCONJ, CCONJ only — skip \
-         articles, prepositions, pronouns, auxiliaries) that appears in the expectedTranslation \
+         listing every CONTENT word (NOUN, VERB, ADJ, ADV, SCONJ, CCONJ only — skip \
+         articles, prepositions, pronouns, auxiliaries, and proper nouns) that appears in the expectedTranslation \
          fields you just wrote (the {target} sentences — never extract words from \
          targetSentence, which is {native}), one entry per distinct word, each with these fields:\n\
          - lemma: the dictionary headword in {target}\n\
@@ -259,6 +259,9 @@ pub fn build_exercise_prompt_with_module_terms(
          - distractors: array of 2–3 plausible but incorrect options for the blank — similar \
          grammatical forms (other inflections of the same lemma or the same part of speech) \
          that are grammatically or lexically wrong in this sentence\n\
+         - write answer and distractors in a uniform case: all lowercase unless the word is a \
+         proper noun or is capitalized by the rules of {target} — never capitalize a word only \
+         because it stands at the start of the sentence\n\
          - translation: the translation of sentence in {native}\n",
         native = native_name,
         target = target_name,
@@ -344,6 +347,7 @@ Use ONLY the following topic IDs when tagging errors. Do not invent new IDs.
 Evaluation rules:
 - Do NOT penalize or report missing accents, diacritics, punctuation marks (¡, ¿, ., ,, etc.), or capitalization differences.
 - Treat "i" and "í", "a" and "á", "e" and "é", etc. as equivalent.
+- Do NOT report or penalize spelling or transliteration variants of proper nouns (names of people, cities, countries, brands): any recognizable transliteration or localized spelling is acceptable and is NOT a spelling error.
 - Accept synonyms, alternative word order, and natural paraphrases as correct or acceptable.
 - Report an error ONLY when the student's translation is semantically different, grammatically wrong, or misses/adds a meaning-bearing word.
 - Keep feedback concise and actionable.
@@ -369,10 +373,10 @@ New topic rules (CRITICAL):
 - If the student answered in the wrong language (e.g. a language other than {target}), mark the affected words as errors, give the correct {target} translation in the explanation, and do NOT create newTopics for that other language.
 
 Vocabulary extraction rules (usedVocabulary):
-- For each sentence, list the CONTENT words (NOUN, VERB, ADJ, ADV, PROPN, SCONJ, CCONJ only) in `usedVocabulary`. Skip function words (articles, prepositions, pronouns, auxiliaries).
+- For each sentence, list the CONTENT words (NOUN, VERB, ADJ, ADV, SCONJ, CCONJ only) in `usedVocabulary`. Skip function words (articles, prepositions, pronouns, auxiliaries) and proper nouns (names of people, cities, countries, brands) entirely.
 - Words from the expected translation: side "target", no spellingOk/usageOk fields.
 - Words from the student's translation: side "student", WITH spellingOk and usageOk.
-- spellingOk is false ONLY for a real misspelling; missing accents, diacritics, punctuation, or capitalization do NOT make spellingOk false.
+- spellingOk is false ONLY for a real misspelling; missing accents, diacritics, punctuation, or capitalization do NOT make spellingOk false. For proper nouns, spellingOk stays true for any recognizable spelling or transliteration.
 - usageOk is false when the word is misused: wrong word choice, wrong inflected form, or broken agreement.
 - expectedForm is true when the surface matches a form used in the expected (or an acceptable) translation; target-side entries always have expectedForm true.
 - `lemma` is the dictionary headword, `pos` is the Universal Dependencies POS tag, `feats` are UD morphological features strictly in "Attr=Val|Attr=Val" format (e.g. "Mood=Ind|Number=Sing|Person=3|Tense=Pres"). Include the full standard UD feature set for the language: always include VerbForm for verbs (e.g. VerbForm=Fin), plus Mood/Tense/Person/Number for finite forms and Gender/Number for nominals, whenever they apply. Use an empty string when no features apply.
@@ -1039,6 +1043,8 @@ mod tests {
         assert!(prompt.contains("must NOT be any sentence used in the exercises or warm-up"));
         assert!(prompt.contains("ENTIRELY in Spanish"));
         assert!(prompt.contains("2–3 plausible but incorrect options"));
+        // Options must not leak the answer through sentence-position casing.
+        assert!(prompt.contains("write answer and distractors in a uniform case"));
     }
 
     #[test]
@@ -1102,7 +1108,18 @@ mod tests {
         assert!(prompt.contains("side \"student\""));
         assert!(prompt.contains("spellingOk"));
         assert!(prompt.contains("Attr=Val"));
-        assert!(prompt.contains("NOUN, VERB, ADJ, ADV, PROPN"));
+        // Proper nouns are excluded from extraction entirely and their
+        // spelling/transliteration variants are never penalized.
+        assert!(prompt.contains("NOUN, VERB, ADJ, ADV, SCONJ, CCONJ"));
+        assert!(!prompt.contains("PROPN"));
+        assert!(prompt.contains("proper nouns"));
+        assert!(
+            prompt.contains("recognizable transliteration or localized spelling is acceptable")
+        );
+        assert!(
+            prompt
+                .contains("spellingOk stays true for any recognizable spelling or transliteration")
+        );
         assert!(prompt.contains("\"cefrLevel\""));
         assert!(prompt.contains("Estimate approximate CEFR level (A1–C2) for the lemma for a typical adult general learner. Prefer high-frequency / early textbook order. Ignore rare or specialized senses."));
         // Full UD feature set is requested, including VerbForm for verbs.
