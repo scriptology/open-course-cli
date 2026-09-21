@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.30.0](https://github.com/scriptology/open-course-cli/compare/v0.29.0...v0.30.0) (2026-09-21)
+
+
+### Features
+
+* **core:** exclude proper nouns from module glossaries ([c785997](https://github.com/scriptology/open-course-cli/commit/c785997755be0793962bd874dfc4148bbc024f70))
+
+
+### Bug Fixes
+
+* **core:** exclude proper nouns from vocabulary and unify cloze option casing ([46efe64](https://github.com/scriptology/open-course-cli/commit/46efe64723b3bf54507bb852717d79b544c6ea85))
+* **core:** exclude proper nouns from vocabulary and unify cloze option casing ([3558fe6](https://github.com/scriptology/open-course-cli/commit/3558fe65dc48a1a1ec7548a9324f23f24063686c))
+
 ## [0.29.0](https://github.com/scriptology/open-course-cli/compare/v0.28.0...v0.29.0) (2026-09-14)
 
 
