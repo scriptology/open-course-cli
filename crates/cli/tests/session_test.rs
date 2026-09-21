@@ -1636,7 +1636,7 @@ fn cloze_items_blank_sentence_and_word_bank() {
 
     let raw = vec![
         make_raw_cloze("comer", "Como pan.", "Como", &["Comes", "Comen"]),
-        make_raw_cloze("beber", "Yo bebo agua.", "bebo", &["bebes", "beben"]),
+        make_raw_cloze("beber", "Yo bebo agua.", "bebo", &["Bebes", "beben"]),
     ];
     let cloze = cloze_items(&[mastered], &[], raw);
 
@@ -1647,6 +1647,9 @@ fn cloze_items_blank_sentence_and_word_bank() {
     assert_eq!(item.answer, "bebo");
     assert!(item.options.len() >= 3 && item.options.len() <= 4);
     assert!(item.options.contains(&item.answer));
+    // Options are re-cased to the answer's casing, so the blank's position
+    // in the sentence does not leak the answer through capitalization.
+    assert_eq!(item.options, ["bebo", "bebes", "beben"]);
 
     // A generated session carries the cloze items alongside the warm-up and
     // the exercises; the session screen walks warm-up -> cloze -> practicing.
