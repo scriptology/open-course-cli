@@ -792,7 +792,7 @@ Optionally link each unit to the student's existing grammar topics it will pract
 {topic_list}
 
 Each unit MUST also include a \"vocabulary\" glossary: the unit's domain terminology the student should master — professional terms, jargon, and fixed collocations, not generic everyday words. Aim for 15-40 terms per unit depending on how broad the unit is; never more than 50. Each entry has:
-- lemma: the headword or short phrase in {target}
+- lemma: the headword or short phrase in {target}. Never include proper nouns (names of people, cities, countries, brands, organizations). Write the lemma in lowercase, except where {target} spelling rules require capitalization (e.g. German nouns).
 - translation: the translation in {native}
 - pos: optional part of speech (Universal Dependencies tag, e.g. \"NOUN\")
 - cefr: optional approximate CEFR level (\"A1\"-\"C2\")
@@ -912,7 +912,7 @@ Optionally link each unit to the student's existing grammar topics it will pract
 {topic_list}
 
 Each unit MUST also include a \"vocabulary\" glossary, revised together with the unit's content: the unit's domain terminology the student should master — professional terms, jargon, and fixed collocations, not generic everyday words. Aim for 15-40 terms per unit depending on how broad the unit is; never more than 50. Apply the feedback to the glossary too (e.g. a request to deepen the terminology means a longer, more specialized glossary). Each entry has:
-- lemma: the headword or short phrase in {target}
+- lemma: the headword or short phrase in {target}. Never include proper nouns (names of people, cities, countries, brands, organizations). Write the lemma in lowercase, except where {target} spelling rules require capitalization (e.g. German nouns).
 - translation: the translation in {native}
 - pos: optional part of speech (Universal Dependencies tag, e.g. \"NOUN\")
 - cefr: optional approximate CEFR level (\"A1\"-\"C2\")
@@ -1168,6 +1168,10 @@ mod tests {
         assert!(prompt.contains("\"vocabulary\" glossary"));
         assert!(prompt.contains("professional terms, jargon"));
         assert!(prompt.contains("15-40 terms per unit"));
+        // Glossaries must stay free of proper nouns, and lemmas follow the
+        // target language's casing rules.
+        assert!(prompt.contains("Never include proper nouns"));
+        assert!(prompt.contains("Write the lemma in lowercase, except where Spanish spelling rules require capitalization"));
         assert!(prompt.contains("every unit's \"vocabulary\" array must not be empty"));
         assert!(prompt.contains(
             "every vocabulary \"lemma\" is in Spanish and every \"translation\" is in Russian"
